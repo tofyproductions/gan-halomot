@@ -258,8 +258,11 @@ async function main() {
     const tekenPay = fileRows
       // Code 8 joins the sum: a תקן employee's leave is part of her agreed salary,
       // carved out of 47 — the five codes together must still make exactly S.
-      .filter((x) => String(x[1]) === empNo && x[2] === RECORD.SALARY && [1, 8, 32, 33, 47].includes(x[3]))
-      .reduce((s, x) => s + x[4] * x[5], 0);
+      .filter((x) => String(x[1]) === empNo && x[2] === RECORD.SALARY && [1, 8, 32, 33, 44, 47].includes(x[3]))
+      // Each row to the agora first, as the payslip prints it: the base goes out
+      // as salary × a six-decimal מקדם, and an unrounded sum drifts by an agora
+      // that no line actually holds (teken-holiday-pay found it, 30.09.2026).
+      .reduce((s, x) => s + r2(x[4] * x[5]), 0);
     console.log(`     ${ce.employee.full_name}: שכר תקן מוסכם ${r2(agreed)} · נשלח ${r2(tekenPay)}`);
     assert.strictEqual(r2(tekenPay), r2(agreed),
       `${ce.employee.full_name}: the teken components must add up to the agreed salary — ₪${r2(agreed)} promised, ₪${r2(tekenPay)} filed`);
@@ -292,7 +295,7 @@ async function main() {
       + (Number(row.breakdown.estimated_total) - Number(ce.earnings.teken_salary))),
       'sanity: estimated_total is readable');
     // The relabel moves money between lines — it must never add any.
-    const lines = mine.filter((x) => [1, 8, 32, 33, 47].includes(x[3])).reduce((t, x) => t + x[4] * x[5], 0);
+    const lines = mine.filter((x) => [1, 8, 32, 33, 44, 47].includes(x[3])).reduce((t, x) => t + r2(x[4] * x[5]), 0);
     assert.strictEqual(r2(lines), r2(10300), `her salary lines still make exactly ₪10,300; got ₪${r2(lines)}`);
     ok('the total does not move — leave relabels completion money, it adds none');
   }
@@ -307,7 +310,7 @@ async function main() {
       'and the value that did not fit is recorded for the accountant');
     const mine = fileRows.filter((x) => String(x[1]) === '905' && x[2] === RECORD.SALARY);
     assert.ok(!mine.some((x) => x[3] === 8 && x[4] * x[5] !== 0), 'no code 8 row is filed');
-    const lines = mine.filter((x) => [1, 8, 32, 33, 47].includes(x[3])).reduce((t, x) => t + x[4] * x[5], 0);
+    const lines = mine.filter((x) => [1, 8, 32, 33, 44, 47].includes(x[3])).reduce((t, x) => t + r2(x[4] * x[5]), 0);
     assert.strictEqual(r2(lines), r2(10300), 'and she is paid exactly the agreed salary — not a shekel above');
     const html3 = buildAccountantHtml(month, rows, new Map([[String(branch._id), branch.name]]));
     const i3 = html3.indexOf('data-emp-name="תקן — אין השלמה לחתוך ממנה"');

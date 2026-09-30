@@ -99,6 +99,7 @@ function suggestPunchLabels(sortedPunches) {
 }
 const { analyzeCommitment, datesInMonth, workingWeekdays, weightedDayHours } = require('../services/commitmentAnalysis');
 const { computeHolidayPay, getHolidaysInMonth, unpaidHolidaysText } = require('../services/israeliHolidays');
+const { carveFromCompletion, tekenHolidayDays } = require('../services/tekenCompletionCarve');
 const { applyCibusReport } = require('../services/cibusImport');
 const { computeSickPay, availableBalance, accruedBalance, groupSickSpells } = require('../services/sickPay');
 const { vacationBalance: vacationBalanceFor, vacationUsageForMonth } = require('../services/vacationBalance');
@@ -1516,50 +1517,86 @@ async function getMonth(req, res, next) {
         }
       }
 
-      // --- A תקן employee's leave is תמורת חופשה, not השלמת שכר -------------
+      // --- A תקן employee's paid-but-not-worked days leave השלמת שכר ------------
       //
-      // Until 30.09.2026 a תקן employee's paid leave sat inside her השלמת שכר:
-      // her salary "already covers the days", so nothing was filed beside it and
-      // only the balance was drawn down. Owner's ruling that day: השלמת שכר
-      // (code 47) carries no social benefits and תמורת חופשה (code 8) does, so a
-      // day of leave filed as completion was costing her the pension on it.
+      // Until 30.09.2026 a תקן employee's statutory holidays AND her leave both sat
+      // inside השלמת שכר (code 47): her salary "already covers the days", so
+      // nothing was filed beside it. computeHolidayPay said it outright — "global
+      // is paid for holidays via the salary itself" — and every holiday month the
+      // export filed her 44 = 0×0. Owner's rulings that day: code 47 carries no
+      // social benefits, and 44 and 8 do, so each such day moves to its own line:
       //
-      // The same move as the August bonus above: the money CHANGES LINE, it is
-      // not added. Carved out of the completion, so estimated_total does not
-      // move by a shekel — and carved AFTER the August bonus, which has its own
-      // scaling rules and must see the completion it always saw.
+      //   statutory holiday on a committed day she did not work → דמי חגים (44).
+      //     No seniority condition: her salary does not move on a holiday at all.
+      //   a day of leave → תמורת חופשה (8). Calendar closures that are not
+      //     statutory (ערב חג, חול המועד) already arrive here as leave days.
       //
-      //   value of a day = agreed salary ÷ committed days — the same dailyRate a
-      //     whole-day absence is deducted at, so a day away is worth one thing
-      //     whether it is leave or an absence (owner's choice, 30.09).
-      //   days = every day of leave credited this month, INCLUDING days past the
-      //     balance: a תקן employee is never capped (vacationUsageForMonth pays
-      //     her the full request) and the balance goes negative for גמר חשבון,
-      //     exactly as before — the owner ruled those days are תמורת חופשה too.
-      //   capped at the completion: if she worked enough elsewhere that the
-      //     completion is smaller than the leave's value, only what is there
-      //     moves. Paying more would raise her above the agreed salary — a new
-      //     payment, not a relabel. The part that did not fit is recorded, so
-      //     the accountant is told.
+      // Both are valued at dailyRate (salary ÷ committed days — the value a
+      // whole-day absence is deducted at) and CARVED out of the completion, so
+      // estimated_total does not move: the same money on a pensioned line.
+      // HOLIDAYS FIRST, then leave (owner's order) — each takes from what is
+      // left, never more than is there; what does not fit is reported, because
+      // paying it would put her above the agreed salary. And all of it AFTER the
+      // August bonus, which has its own scaling and must see the completion it
+      // always saw. See services/tekenCompletionCarve.js.
       //
-      // No daily rate (no commitment on file) → nothing is carved and the
-      // leave stays inside the completion, as it always did.
-      if (isTeken && tb && vacUseRow.paid > 0 && dailyRate > 0) {
-        const want = Math.round(vacUseRow.paid * dailyRate * 100) / 100;
-        const available = Math.max(0, Number(tb.completion) || 0);
-        const carved = Math.round(Math.min(want, available) * 100) / 100;
-        tekenVacationUnfunded = Math.round((want - carved) * 100) / 100;
+      // No daily rate (no commitment on file) → nothing moves, exactly as before.
+      if (isTeken && tb && dailyRate > 0) {
+        const monthStatutory = getHolidaysInMonth(month);
+        const holDays = tekenHolidayDays(
+          monthStatutory, commitmentInfo.committed_dates, commitmentInfo.worked_dates,
+        );
+        const vacDaysToPay = Number(vacUseRow.paid) || 0;
+        const { allocations: carve, carved, remaining } = carveFromCompletion(tb.completion, [
+          { key: 'holiday', days: holDays.length, want: holDays.length * dailyRate },
+          { key: 'vacation', days: vacDaysToPay, want: vacDaysToPay * dailyRate },
+        ]);
         if (carved > 0) {
-          tb.completion = Math.round((available - carved) * 100) / 100;
-          tb.completion_reduced_by_vacation = carved;
+          tb.completion = remaining;
           breakdown.components.base_salary =
             Math.round((Number(breakdown.components.base_salary || 0) - carved) * 100) / 100;
           if (breakdown.components.pay_split) {
             breakdown.components.pay_split.completion =
               Math.round((Number(breakdown.components.pay_split.completion || 0) - carved) * 100) / 100;
           }
-          vacationPay = carved; // a relabel — NOT added to estimated_total
         }
+        tb.completion_reduced_by_holidays = carve.holiday.got;
+        tb.completion_reduced_by_vacation = carve.vacation.got;
+        vacationPay = carve.vacation.got;              // a relabel — NOT added to estimated_total
+        tekenVacationUnfunded = carve.vacation.unfunded;
+
+        // דמי חגים travel through holiday_pay_auto, which the row, the card and
+        // the export all read — so rewriting it here keeps the three agreeing.
+        // The month's other statutory days are still listed as not paid, with the
+        // TRUE reason: a Saturday, her day off, or a day she worked. That keeps
+        // holiday_pay_denied honest — true only when nothing is paid on 44, and
+        // then the export switches 44 off rather than let שקלולית carry it.
+        const paidDates = new Set(holDays.map((h) => h.date));
+        const committedSet = new Set(commitmentInfo.committed_dates || []);
+        const notPaid = monthStatutory.filter((h) => !paidDates.has(h.date)).map((h) => ({
+          date: h.date, name: h.name,
+          reasons: [committedSet.has(h.date) ? 'עבדה ביום הזה' : 'לא יום עבודה שלה'],
+        }));
+        if (carve.holiday.got > 0) {
+          const per = Math.round((carve.holiday.got / holDays.length) * 100) / 100;
+          holidayPayInfo.eligible_days = holDays.map((h) => ({ date: h.date, name: h.name, amount: per }));
+          holidayPayInfo.ineligible_days = notPaid;
+          holidayPayInfo.total_days = holDays.length;
+          holidayPayInfo.total_pay = carve.holiday.got;
+        } else {
+          // Holidays on her working days, and a completion with nothing in it —
+          // she worked the whole commitment. Nothing moves; 44 is switched off.
+          holidayPayInfo.eligible_days = [];
+          holidayPayInfo.ineligible_days = [
+            ...holDays.map((h) => ({ date: h.date, name: h.name, reasons: ['אין השלמת שכר לחתוך ממנה'] })),
+            ...notPaid,
+          ];
+          holidayPayInfo.total_days = 0;
+          holidayPayInfo.total_pay = 0;
+        }
+        holidayPayInfo.blocking_reason = null;
+        holidayPayInfo.teken_carved = true;
+        holidayPayInfo.teken_unfunded = carve.holiday.unfunded;
       }
 
       // --- Partial-day absence (היעדרות שעות) ------------------------------
