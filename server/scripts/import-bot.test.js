@@ -125,10 +125,10 @@ function wrongExportFile() {
  */
 const CHILD_FIRST = 'ילדבדיקה';
 const CHILD_LAST = 'משפחתבדיקה';
-function clicktacFile() {
+function clicktacFile({ city = 'כפר סבא', id = '300000001' } = {}) {
   const aoa = [
     ['מוסד', 'שנת לימודים', 'שם פרטי של הנרשם', 'שם משפחה של הנרשם', 'ת.ז הנרשם', 'תאריך לידה', 'טלפון של הרושם הראשון'],
-    ['כפר סבא', 'תשפ״ז', CHILD_FIRST, CHILD_LAST, '300000001', '01/03/2024', '0501111111'],
+    [city, 'תשפ״ז', CHILD_FIRST, CHILD_LAST, id, '01/03/2024', '0501111111'],
   ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'registrations');
@@ -207,11 +207,26 @@ function months() {
   await mongoose.connect(uri, { dbName: 'gan_import_bot_test' });
   const db = mongoose.connection.db;
 
-  const branchId = new ObjectId();
+  /**
+   * Four branches, the shape production actually has — because the two that
+   * matter here are the two that share a city.
+   *
+   *   משה דיין  — the כפר סבא gan ClickTac holds children for
+   *   קפלן      — the other כפר סבא gan, which registers and collects on its
+   *               own and must never receive a ClickTac file. The city guard
+   *               CANNOT catch this one (both are "כפר סבא"), which is exactly
+   *               why the allowlist exists.
+   *   תל אביב   — a different city, so the city guard can catch it
+   */
+  const branchId = new ObjectId();      // כפר סבא - משה דיין, the allowed one
+  const kaplanId = new ObjectId();      // כפר סבא - קפלן, same city, not allowed
+  const telAvivId = new ObjectId();     // different city, allowed
   const amutaId = new ObjectId();
-  await db.collection('branches').insertOne({
-    _id: branchId, name: 'כפר סבא - קפלן', amuta_id: amutaId, is_active: true,
-  });
+  await db.collection('branches').insertMany([
+    { _id: branchId, name: 'כפר סבא - משה דיין', amuta_id: amutaId, is_active: true },
+    { _id: kaplanId, name: 'כפר סבא - קפלן', amuta_id: amutaId, is_active: true },
+    { _id: telAvivId, name: 'תל אביב - יפו', amuta_id: amutaId, is_active: true },
+  ]);
   await db.collection('employees').insertOne({
     _id: new ObjectId(), full_name: MATCHED_NAME, israeli_id: '123456782',
     branch_id: branchId, is_active: true,
@@ -234,6 +249,8 @@ function months() {
       // The hourly cap is a production figure (40); this file makes more
       // requests than that on purpose, since most of them are refusals.
       IMPORT_BOT_RATE_MAX: '500',
+      // ClickTac may land on משה דיין and תל אביב, and never on קפלן.
+      IMPORT_BOT_CLICKTAC_BRANCHES: `${branchId},${telAvivId}`,
       ...(withSecret ? { IMPORT_BOT_SECRET: SECRET } : { IMPORT_BOT_SECRET: '' }),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -420,9 +437,101 @@ function months() {
       const logged = await db.collection('importbotruns')
         .findOne({ kind: 'clicktac', status: 'ok' });
       eq(logged?.enrollment_import_id?.toString(), r.json.import_id, 'שנשמר ביומן הבוט כדי שאפשר יהיה לבטל');
-      eq(logged?.branch_name, 'כפר סבא - קפלן', 'והיומן אומר לאיזה סניף זה נכנס');
+      eq(logged?.branch_name, 'כפר סבא - משה דיין', 'והיומן אומר לאיזה סניף זה נכנס');
       eq(logged?.counts?.created, 1, 'ואת הספירה');
       ok(!JSON.stringify(logged).includes(CHILD_FIRST), 'גם יומן הבוט לא מחזיק שמות');
+    }
+
+    console.log('\n🛑  שני הסניפים של כפר סבא — הטעות שאי אפשר לזהות מהקובץ\n');
+    {
+      // קפלן is the same city as משה דיין, so institutionMatchesBranch passes it
+      // and always will. The allowlist is the only thing between a mis-mapped
+      // bot and a cohort filed into a gan that registers on its own.
+      const before = await db.collection('externalenrollments').countDocuments({});
+      const r = await post(B, '/api/import-bot/clicktac', {
+        file: clicktacFile({ city: 'כפר סבא', id: '300000002' }),
+        fields: { branch_id: kaplanId.toString() },
+      });
+      eq(r.status, 403, 'קובץ כפר סבא שמכוון לקפלן נדחה');
+      eq(r.json?.error?.code, 'BRANCH_NOT_FROM_CLICKTAC', 'בקוד שאומר שהסניף לא מקבל ייבוא משם');
+      const after = await db.collection('externalenrollments').countDocuments({});
+      eq(after - before, 0, 'ואף שורה לא נכנסה לקפלן');
+      const logged = await db.collection('importbotruns')
+        .findOne({ kind: 'clicktac', message: /קליקטאק/ });
+      ok(!!logged, 'הסירוב תועד');
+    }
+    {
+      // The mistake the city guard DOES catch: the right branch id on the wrong
+      // town's file, which is what a copied config line produces.
+      const r = await post(B, '/api/import-bot/clicktac', {
+        file: clicktacFile({ city: 'הרצליה', id: '300000003' }),
+        fields: { branch_id: telAvivId.toString() },
+      });
+      eq(r.status, 400, 'קובץ של הרצליה שמכוון לתל אביב נדחה');
+      eq(r.json?.error?.code, 'CITY_MISMATCH', 'בקוד שאומר שהעיר לא מתאימה');
+      eq(r.json?.file_city, 'הרצליה', 'והתשובה אומרת איזו עיר בקובץ — עיר היא לא מידע אישי');
+      const rows = await db.collection('externalenrollments')
+        .find({ branch_id: telAvivId }).toArray();
+      eq(rows.length, 0, 'ואף שורה לא נכנסה לתל אביב');
+    }
+    {
+      // And the same city still passes, so the guard is not simply refusing
+      // everything: תל אביב's own file lands on תל אביב.
+      const r = await post(B, '/api/import-bot/clicktac', {
+        file: clicktacFile({ city: 'תל אביב', id: '300000004' }),
+        fields: { branch_id: telAvivId.toString() },
+      });
+      eq(r.status, 200, 'קובץ של תל אביב לסניף תל אביב כן עובר');
+      eq(r.json?.created, 1, 'ונוצרה שורה');
+    }
+
+    console.log('\n🧪  בדיקה יבשה — כלום לא נכתב\n');
+    {
+      const syncBefore = await db.collection('cibussyncs').findOne({ key: 'cibus' });
+      const runsBefore = await db.collection('importbotruns').countDocuments({});
+      const r = await post(B, '/api/import-bot/cibus', {
+        file: cibusFile(), fields: { dry_run: '1' },
+      });
+      eq(r.status, 200, 'סיבוס: בדיקה יבשה מחזירה תשובה');
+      eq(r.json?.dry_run, true, 'ומסומנת כיבשה');
+      eq(r.json?.matched, 1, 'ואומרת כמה הותאמו');
+      ok(Array.isArray(r.json?.detected_columns) && r.json.detected_columns.includes('amount'),
+        'ואילו עמודות זוהו — מה שצריך כשפלאקסי משנים ייצוא');
+      eq(r.json?.already_imported, true, 'ואומרת שהחודש הזה כבר בפנים');
+      ok(!r.text.includes(UNMATCHED_NAME), 'וגם היא לא מחזירה שמות');
+
+      const syncAfter = await db.collection('cibussyncs').findOne({ key: 'cibus' });
+      eq(String(syncAfter?.last_run_at), String(syncBefore?.last_run_at), 'יומן סיבוס לא נגע');
+      eq(syncAfter?.runs?.length, syncBefore?.runs?.length, 'ולא נוספה לו ריצה');
+      eq(await db.collection('importbotruns').countDocuments({}), runsBefore, 'וגם יומן הבוט לא גדל');
+    }
+    {
+      const before = await db.collection('externalenrollments').countDocuments({});
+      const r = await post(B, '/api/import-bot/clicktac/validate', {
+        file: clicktacFile({ city: 'כפר סבא', id: '300000005' }),
+        fields: { branch_id: branchId.toString() },
+      });
+      eq(r.status, 200, 'קליקטאק: הבדיקה עברה');
+      eq(r.json?.export_type, 'registrations', 'וזיהתה איזה ייצוא זה');
+      eq(r.json?.rows, 1, 'וכמה שורות');
+      eq(r.json?.branch, 'כפר סבא - משה דיין', 'ולאיזה סניף נבדק');
+      eq(await db.collection('externalenrollments').countDocuments({}), before, 'ואף שורה לא נכתבה');
+      ok(!r.text.includes(CHILD_FIRST), 'וגם היא לא מחזירה שמות');
+    }
+    {
+      const r = await post(B, '/api/import-bot/clicktac/validate', {
+        file: wrongExportFile(), fields: { branch_id: branchId.toString() },
+      });
+      eq(r.status, 400, 'בדיקה של קובץ שאינו ייצוא של קליקטאק נכשלת מראש');
+      ok(/ייצוא/.test(r.json?.error?.message || ''), 'וההודעה אומרת למה');
+    }
+    {
+      const r = await post(B, '/api/import-bot/clicktac/validate', {
+        file: clicktacFile({ city: 'הרצליה', id: '300000006' }),
+        fields: { branch_id: telAvivId.toString() },
+      });
+      eq(r.status, 400, 'והבדיקה תופסת עיר לא מתאימה — לפני ההעלאה האמיתית');
+      eq(r.json?.error?.code, 'CITY_MISMATCH', 'בקוד הנכון');
     }
   } catch (e) {
     console.error('\n❌  נפילה:', e.message, '\n', e.stack, '\n' + log.slice(-20).join(''));

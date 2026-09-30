@@ -132,6 +132,13 @@ services:
       # and grows with the branch count; raise it there rather than in code.
       - key: IMPORT_BOT_SECRET
         sync: false
+      # Which branches may receive a ClickTac import, comma-separated ids.
+      # Unset means no restriction. It exists because כפר סבא - קפלן registers
+      # and collects on its own and ClickTac holds nothing for it — and the
+      # file's own city column cannot tell it from כפר סבא - משה דיין, so this
+      # is the only place that distinction can live. See docs/import-bot.md.
+      - key: IMPORT_BOT_CLICKTAC_BRANCHES
+        sync: false
     healthCheckPath: /api/health
 
   # ---------------------------------------------------------------------------

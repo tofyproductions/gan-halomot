@@ -136,4 +136,9 @@ const limiter = require('express-rate-limit')({
 router.post('/cibus', limiter, authed, upload.single('file'), guard(c.cibus));
 router.post('/clicktac', limiter, authed, upload.single('file'), guard(c.clicktac));
 
+// The dry run for ClickTac — identifies the export, checks the file's city
+// against the branch, counts rows, and writes nothing. Before /clicktac in
+// nobody's way, since Express matches the full path.
+router.post('/clicktac/validate', limiter, authed, upload.single('file'), guard(c.clicktacValidate));
+
 module.exports = router;

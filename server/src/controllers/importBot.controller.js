@@ -32,9 +32,11 @@
  *    the office what changed, with the undo, so a file filed against the wrong
  *    branch is caught in hours instead of at the end of the year.
  */
+const XLSX = require('xlsx');
 const { ImportBotRun, Branch } = require('../models');
 const cibusJob = require('../services/cibusSyncJob');
 const enrollments = require('./externalEnrollment.controller');
+const { identifyHeader, institutionMatchesBranch } = require('../services/clicktac.service');
 const { dispatchEmail } = require('../services/email.service');
 const { officeEmails } = require('../services/office-recipients.service');
 
@@ -64,6 +66,51 @@ function monthOutOfRange(ym) {
   const back = (cy * 12 + cm) - (y * 12 + m);
   if (back > 3) return `חודש ${ym} רחוק מדי לאחור — עד 3 חודשים בלבד`;
   return null;
+}
+
+/**
+ * WHAT CITY DOES THIS FILE SAY IT IS, and does the named branch sit in it?
+ *
+ * The branch cannot be read off a ClickTac file — `מוסד` and `מעון` are written
+ * at CITY level, and two branches answer to "כפר סבא". That is why the branch is
+ * a parameter. But city level is not nothing: it is enough to catch the mistake
+ * a bot actually makes, which is a mapping error — הרצליה's file posted with תל
+ * אביב's branch id, because a config line was copied and one field was not
+ * changed. That mistake files a whole cohort into another town, and the office
+ * would find it by noticing strangers on a roster.
+ *
+ * So the file's city is checked against the branch's before a row is written.
+ * `institutionMatchesBranch` is the same comparison the contracts import already
+ * makes per row; this applies it to both exports, once, at the door.
+ *
+ * IT DOES NOT SOLVE כפר סבא. Both כפר סבא branches match "כפר סבא" and always
+ * will — the comparison is at city depth on purpose, because that is the depth
+ * the file is written at. A כפר סבא file still needs a person to say which gan,
+ * or to be split before it is sent. This guard is the layer that closes the
+ * wrong-TOWN mistake, not the wrong-gan one.
+ *
+ * Returns null when it is fine, or `{ file_city, branch_name }` when it is not.
+ */
+function cityMismatch(rows, branchName) {
+  const header = rows[0] || {};
+  const col = ['מוסד', 'מעון'].find(c => c in header);
+  if (!col) return null;               // neither column in this export — nothing to check
+  const value = String(rows[0]?.[col] ?? '').trim();
+  if (!value) return null;             // blank, as an older hand-edited sheet can be
+  if (institutionMatchesBranch(value, branchName)) return null;
+  return { file_city: value, branch_name: branchName };
+}
+
+/** The sheet as row objects, or null when the buffer is not a readable workbook. */
+function readRows(buffer) {
+  try {
+    const wb = XLSX.read(buffer, { type: 'buffer' });
+    const name = wb.SheetNames[0];
+    if (!name) return null;
+    return { rows: XLSX.utils.sheet_to_json(wb.Sheets[name], { defval: null, raw: false }), sheet: name };
+  } catch {
+    return null;
+  }
 }
 
 /** One row per knock, successful or not. Never throws into the response. */
@@ -130,6 +177,41 @@ async function cibus(req, res, next) {
       if (bad) {
         await log(req, { kind: 'cibus', status: 'rejected', month: asked, message: bad });
         return res.status(400).json({ error: { code: 'BAD_MONTH', message: bad } });
+      }
+    }
+
+    /**
+     * A dry run parses, matches and counts, and writes nothing — not the payroll
+     * figures, not the CibusSync log, not a run row here. It is what to call the
+     * first time a bot is pointed at this, and after Pluxee changes an export:
+     * the answer tells you whether the columns were found and how many employees
+     * matched, which is the whole question, without a figure landing on anyone's
+     * payslip.
+     */
+    const dryRun = String(req.body?.dry_run || '') === '1';
+    if (dryRun) {
+      const { applyCibusReport } = require('../services/cibusImport');
+      const cfg = await cibusJob.getConfig();
+      const ym = asked || cibusJob.targetMonth(cfg.month_offset);
+      try {
+        const applied = await applyCibusReport(
+          req.file.buffer, req.file.originalname || '', ym, { dryRun: true },
+        );
+        return res.json({
+          ok: true,
+          dry_run: true,
+          month: ym,
+          matched: applied.matched_count,
+          unmatched: applied.unmatched_count,
+          // Which columns the parser recognised — the one thing worth seeing
+          // when an export changes shape, and it names no person.
+          detected_columns: Object.keys(applied.detected_columns || {}),
+          already_imported: cfg.last_success_month === ym,
+        });
+      } catch (err) {
+        return res.status(422).json({
+          error: { code: 'PARSE_FAILED', message: err.message }, dry_run: true, month: ym,
+        });
       }
     }
 
@@ -246,6 +328,60 @@ async function clicktac(req, res, next) {
     }
 
     /**
+     * A branch that does not get its children from ClickTac at all.
+     *
+     * כפר סבא - קפלן registers and collects on its own; ClickTac holds nothing
+     * for it and never will. So a bot upload naming it is not a borderline call,
+     * it is a mapping error — and the city guard below cannot catch that one,
+     * because קפלן and משה דיין are both "כפר סבא" and always match.
+     *
+     * Expressed as configuration rather than a field on Branch: a new field
+     * would need an admin screen to ever be corrected, and a field with no
+     * screen is a rule nobody can change without a deploy. This sits with the
+     * secret, where the rest of the bot's setup already lives.
+     *
+     * UNSET MEANS NO RESTRICTION, so no existing behaviour depends on it and a
+     * customer with no such split is unaffected.
+     */
+    const allow = String(process.env.IMPORT_BOT_CLICKTAC_BRANCHES || '')
+      .split(',').map(s => s.trim()).filter(Boolean);
+    if (allow.length && !allow.includes(branchId)) {
+      const message = `סניף ${branch.name} אינו מקבל ייבוא מקליקטאק`;
+      await log(req, {
+        kind: 'clicktac', status: 'rejected',
+        branch_id: branchId, branch_name: branch.name, message,
+      });
+      await notifyOffice('system_faults', 'ייבוא קליקטאק לסניף שאינו מקליקטאק',
+        `הבוט ניסה להעלות קובץ קליקטאק לסניף <b>${branch.name}</b>, שלא מקבל ייבוא משם.<br/>`
+        + 'זו כמעט בוודאות טעות בהגדרת הבוט. שום שורה לא נכנסה.');
+      return res.status(403).json({ error: { code: 'BRANCH_NOT_FROM_CLICKTAC', message } });
+    }
+
+    /**
+     * The city check, before anything is written. See cityMismatch — it closes
+     * the wrong-TOWN mistake and deliberately cannot close the wrong-gan one.
+     */
+    const read = readRows(req.file.buffer);
+    if (read?.rows?.length) {
+      const clash = cityMismatch(read.rows, branch.name);
+      if (clash) {
+        const message = `הקובץ הוא של ${clash.file_city}, וההעלאה היא לסניף ${clash.branch_name}`;
+        await log(req, {
+          kind: 'clicktac', status: 'rejected',
+          branch_id: branchId, branch_name: branch.name, message,
+        });
+        await notifyOffice('system_faults', 'ייבוא קליקטאק — קובץ של עיר אחרת',
+          `הבוט ניסה להעלות קובץ של <b>${clash.file_city}</b> לסניף `
+          + `<b>${clash.branch_name}</b>.<br/>שום שורה לא נכנסה. `
+          + 'כנראה מיפוי שגוי בין הדוחות לסניפים בהגדרת הבוט.');
+        return res.status(400).json({
+          error: { code: 'CITY_MISMATCH', message },
+          file_city: clash.file_city,
+        });
+      }
+    }
+
+    /**
      * The import runs as the office, not as a person.
      *
      * `importFile` reads `req.user` for the branch check and stamps
@@ -320,4 +456,90 @@ async function clicktac(req, res, next) {
   }
 }
 
-module.exports = { cibus, clicktac, monthOutOfRange, reduceClicktac };
+/**
+ * POST /api/import-bot/clicktac/validate
+ * multipart: file, branch_id
+ *
+ * The dry run for ClickTac: WRITES NOTHING, and answers the three questions
+ * worth asking before an import that creates children.
+ *
+ *   - is this one of the two exports, and which — the header decides, by the
+ *     same `identifyHeader` the import uses, so a file this accepts is a file
+ *     the import accepts
+ *   - does the file's city match the branch being named
+ *   - how many data rows are in it
+ *
+ * It cannot answer "which of the two כפר סבא gans is this", because nothing can:
+ * the file is written at city level. That is a decision, not a check.
+ *
+ * Deliberately not a `dry_run` flag on the import route: the import's own path
+ * has no dry mode — it merges against what is already stored, row by row — and a
+ * flag that skipped the write would be a second implementation of the merge,
+ * which is the one thing this whole feature is written to avoid. So this is a
+ * separate, smaller question, and it is honest about being smaller.
+ */
+async function clicktacValidate(req, res, next) {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: { code: 'NO_FILE', message: 'לא צורף קובץ' } });
+    }
+
+    const read = readRows(req.file.buffer);
+    if (!read) {
+      return res.status(422).json({
+        error: { code: 'UNREADABLE', message: 'הקובץ אינו גיליון שאפשר לקרוא' },
+      });
+    }
+    if (!read.rows.length) {
+      return res.status(400).json({ error: { code: 'EMPTY_SHEET', message: 'הגיליון ריק' } });
+    }
+
+    const verdict = identifyHeader(read.rows[0]);
+    if (!verdict.type) {
+      return res.status(400).json({
+        error: { code: verdict.code || 'WRONG_EXPORT_TYPE', message: verdict.error },
+        dry_run: true,
+      });
+    }
+
+    // The branch is optional here — a caller may be asking only "what file is
+    // this". When it IS given, the city is checked, because that is the answer
+    // worth having before the real upload.
+    const branchId = String(req.body?.branch_id || '').trim();
+    let branch = null;
+    if (branchId) {
+      branch = await Branch.findById(branchId).select('name').lean().catch(() => null);
+      if (!branch) {
+        return res.status(404).json({
+          error: { code: 'BRANCH_NOT_FOUND', message: `סניף ${branchId} לא נמצא` }, dry_run: true,
+        });
+      }
+      const clash = cityMismatch(read.rows, branch.name);
+      if (clash) {
+        return res.status(400).json({
+          error: {
+            code: 'CITY_MISMATCH',
+            message: `הקובץ הוא של ${clash.file_city}, וההעלאה היא לסניף ${clash.branch_name}`,
+          },
+          file_city: clash.file_city,
+          dry_run: true,
+        });
+      }
+    }
+
+    return res.json({
+      ok: true,
+      dry_run: true,
+      export_type: verdict.type,
+      sheet: read.sheet,
+      rows: read.rows.length,
+      branch: branch ? branch.name : null,
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+module.exports = {
+  cibus, clicktac, clicktacValidate, monthOutOfRange, reduceClicktac, cityMismatch,
+};
