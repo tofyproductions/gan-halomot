@@ -96,6 +96,7 @@ const PunchEntryTask = require('./PunchEntryTask');
 const ExternalEnrollment = require('./ExternalEnrollment');
 const TmtApproval = require('./TmtApproval');
 const EnrollmentImport = require('./EnrollmentImport');
+const ImportBotRun = require('./ImportBotRun');
 const ScannedAttachment = require('./ScannedAttachment');
 const ProductMatch = require('./ProductMatch');
 const ProductScanMark = require('./ProductScanMark');
@@ -206,6 +207,7 @@ const real = {
   ExternalEnrollment,
   TmtApproval,
   EnrollmentImport,
+  ImportBotRun,
   ScannedAttachment,
   ProductMatch,
   ProductScanMark,

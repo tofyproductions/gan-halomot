@@ -165,4 +165,73 @@ async function alertIfStale(doc) {
   }
 }
 
-module.exports = { runOnce, tick, getConfig, targetMonth };
+/**
+ * A report the import bot took off the Cibus site, applied to a month.
+ *
+ * WHY THIS LIVES HERE rather than in the bot's controller: this module owns the
+ * CibusSync document, and a bot import that does not land in it breaks two
+ * things that read it. `tick()` skips a month whose report already succeeded —
+ * so recording the bot's success is what stops the mailbox job importing the
+ * same file again off the email on the 2nd. And `alertIfStale` measures silence
+ * from `last_success_at` — so a bot that quietly does all the work would, forty
+ * days in, make the office an alert saying the import has been failing.
+ *
+ * It is `applyCibusReport` underneath, exactly as the email job and the human
+ * upload are. Three callers, one implementation, on purpose: a second one is
+ * how "the automatic import gave a different number" starts.
+ *
+ * REFUSES A MONTH THAT IS ALREADY IN. Not because writing twice would corrupt
+ * anything — `applyCibusReport` sets each employee's figure rather than adding
+ * to it, so a repeat is arithmetically harmless — but because between the two
+ * runs the accountant may have corrected a figure by hand, and the second run
+ * would erase the correction without saying so. A retrying bot gets a plain
+ * 'already imported' and stops. `force` is the office's override, from a person
+ * who knows what they are overwriting.
+ *
+ * @param {Buffer} buffer    the xlsx/csv as downloaded
+ * @param {String} filename  used only to pick the parser
+ * @param {String} month     'YYYY-MM'; defaults to the configured offset, which
+ *                           is the same month the scheduled job would pick
+ * @param {Boolean} force    write a month that already succeeded
+ * @returns {{ ok, code, month, run }} `code` is set only when ok is false
+ */
+async function applyBotFile({ buffer, filename, month = null, force = false } = {}) {
+  const doc = await getConfig();
+  const ym = month || targetMonth(doc.month_offset);
+
+  if (!force && doc.last_success_month === ym) {
+    return {
+      ok: false,
+      code: 'ALREADY_IMPORTED',
+      month: ym,
+      run: null,
+      message: `דוח סיבוס לחודש ${ym} כבר יובא בהצלחה`,
+    };
+  }
+
+  try {
+    const applied = await applyCibusReport(buffer, filename, ym);
+    const run = await record(doc, {
+      trigger: 'bot',
+      month: ym,
+      status: 'ok',
+      matched_count: applied.matched_count,
+      unmatched_count: applied.unmatched_count,
+      total_amount: applied.total_amount,
+      unmatched: applied.unmatched.slice(0, 50),
+      file_name: filename || '',
+      message: applied.warning || '',
+    });
+    return { ok: true, month: ym, run };
+  } catch (err) {
+    console.error('[cibus] bot import failed:', err.message);
+    const run = await record(doc, {
+      trigger: 'bot', month: ym, status: 'error',
+      file_name: filename || '',
+      message: err.message,
+    });
+    return { ok: false, code: 'PARSE_FAILED', month: ym, run, message: err.message };
+  }
+}
+
+module.exports = { runOnce, tick, getConfig, targetMonth, applyBotFile };

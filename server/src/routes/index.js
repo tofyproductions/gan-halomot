@@ -40,6 +40,12 @@ router.use('/agent', require('./agent.routes'));
 // themselves. Read-only, and closed entirely when TASKS_SYNC_KEY is unset.
 router.use('/sync', require('./sync.routes'));
 
+// The import bot — a robot that signs in to Cibus and ClickTac, downloads the
+// reports neither of them exposes an API for, and posts the files here. Its own
+// shared key, write-only, two routes, and closed entirely when
+// IMPORT_BOT_SECRET is unset. See the file for why it is not an account.
+router.use('/import-bot', require('./importBot.routes'));
+
 // Protected routes that require auth for employees/salary
 router.use('/employees', require('./employee.routes'));
 router.use('/salary-requests', require('./salary.routes'));
