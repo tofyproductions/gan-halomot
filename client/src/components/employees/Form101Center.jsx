@@ -31,6 +31,7 @@ const fmtDateTime = (d) => { try { return d ? new Date(d).toLocaleString('he-IL'
 
 const BASIS_HE = {
   israeli_id: 'ת״ז',
+  mail_subject_id: 'ת״ז מכותרת המייל',
   sender_email: 'כתובת השולח',
   name: 'שם בלבד',
   manual: 'ידני',

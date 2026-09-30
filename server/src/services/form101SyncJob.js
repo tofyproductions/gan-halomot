@@ -325,7 +325,12 @@ async function runOnce(trigger) {
         continue;
       }
 
-      const verdict = await form101.classifyScan(scan, msg.from, { allowNameMatch: cfg.allow_name_match });
+      const verdict = await form101.classifyScan(scan, msg.from, {
+        allowNameMatch: cfg.allow_name_match,
+        // What the employee typed into Tepez — preferred over what the scan
+        // read (see matchEmployee, step 0).
+        mailId: form101.idFromMail(msg.subject, att.filename),
+      });
 
       // Another business's form (חברים של טופי). mail-sorter offers every 101 to
       // both businesses and each keeps its own, so this one is not waiting for

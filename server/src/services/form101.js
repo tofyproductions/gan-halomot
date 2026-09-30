@@ -113,9 +113,23 @@ async function attachForm(employee, file, opts = {}) {
  *
  * @returns {{ employee, basis } | { employee: null, reason, candidates }}
  */
-async function matchEmployee(scan, mailFrom, { allowNameMatch = true } = {}) {
+async function matchEmployee(scan, mailFrom, { allowNameMatch = true, mailId = '' } = {}) {
   const active = await Employee.find({ is_active: true })
     .select('full_name israeli_id email branch_id clock_aliases').lean();
+
+  // 0. The ID the employee TYPED, from the Tepez subject/filename — before the
+  //    one the scan READ. The scan reads the same number off the PDF Tepez
+  //    rendered from her input, so it can only add error: on an 8-digit ID it
+  //    completed the number with a digit that does not exist instead of padding
+  //    a 0 (גאליה כהן, 51429389 read as 514293893, 30.09.2026), and the result
+  //    still passed the check digit, so nothing caught it. Tried first, and only
+  //    a UNIQUE hit is taken; otherwise the scan's ID gets its turn below.
+  const typed = normalizeId(mailId);
+  if (typed) {
+    const byTyped = active.filter(e => normalizeId(e.israeli_id) === typed
+      || (e.clock_aliases || []).some(a => normalizeId(a) === typed));
+    if (byTyped.length === 1) return { employee: byTyped[0], basis: 'mail_subject_id' };
+  }
 
   // 1. ת״ז — the only basis that is an identity rather than a label.
   const id = normalizeId(scan.israeli_id);
@@ -296,8 +310,77 @@ async function reclassifyQueuedOtherEmployer() {
   return moved;
 }
 
+/**
+ * The ID in a Tepez 101's subject or filename — "טופס 101 - גאליה כהן - 51429389".
+ *
+ * The same rule mail-sorter's parseForm101Subject uses (5–9 digits, anchored on
+ * separators so "101" and a year are not taken for an ID; subject first, then
+ * the filename), so the two services read the same number from the same mail.
+ * Empty when neither carries one — a scanned paper form, a form sent by hand —
+ * and then the scan decides, exactly as before.
+ */
+function idFromMail(subject, filename) {
+  const one = (raw) => {
+    const clean = String(raw || '').replace(/[\u200e\u200f\u202a-\u202e]/g, '').trim();
+    const m = clean.match(/(?:^|[\s\-–—:·|])(\d{5,9})(?=$|[\s\-–—:·|])/);
+    return m ? m[1] : '';
+  };
+  return one(subject) || one(String(filename || '').replace(/\.[a-z0-9]+$/i, ''));
+}
+
+/**
+ * Re-match what is waiting in the queue using the ID from its mail.
+ *
+ * Queued forms are never scanned again — alreadySeen() finds them by hash — so
+ * a better matching rule only reaches NEW mail unless the queue is walked once.
+ * Each pending row is re-classified from what is already stored on it (its
+ * scan and its mail subject: no re-scan, no cost) and, when it now matches, is
+ * filed the way the manual "שייך" button files it (form101.controller
+ * assignInbox): the document on the employee, the queue row marked assigned,
+ * its copy of the bytes dropped. Idempotent — an assigned row is not pending.
+ *
+ * @returns {{ attached, still_pending }}
+ */
+async function rematchPending({ allowNameMatch = false } = {}) {
+  const pending = await Form101Inbox.find({ status: 'pending' });
+  let attached = 0;
+  for (const item of pending) {
+    const mailId = idFromMail(item.mail && item.mail.subject, item.file_name);
+    if (!mailId) continue;
+    const verdict = await classifyScan(item.scan || {}, item.mail && item.mail.from, { allowNameMatch, mailId });
+    if (verdict.kind !== 'match' || !verdict.employee) continue;
+
+    const year = (item.scan && item.scan.tax_year) || currentTaxYear();
+    const exists = await EmployeeDocument.exists({
+      employee_id: verdict.employee._id, doc_type: 'form_101', tax_year: year,
+    });
+    if (exists) continue; // she already has one for that year — a person decides
+
+    const doc = await attachForm(verdict.employee, {
+      data: item.file_data, name: item.file_name, mimetype: item.file_mimetype,
+    }, {
+      scan: item.scan || {},
+      taxYear: year,
+      source: 'mail',
+      matchBasis: verdict.basis,
+      mail: { ...(item.mail ? item.mail.toObject ? item.mail.toObject() : item.mail : {}), hash: item.hash },
+      description: `שויך אוטומטית לפי הת״ז בכותרת המייל (${(item.mail && item.mail.from) || 'ללא שולח'})`,
+    });
+    item.status = 'assigned';
+    item.assigned_to = verdict.employee._id;
+    item.assigned_document_id = doc._id;
+    item.resolved_at = new Date();
+    item.file_data = ' ';
+    await item.save();
+    attached += 1;
+  }
+  return { attached, still_pending: pending.length - attached };
+}
+
 module.exports = {
   currentTaxYear,
+  idFromMail,
+  rematchPending,
   otherEmployer,
   classifyScan,
   reclassifyQueuedOtherEmployer,

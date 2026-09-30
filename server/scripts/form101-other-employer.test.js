@@ -125,6 +125,54 @@ const eq = (a, b, label) => {
     eq(await form101.reclassifyQueuedOtherEmployer(), 0, 'הרצה שנייה — לא עושה כלום');
   }
 
+  console.log('\n📨  הת"ז מכותרת המייל של טפז\n');
+  {
+    // What the employee TYPED into Tepez, in the subject and the filename. The
+    // scan reads the same number off the PDF Tepez rendered from it — and on an
+    // 8-digit ID it "completes" it with a digit that does not exist instead of
+    // padding a 0 (גאליה כהן: 51429389 read as 514293893, 30.09.2026).
+    eq(form101.idFromMail('טופס 101 - גאליה כהן - 51429389', ''), '51429389', '8 ספרות מהכותרת');
+    eq(form101.idFromMail('טופס 101 - טליה כהן - 219909041', ''), '219909041', '9 ספרות מהכותרת');
+    eq(form101.idFromMail('', 'טופס 101 - גאליה כהן - 51429389.pdf'), '51429389', 'ומשם הקובץ כשאין בכותרת');
+    eq(form101.idFromMail('טופס 101 לשנת 2026', ''), '', '"101" ושנה אינם ת"ז');
+    eq(form101.idFromMail('Re: payslip', 'scan.pdf'), '', 'מייל שאינו של טפז — ריק, והסריקה תקבע');
+
+    const galia = await Employee.create({
+      full_name: 'גאליה כהן', israeli_id: '051429389', is_active: true, branch_id,
+    });
+    const scan = { employer_name: 'גן החלומות', israeli_id: '514293893', employee_name: 'גאליה כהן' };
+    const withoutMail = await form101.classifyScan(scan, null, {});
+    ok(!withoutMail.employee || String(withoutMail.employee._id) !== String(galia._id) || withoutMail.basis === 'name',
+      'בלי הכותרת — הת"ז השגויה מהסריקה לא מוצאת אותה לפי ת"ז');
+    const withMail = await form101.classifyScan(scan, null, { mailId: '51429389' });
+    eq(String(withMail.employee?._id), String(galia._id), 'עם הכותרת — נמצאת: 51429389 → 051429389');
+    eq(withMail.basis, 'mail_subject_id', 'ובסיס השיוך אומר שזה מהכותרת');
+    const scanOnly = await form101.classifyScan(
+      { employer_name: 'גן החלומות', israeli_id: '222222226', employee_name: 'שרה גן' }, null, { mailId: '' },
+    );
+    eq(scanOnly.basis, 'israeli_id', 'בלי ת"ז בכותרת — חוזרים לסריקה כמו היום');
+
+    // What is already queued: re-matched from the subject stored on the row,
+    // then attached exactly the way the manual "שייך" button attaches it.
+    await Form101Inbox.create({
+      file_data: Buffer.from('%PDF-1.4 galia').toString('base64'), file_name: 'טופס 101 - גאליה כהן - 51429389.pdf',
+      file_mimetype: 'application/pdf', hash: 'galia-hash', status: 'pending',
+      mail: { from: 'noreply@tepez.co.il', subject: 'טופס 101 - גאליה כהן - 51429389' },
+      scan: { is_form_101: true, employer_name: 'גן החלומות', employee_name: 'גאליה כהן', israeli_id: '514293893', tax_year: 2026 },
+      reason: 'לא נמצא עובד תואם לפרטים שבטופס',
+    });
+    const r = await form101.rematchPending();
+    eq(r.attached, 1, 'הטופס של גאליה שויך');
+    const item = await Form101Inbox.findOne({ hash: 'galia-hash' }).lean();
+    eq(item.status, 'assigned', 'והפריט בתור סומן כמשויך');
+    eq(String(item.assigned_to), String(galia._id), 'אליה');
+    const { EmployeeDocument } = require('../src/models');
+    const doc = await EmployeeDocument.findById(item.assigned_document_id).lean();
+    eq(doc?.doc_type, 'form_101', 'ונוצר לה טופס 101 בתיק');
+    eq(doc?.match_basis, 'mail_subject_id', 'עם בסיס השיוך הנכון');
+    eq((await form101.rematchPending()).attached, 0, 'הרצה שנייה — לא משייכת שוב');
+  }
+
   console.log(failures ? `\n❌  ${failures} כשלונות\n` : '\n✅  הכל עבר\n');
   await mongoose.disconnect();
   await mongo.stop();

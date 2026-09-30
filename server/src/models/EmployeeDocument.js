@@ -69,7 +69,9 @@ const employeeDocumentSchema = new mongoose.Schema({
   // How the file was tied to this employee. 'israeli_id' and 'sender_email'
   // are identity matches; 'name' is a guess that happened to be unique, and is
   // worth showing as such in the review screen.
-  match_basis: { type: String, enum: ['manual', 'israeli_id', 'sender_email', 'name'], default: 'manual' },
+  // mail_subject_id — the ID Tepez puts in the subject/filename: what the
+  // employee typed, read without a scan (see form101.idFromMail).
+  match_basis: { type: String, enum: ['manual', 'israeli_id', 'mail_subject_id', 'sender_email', 'name'], default: 'manual' },
   match_confidence: { type: String, enum: ['high', 'medium', 'low', ''], default: '' },
   // What the scan read off the form, kept so a human can check the machine.
   scan_notes: { type: String, default: '' },
