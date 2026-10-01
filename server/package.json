@@ -166,7 +166,8 @@
     "backfill:pay-summary": "node scripts/backfill-pay-summary.js",
     "test:shkulit": "node scripts/shkulit-adapter.test.js",
     "test:shkulit-history": "node scripts/shkulit-movement-history.test.js",
-    "test:holiday-day-value": "node scripts/holiday-day-value.test.js"
+    "test:holiday-day-value": "node scripts/holiday-day-value.test.js",
+    "test:max-import": "node scripts/max-import.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
