@@ -69,6 +69,9 @@ async function suite() {
     eq(await ExpenseFile.countDocuments(), 1, 'הקובץ הכפול לא נשמר');
     await refuses(() => intake.createManual({ fields: { ...base, doc_number: '4' }, file: { data: Buffer.alloc(11 * 1024 * 1024, 1), name: 'big.pdf', mime: 'application/pdf' } }), 400, 'קובץ 11MB');
     eq(await ExpenseFile.countDocuments(), 1, 'הגדול לא נשמר');
+    await refuses(() => intake.createManual({ fields: { ...base, doc_number: '4b' }, file: { data: Buffer.from('x'), name: 'a.exe', mime: 'application/x-msdownload' } }), 400, 'mime לא מורשה');
+    await refuses(() => intake.createManual({ fields: { ...base, doc_number: '4c' }, file: { data: Buffer.from('x'), name: 'a', mime: '' } }), 400, 'בלי mime');
+    eq(await ExpenseFile.countDocuments(), 1, 'לא נשמר קובץ עם mime אסור');
     const b64 = await intake.createManual({ fields: { ...base, doc_number: '5' }, file: { data: Buffer.from('b64').toString('base64'), name: 'z.png', mime: 'image/png' } });
     eq((await intake.getFile(b64._id)).buffer.toString(), 'b64', 'data כ-base64 מתקבל');
 
@@ -143,8 +146,8 @@ async function suite() {
     eq(r.skipped, 1, 'הפריט הכפול דולג');
     eq(r.errors, 0, 'בלי שגיאות');
     eq(await ExpenseDocument.countDocuments(), 5, 'חמישה מסמכים');
-    eq(c.acks.filter(x => x === 1).length, 1, 'ack פעם אחת לפריט הכפול');
-    eq(c.acks.length, 5, 'ack לכל מסמך שנשמר');
+    eq(c.acks.filter(x => x === 1).length, 2, 'הפריט הכפול: ack בשמירה + ack חוזר');
+    eq(c.acks.length, 6, 'ack לכל פריט (כולל החוזר)');
     const d1 = await ExpenseDocument.findOne({ mail_sorter_id: 1 });
     eq(d1.needs_review, true, 'needs_review');
     eq(d1.source, 'mail_sorter', 'source');
@@ -166,7 +169,7 @@ async function suite() {
     const v = await intake.pullFromMailSorter({ client: c2 });
     eq(v.created, 0, 'מסמך מבוטל לא נוצר מחדש');
     eq(v.skipped, 1, 'דולג');
-    eq(c2.acks.length, 0, 'ואין ack');
+    eq(c2.acks.length, 1, 'ack חוזר גם למבוטל');
     // wrapped list shape
     const w = await intake.pullFromMailSorter({ client: { ...fake({}), listDocuments: async (k) => (k === 'invoice' ? { items: [item(50)] } : []) } });
     eq(w.created, 1, 'תומך ב-{items}');
@@ -174,8 +177,6 @@ async function suite() {
   await reset();
   {
     // a failed save never acks and never blocks the others
-    const bad = item(10, { amount_total: 5, doc_type: 'tax_invoice' });
-    bad.extracted.doc_date = '2026-09-01';
     const c = fake({ invoice: [item(10), item(11)] });
     const realCreate = ExpenseDocument.create;
     ExpenseDocument.create = async function (d, ...rest) { if (d.mail_sorter_id === 10) throw new Error('db down'); return realCreate.call(this, d, ...rest); };
@@ -192,6 +193,32 @@ async function suite() {
     let r3; try { r3 = await intake.pullFromMailSorter({ client: c3 }); } finally { console.error = orig2; }
     eq(r3.created, 1, 'נשמר למרות ack שנכשל');
     eq(r3.errors, 1, 'השגיאה נספרה');
+    // run 2 re-acks what a failed ack left behind
+    const c3b = fake({ invoice: [item(20)] });
+    const r3b = await intake.pullFromMailSorter({ client: c3b });
+    eq(r3b.created, 0, 'הרצה שנייה לא יוצרת');
+    eq(r3b.skipped, 1, 'דולג');
+    ok(c3b.acks.includes(20), 'הרצה שנייה עושה ack שחסר');
+    // dedupe skip (same supplier+number as an active doc) is acked and not an error
+    await ExpenseDocument.create({ source: 'manual', vendor_name: 'כפול בע"מ', doc_number: 'X1' });
+    const c5 = fake({ invoice: [item(40, { vendor_name: 'כפול', doc_number: 'X1' })] });
+    const r5 = await intake.pullFromMailSorter({ client: c5 });
+    eq(r5.skipped, 1, 'כפילות לוגית דולגה');
+    eq(r5.errors, 0, 'לא שגיאה');
+    ok(c5.acks.includes(40), 'וגם ack');
+    // an ack failure on a skip is an error but does not block the next item
+    const c6 = fake({ invoice: [item(20), item(41)] });
+    c6.ack = async (id) => { c6.acks.push(id); if (id === 20) throw new Error('down'); };
+    const orig6 = console.error; console.error = () => {};
+    let r6; try { r6 = await intake.pullFromMailSorter({ client: c6 }); } finally { console.error = orig6; }
+    eq(r6.errors, 1, 'כשל ack בדילוג נספר שגיאה');
+    eq(r6.created, 1, 'הבא אחריו נשמר');
+    // an item with no id is an error, never a query on undefined
+    const c7 = fake({ invoice: [{ extracted: {} }, item(42)] });
+    const orig7 = console.error; console.error = () => {};
+    let r7; try { r7 = await intake.pullFromMailSorter({ client: c7 }); } finally { console.error = orig7; }
+    eq(r7.errors, 1, 'פריט בלי id → שגיאה');
+    eq(r7.created, 1, 'והבא נשמר');
     // a list that fails does not stop the other kind
     const c4 = { ...fake({ receipt: [item(30, {}, { doc_type: 'receipt' })] }), listDocuments: async (k) => { if (k === 'invoice') throw new Error('down'); return [item(30)]; } };
     const orig3 = console.error; console.error = () => {};

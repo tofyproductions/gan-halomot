@@ -19,6 +19,7 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const DOC_TYPES = ['tax_invoice', 'invoice_receipt', 'receipt', 'credit_note', 'other'];
 const EDITABLE = ['supplier_id', 'vendor_name', 'supplier_tax_id', 'doc_type', 'doc_number', 'doc_date',
   'amount_total', 'currency', 'amount_original', 'branch_id', 'is_general', 'order_id'];
+const FILE_MIMES = ['application/pdf', 'image/jpeg', 'image/png', 'image/heic', 'image/webp'];
 const ID_FIELDS = ['supplier_id', 'branch_id', 'order_id'];
 
 const fail = (status, message, extra) => Object.assign(new Error(message), { status }, extra);
@@ -97,6 +98,7 @@ function applyFx(patch, current) {
 
 function decodeFile(file) {
   const buf = Buffer.isBuffer(file.data) ? file.data : Buffer.from(String(file.data || ''), 'base64');
+  if (!FILE_MIMES.includes(str(file.mime).toLowerCase())) throw fail(400, 'סוג קובץ לא נתמך (PDF או תמונה)');
   if (!buf.length) throw fail(400, 'הקובץ ריק');
   if (buf.length > MAX_FILE_BYTES) throw fail(400, 'הקובץ גדול מדי (עד 10MB)');
   return buf;
@@ -233,14 +235,25 @@ async function pullFromMailSorter({ client = mailSorter } = {}) {
     for (const item of list) {
       result.fetched++;
       try {
+        if (!item || item.id == null || item.id === '') throw new Error('פריט בלי מזהה');
         // No status filter: a void document keeps its mail_sorter_id, and the
-        // item must not come back to life on the next run.
-        if (await ExpenseDocument.exists({ mail_sorter_id: item.id })) { result.skipped++; continue; }
+        // item must not come back to life on the next run. Re-ack is safe (it is
+        // saved) and recovers an ack that failed on an earlier run.
+        if (await ExpenseDocument.exists({ mail_sorter_id: item.id })) {
+          result.skipped++;
+          await client.ack(item.id);
+          continue;
+        }
         const data = mapItem(item, kind);
         const supplier = await core.matchSupplier(data);
         if (supplier) data.supplier_id = supplier._id;
-        const dup = await core.findDuplicate(data);
-        if (dup) { result.skipped++; continue; }
+        // Already represented by another active document: acked so it stops
+        // coming back every 6 hours.
+        if (await core.findDuplicate(data)) {
+          result.skipped++;
+          await client.ack(item.id);
+          continue;
+        }
         await ExpenseDocument.create(data);
         result.created++;
         await client.ack(item.id);
