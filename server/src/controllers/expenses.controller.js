@@ -7,7 +7,7 @@
  * turns those into responses. Reads never write (rules are seeded at boot).
  */
 const mongoose = require('mongoose');
-const { BankTransaction, ExpenseDocument, Supplier, NoInvoiceRule, Setting, IcountPull, IcountPaidReport } = require('../models');
+const { BankTransaction, ExpenseDocument, Supplier, NoInvoiceRule, Setting, IcountPull, IcountPaidReport, IcountExpense } = require('../models');
 const core = require('../services/expenseCore.service');
 const pairs = require('../services/expensePairs.service');
 const writes = require('../services/expenseWrites.service');
@@ -21,6 +21,9 @@ const { getClient } = require('../services/ganIcount.client');
 const icountSuppliers = require('../services/icountSuppliers.service');
 const bridge = require('../services/icountBridge.service');
 const filing = require('../services/icountFiling.service');
+const { ADMIN_VIEWER } = require('../constants/roles');
+// The auth middleware serves a viewer's read as system_admin and keeps the truth in `actual_role`.
+const isViewerReq = (req) => ((req.user && (req.user.actual_role || req.user.role)) === ADMIN_VIEWER);
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const by = (req) => (req.user && (req.user.id || req.user._id)) || null;
@@ -35,9 +38,11 @@ function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-va
   if (res.headersSent) return;
   const status = Number.isInteger(err && err.status) && err.status >= 400 && err.status < 600 ? err.status : null;
   // 502/503 pass through only from the iCount services (they set a code and a
-  // Hebrew message: THROTTLED / NOT_CONFIGURED → 503, iCount's own refusal → 502).
-  // Any other 5xx stays the generic message.
-  const passThrough = status && (status < 500 || ((status === 502 || status === 503) && err.code));
+  // Hebrew message: THROTTLED / NOT_CONFIGURED → 503, iCount's own refusal → 502),
+  // and 500 SAVE_FAILED (created in iCount, not saved here — the screen must
+  // know, with the id). Any other 5xx stays the generic message.
+  const passThrough = status && (status < 500 || ((status === 502 || status === 503) && err.code)
+    || (status === 500 && err.code === 'SAVE_FAILED'));
   if (passThrough) {
     return res.status(status).json({
       error: err.message,
@@ -185,9 +190,14 @@ async function intakeStatus(req, res) {
 // ── iCount (reads) ─────────────────────────────────────────────────────────
 // Booleans and timestamps only — never a credential, never iCount's raw reply.
 async function icountStatus(req, res) {
-  const [last, lastComplete] = await Promise.all([
+  // `held_rows`: iCount rows the bridge did not turn into documents because an
+  // active document already answers for them under another icount_id.
+  const HELD = { match_kind: 'held', gone_at: null };
+  const [last, lastComplete, heldRows, heldTotal] = await Promise.all([
     IcountPull.findOne().sort({ started_at: -1 }).lean(),
     IcountPull.findOne({ complete: true }).sort({ started_at: -1 }).lean(),
+    IcountExpense.find(HELD, 'icount_id supplier_name doc_number doc_date amount_total match_why matched_expense_id').sort({ doc_date: -1 }).limit(50).lean(),
+    IcountExpense.countDocuments(HELD),
   ]);
   const st = getClient().status();
   res.json({
@@ -197,8 +207,14 @@ async function icountStatus(req, res) {
       started_at: last.started_at, finished_at: last.finished_at, complete: last.complete,
       suppliers_total: last.suppliers_total, suppliers_read: last.suppliers_read,
       rows_seen: last.rows_seen, upserted: last.upserted, gone: last.gone, failed_suppliers: (last.failures || []).length,
+      foreign: last.foreign || 0, gone_suppressed: last.gone_suppressed || null,
     } : null,
     last_complete_pull_at: lastComplete ? lastComplete.finished_at || lastComplete.started_at : null,
+    held_rows: heldRows.map(r => ({
+      icount_id: r.icount_id, supplier_name: r.supplier_name, doc_number: r.doc_number, doc_date: r.doc_date,
+      amount_total: r.amount_total, why: r.match_why, document_id: r.matched_expense_id ? String(r.matched_expense_id) : null,
+    })),
+    held_total: heldTotal,
   });
 }
 
@@ -246,7 +262,10 @@ async function icountSuppliersMissing(req, res) {
 }
 
 const identityQuestions = async (req, res) => res.json({ questions: await bridge.pendingIdentityQuestions() });
-const icountPreview = async (req, res) => res.json(await filing.previewFiling(req.params.id, { expense_type_id: req.query.expense_type_id }));
+// A viewer sees the dry run without iCount being asked anything (no supplier read on their behalf).
+const icountPreview = async (req, res) => res.json(await filing.previewFiling(req.params.id, {
+  expense_type_id: req.query.expense_type_id, remote: !isViewerReq(req),
+}));
 
 /** Same status/code shape the filing service throws, for errors raised here. */
 function filingError(e) {

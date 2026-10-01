@@ -182,6 +182,8 @@ const row = (id, no, date, sum, extra = {}) => ({ expense_id: id, expense_docnum
     // seed: supplier 11 has an old row that would look "gone" if the pull wrongly applied gone to it
     await IcountExpense.create({ icount_id: 'KEEP', supplier_id: '11', doc_date: '2026-09-10', amount_total: 5 });
     await IcountExpense.create({ icount_id: 'VANISH', supplier_id: '22', doc_date: '2026-09-10', amount_total: 5 });
+    // more known rows (a supplier not in the list), so one vanished row stays under the mass-void brake's 30%
+    for (let i = 0; i < 4; i++) await IcountExpense.create({ icount_id: `FILL${i}`, supplier_id: '99', doc_date: '2026-09-10', amount_total: 5 });
     const c = fakeClient({ suppliers: SUP, throttleFor: ['11'], expenses: {
       22: [row('S9', 'X-1', '2026-09-12', 40)], 33: [row('T9', 'Y-1', '2026-09-13', 41)],
     } });
@@ -247,6 +249,74 @@ const row = (id, no, date, sum, extra = {}) => ({ expense_id: id, expense_docnum
     eq(r2.partial, true, 'לא מחובר — partial');
     eq(r2.errors[0], 'לא מחובר', 'הודעת "לא מחובר"');
     eq(off.calls.length, 0, 'לא נוגע ברשת');
+  }
+
+  console.log('pullMirror — בלם היעלמות המונית');
+  {
+    await IcountExpense.deleteMany({}); await IcountPull.deleteMany({}); suppliersSvc.clearSupplierCache();
+    const many = Array.from({ length: 30 }, (_, i) => row(`M${i}`, `M-${i}`, '2026-09-15', 10 + i));
+    const full = fakeClient({ suppliers: SUP.slice(0, 1), expenses: { 11: many } });
+    await mirror.pullMirror({ client: full, gapMs: 0 });
+    eq(await IcountExpense.countDocuments({ gone_at: null }), 30, '30 שורות ידועות');
+
+    // 21 vanish at once (>20) → nothing marked, recorded
+    suppliersSvc.clearSupplierCache();
+    const r = await mirror.pullMirror({ client: fakeClient({ suppliers: SUP.slice(0, 1), expenses: { 11: many.slice(21) } }), gapMs: 0 });
+    eq(r.gone, 0, 'יותר מ-20 נעלמו — אף אחד לא סומן');
+    eq(r.gone_suppressed && r.gone_suppressed.count, 21, 'gone_suppressed.count = 21');
+    ok(!!(r.gone_suppressed && r.gone_suppressed.reason), 'עם סיבה');
+    eq(await IcountExpense.countDocuments({ gone_at: { $ne: null } }), 0, 'במסד — אף שורה לא gone');
+    const p1 = await IcountPull.findOne({}).sort({ started_at: -1 }).lean();
+    eq(p1.gone_suppressed && p1.gone_suppressed.count, 21, 'נרשם על IcountPull');
+
+    // 10 of 30 (33% > 30%) → suppressed too
+    suppliersSvc.clearSupplierCache();
+    const r2 = await mirror.pullMirror({ client: fakeClient({ suppliers: SUP.slice(0, 1), expenses: { 11: many.slice(10) } }), gapMs: 0 });
+    eq(r2.gone, 0, '33% נעלמו — לא סומן');
+    eq(r2.gone_suppressed && r2.gone_suppressed.count, 10, 'נרשם 10');
+
+    // 5 of 30 (17%, ≤20) → marked normally
+    suppliersSvc.clearSupplierCache();
+    const r3 = await mirror.pullMirror({ client: fakeClient({ suppliers: SUP.slice(0, 1), expenses: { 11: many.slice(5) } }), gapMs: 0 });
+    eq(r3.gone, 5, '5 נעלמו — סומנו');
+    eq(r3.gone_suppressed, null, 'בלי בלם');
+    eq((await IcountPull.findOne({}).sort({ started_at: -1 }).lean()).gone_suppressed, null, 'IcountPull — gone_suppressed null');
+  }
+
+  console.log('pullMirror — שורה של ספק אחר בתשובה מדולגת');
+  {
+    await IcountExpense.deleteMany({}); await IcountPull.deleteMany({}); suppliersSvc.clearSupplierCache();
+    const c = fakeClient({ suppliers: SUP.slice(0, 2), expenses: {
+      11: [row('OWN1', 'O-1', '2026-09-12', 10), row('FOR1', 'F-1', '2026-09-12', 20, { supplier_id: 22 }), row('OWN2', 'O-2', '2026-09-12', 30, { supplier_id: '11' })],
+      22: [],
+    } });
+    const r = await mirror.pullMirror({ client: c, gapMs: 0 });
+    eq(r.foreign, 1, 'שורה זרה אחת נספרה');
+    eq(r.upserted, 2, 'רק שתי שורות של הספק נשמרו');
+    eq(await IcountExpense.countDocuments({ icount_id: 'FOR1' }), 0, 'השורה הזרה לא נשמרה');
+    eq((await IcountPull.findOne({}).lean()).foreign, 1, 'נרשם על IcountPull');
+  }
+
+  console.log('pullMirror — אחרי חסימה, המשיכה הבאה ממשיכה מאיפה שנעצרה');
+  {
+    await IcountExpense.deleteMany({}); await IcountPull.deleteMany({}); suppliersSvc.clearSupplierCache();
+    const four = [...SUP, { supplier_id: 44, supplier_name: 'ספק רביעי', vat_id: '' }];
+    const exp = { 11: [row('A1', 'A', '2026-09-12', 1)], 33: [row('C1', 'C', '2026-09-12', 1)], 44: [row('D1', 'D', '2026-09-12', 1)] };
+    const c1 = fakeClient({ suppliers: four, throttleFor: ['33'], expenses: exp });
+    await mirror.pullMirror({ client: c1, concurrency: 1, gapMs: 0 });
+    eq(c1.calls.filter(x => x.method === '/expense/search').map(x => String(x.params.supplier_id)).join(','), '11,22,33', 'משיכה 1 — נעצרה בספק 33');
+    eq((await IcountPull.findOne({}).sort({ started_at: -1 }).lean()).resume_supplier_id, '33', 'נרשם מאיפה להמשיך');
+    suppliersSvc.clearSupplierCache();
+    const c2 = fakeClient({ suppliers: four, expenses: exp });
+    const r2 = await mirror.pullMirror({ client: c2, concurrency: 1, gapMs: 0 });
+    eq(c2.calls.filter(x => x.method === '/expense/search').map(x => String(x.params.supplier_id)).join(','), '33,44,11,22', 'משיכה 2 — מתחילה ב-33 ומסתובבת');
+    eq(r2.partial, false, 'משיכה 2 מלאה');
+    ok(!!(await IcountExpense.findOne({ icount_id: 'D1' })), 'הזנב (ספק 44) נקרא');
+    eq((await IcountPull.findOne({}).sort({ started_at: -1 }).lean()).resume_supplier_id, '', 'משיכה מלאה — בלי נקודת המשך');
+    suppliersSvc.clearSupplierCache();
+    const c3 = fakeClient({ suppliers: four, expenses: exp });
+    await mirror.pullMirror({ client: c3, concurrency: 1, gapMs: 0 });
+    eq(String(c3.calls.find(x => x.method === '/expense/search').params.supplier_id), '11', 'משיכה 3 — שוב מההתחלה');
   }
 
   console.log('mongo index');

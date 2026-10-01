@@ -317,7 +317,8 @@ async function confirmDocument(document_id, fields, by) {
  * covering a bank charge, or that charge would never reach the pool again.
  * Receipts linked to it are released back to the receipts lane.
  */
-async function voidDocument(document_id, by) {
+/** `set`: further fields written in the SAME update as the void (the bridge's own mark), restored on undo. */
+async function voidDocument(document_id, by, { set = {} } = {}) {
   oid(document_id, 'מזהה מסמך');
   return atomically(async ({ session, undo }) => {
     const doc = await activeDoc(document_id, session);
@@ -339,9 +340,10 @@ async function voidDocument(document_id, by) {
     // and its charge must stay explained. An iCount-sourced document keeps its
     // icount_id: the bridge restores it if the row comes back.
     const release = doc.source !== 'icount' && doc.icount_id ? { icount_id: null, icount_id_released: doc.icount_id } : {};
-    await ExpenseDocument.updateOne({ _id: doc._id }, { $set: { status: 'void', ...release } }, { session });
+    await ExpenseDocument.updateOne({ _id: doc._id }, { $set: { ...set, status: 'void', ...release } }, { session });
+    const before = Object.fromEntries(Object.keys(set).map(k => [k, doc[k] ?? null]));
     undo(() => ExpenseDocument.updateOne({ _id: doc._id }, {
-      $set: { status: 'active', ...(release.icount_id_released ? { icount_id: doc.icount_id, icount_id_released: doc.icount_id_released ?? null } : {}) },
+      $set: { ...before, status: 'active', ...(release.icount_id_released ? { icount_id: doc.icount_id, icount_id_released: doc.icount_id_released ?? null } : {}) },
     }));
     return { ok: true, removed_payments: pays.length, released_receipts: receipts.length };
   }, { document_id });

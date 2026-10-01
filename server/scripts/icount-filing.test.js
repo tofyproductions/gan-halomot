@@ -178,6 +178,15 @@ const TAX_B = '510000094';
     eq(off.calls.length, 0, 'לא מחובר — אין קריאות');
     await refuses(() => filing.previewFiling(String(new mongoose.Types.ObjectId()), { client: f.client }), 404, 'NOT_FOUND', 'תצוגה למסמך שלא קיים');
     eq(f.creates(), 0, 'אף תצוגה לא יצרה מסמך');
+
+    // the viewer's preview: iCount is not asked anything
+    const fv = fakeIcount();
+    clearSupplierCache();
+    const pv = await filing.previewFiling(String(d._id), { client: fv.client, remote: false });
+    eq(fv.calls.length, 0, 'remote:false — אין שום קריאה לאייקאונט');
+    ok(pv.ok === false && pv.payload === null && pv.icount_supplier === null && pv.remote_checked === false, 'בלי ספק אייקאונט ובלי payload');
+    deepEq(pv.blockers, [], 'חוסמים מקומיים בלבד (אין)');
+    eq(p.remote_checked, true, 'תצוגה רגילה — remote_checked');
   }
 
   console.log('\nfileToIcount — שערים, לפי הסדר');
@@ -468,10 +477,31 @@ const TAX_B = '510000094';
     eq((await fresh(n)).icount_filed_at, null, 'בלי "הועלה"');
   }
 
+  console.log('\nבדיקת כפילות — סוג מסמך: זיכוי 45 באייקאונט אינו החשבונית 45 שלנו');
+  await reset();
+  {
+    const inv = await closedDoc({ doc_number: '45', amount_total: 45 });
+    const fk = fakeIcount({ handlers: { '/expense/search': () => ({ status: true, total_count: 1, results_list: [
+      { expense_id: 'RF45', expense_docnum: '45', expense_date: '2026-09-10', nis_sum: 45, supplier_id: 11, expense_doctype: 'refund' },
+    ] }) } });
+    const res = await filing.fileToIcount(String(inv._id), { by, client: fk.client });
+    eq(res.filed, true, 'נוצר מסמך חדש — לא אומץ הזיכוי');
+    eq(fk.creates(), 1, 'create נקרא פעם אחת');
+    ok((await fresh(inv)).icount_id !== 'RF45', 'החשבונית לא קיבלה את מזהה הזיכוי');
+    // a receipt row with the same number is not our invoice either; an invrec is
+    const inv2 = await closedDoc({ doc_number: '46', amount_total: 46 });
+    const fk2 = fakeIcount({ handlers: { '/expense/search': () => ({ status: true, total_count: 2, results_list: [
+      { expense_id: 'RC46', expense_docnum: '46', expense_date: '2026-09-10', nis_sum: 46, supplier_id: 11, expense_doctype: 'receipt' },
+      { expense_id: 'IR46', expense_docnum: '46', expense_date: '2026-09-10', nis_sum: 46, supplier_id: 11, expense_doctype: 'invrec' },
+    ] }) } });
+    deepEq(await filing.fileToIcount(String(inv2._id), { by, client: fk2.client }), { adopted: true, icount_id: 'IR46' }, 'חשבונית-קבלה — אותו סוג, אומצה; הקבלה דולגה');
+  }
+
   console.log('\nreportPaid / undoReportPaid (spec §5, port notes §8)');
   await reset();
   {
     const f = fakeIcount();
+    const mirror = (icount_id, o = {}) => IcountExpense.create({ icount_id, supplier_id: '11', supplier_name: 'חשמל ישראל', supplier_tax_id: TAX_A, doc_number: icount_id, doc_date: '2026-09-10', amount_total: 100, doctype: 'invoice', ...o });
     const rp = (d, o = {}) => filing.reportPaid(String(d._id || d), { by, client: f.client, ...o });
 
     await refuses(() => rp(new mongoose.Types.ObjectId()), 404, 'NOT_FOUND', 'מסמך שלא קיים');
@@ -494,8 +524,18 @@ const TAX_B = '510000094';
     await refuses(() => rp(gone), 409, 'ICOUNT_GONE', 'נמחק באייקאונט');
     eq(f.calls.length, 0, 'אף סירוב לא קרא לאייקאונט');
 
+    // not (or no longer) seen in iCount by a pull → refused before any call
+    const unverified = await doc({ icount_id: 'R11' });
+    await pay(unverified, 100);
+    const ue = await refuses(() => rp(unverified), 409, 'NOT_VERIFIED', 'לא נמשך מאייקאונט — עוד לא אומת');
+    ok(ue && ue.message.includes('משכו מאייקאונט קודם'), 'ההודעה: משכו מאייקאונט קודם');
+    await mirror('R11', { gone_at: new Date() });
+    await refuses(() => rp(unverified), 409, 'NOT_VERIFIED', 'שורת המראה נעלמה — לא מדווחים');
+    eq(f.calls.length, 0, 'לא אומת — אין קריאה לאייקאונט');
+
     // covered within 2 ₪ by two charges → the LATEST charge date
     const d = await doc({ source: 'icount', mail_sorter_id: undefined, icount_id: 'R9', amount_total: 300 });
+    await mirror('R9', { amount_total: 300 });
     await pay(d, 150, { date: '2026-09-14' });
     await pay(d, 148.5, { date: '2026-09-20' });
     const res = await rp(d);
@@ -513,6 +553,7 @@ const TAX_B = '510000094';
 
     const failing = fakeIcount({ handlers: { '/expense/update': () => ({ status: false, reason: 'expense_not_found' }) } });
     const d2 = await doc({ icount_id: 'R10' });
+    await mirror('R10');
     await pay(d2, 100);
     const e = await refuses(() => filing.reportPaid(String(d2._id), { by, client: failing.client }), 502, 'ICOUNT_ERROR', 'אייקאונט סירב');
     ok(e && e.message.includes('expense_not_found'), 'הסיבה מילה במילה');
@@ -530,6 +571,11 @@ const TAX_B = '510000094';
     await rp(d);
     const again = await IcountPaidReport.findOne({ document_id: d._id }).lean();
     ok(again.undone_at === null && again.undone_by === null, 'דיווח מחדש מנקה את הביטול');
+    await IcountExpense.updateOne({ icount_id: 'R9' }, { $set: { gone_at: new Date() } });
+    const before = f.calls.length;
+    await refuses(() => filing.undoReportPaid(String(d._id), { by, client: f.client }), 409, 'NOT_VERIFIED', 'ביטול כשהשורה נעלמה מאייקאונט — 409');
+    eq(f.calls.length, before, 'ביטול לא מאומת — אין קריאה');
+    await IcountExpense.updateOne({ icount_id: 'R9' }, { $set: { gone_at: null } });
     await refuses(() => filing.undoReportPaid(String(d._id), { by, client: undoFail.client }), 502, 'ICOUNT_ERROR', 'ביטול שאייקאונט סירב');
     eq((await IcountPaidReport.findOne({ document_id: d._id }).lean()).undone_at, null, 'הדיווח נשאר פעיל');
     ok(f.calls.every(c => !Object.keys(c.params).some(k => /payment|sum|vat/i.test(k)) || c.method !== '/expense/update'), 'שום עדכון לא שלח payments/סכום/מע״מ');

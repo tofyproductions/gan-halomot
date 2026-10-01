@@ -222,6 +222,17 @@ const yesNo = (b) => (b ? 'כן' : 'לא');
 // A full pull walks every supplier in iCount; it may take minutes.
 const PULL_TIMEOUT_MS = 10 * 60 * 1000;
 
+/** The mass-void brake held back: nothing was marked gone in that pull. */
+function GoneSuppressed({ g }) {
+  if (!g || !g.count) return null;
+  return (
+    <Alert severity="warning" sx={{ mt: 1 }}>
+      נמצאו {g.count} מסמכים שנעלמו מאייקאונט — לא סומנו, בדקו ידנית
+      {g.reason ? <Typography variant="caption" sx={{ display: 'block' }}>{g.reason}</Typography> : null}
+    </Alert>
+  );
+}
+
 function PullResult({ r }) {
   const p = r.pull || {};
   const b = r.bridge;
@@ -235,8 +246,11 @@ function PullResult({ r }) {
         <Typography variant="body2">
           קושרו למסמכים שלנו {b.linked} · נוצרו חדשים מאייקאונט {b.created} · שאלות "זה אותו מסמך?" {b.probable}
           {b.voided ? ` · בוטלו ${b.voided}` : ''}{b.kept_gone ? ` · נשארו עם סימון "נמחק" ${b.kept_gone}` : ''}{b.restored ? ` · חזרו ${b.restored}` : ''}
+          {b.held ? ` · לא נוצרו (מסמך אחר כבר מחזיק) ${b.held}` : ''}{b.skipped_doctype ? ` · דולגו (הזמנה/תעודת משלוח/תלוש) ${b.skipped_doctype}` : ''}
         </Typography>
       )}
+      {p.foreign ? <Typography variant="body2">שורות של ספק אחר שאייקאונט החזיר — דולגו: {p.foreign}</Typography> : null}
+      <GoneSuppressed g={p.gone_suppressed} />
       {(p.errors || []).length > 0 && (
         <Box component="ul" sx={{ m: 0, mt: 0.5, paddingInlineStart: '20px' }}>
           {p.errors.slice(0, 8).map((e, i) => <li key={i}><Typography variant="caption">{e}</Typography></li>)}
@@ -283,6 +297,22 @@ function IcountConnection({ canWrite, onPulled }) {
             </Typography>
           )}
           {last && !last.complete && <Typography variant="body2">משיכה מלאה אחרונה: {when(s.last_complete_pull_at)}</Typography>}
+          {last && <GoneSuppressed g={last.gone_suppressed} />}
+          {s.held_total > 0 && (
+            <Alert severity="warning">
+              <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                {s.held_total} מסמכים מאייקאונט לא נוצרו כאן — מסמך אחר כבר מחזיק אותם (מספר אייקאונט אחר). בדקו ידנית.
+              </Typography>
+              <Box component="ul" sx={{ m: 0, mt: 0.5, paddingInlineStart: '20px' }}>
+                {(s.held_rows || []).slice(0, 10).map(r => (
+                  <li key={r.icount_id}>
+                    <Typography variant="caption">{r.supplier_name || '—'} · מסמך {r.doc_number || r.icount_id} · {formatILS(r.amount_total)} · {formatDay(r.doc_date)}</Typography>
+                  </li>
+                ))}
+                {s.held_total > 10 && <li><Typography variant="caption">ועוד {s.held_total - 10}…</Typography></li>}
+              </Box>
+            </Alert>
+          )}
           <Typography variant="caption" color="text.secondary">המשיכה רצה לבד פעם ביום. רק מסמכים מתאריך ההתחלה ואילך.</Typography>
           {canWrite && s.configured && (
             <Box><BusyButton variant="outlined" loading={busy} loadingText="מושך מאייקאונט…" onClick={pull}>משוך מאייקאונט עכשיו</BusyButton></Box>

@@ -422,6 +422,127 @@ const TAX_BAD = '510000555'; // fails the check digit — ignored
     eq((await ExpenseDocument.findOne({ icount_id: 'W1' }).lean())?.doc_type, 'invoice_receipt', 'doctype מהמשיכה נשמר וממופה');
   }
 
+  // ── final review fixes ───────────────────────────────────────────────────
+  const { ExpenseDocDecision, ExpenseUnpaidMark, IcountPaidReport } = require('../src/models');
+  await Promise.all([ExpenseDocDecision.init(), ExpenseUnpaidMark.init(), IcountPaidReport.init()]);
+  const resetAll = () => Promise.all([reset(), ExpenseDocDecision.deleteMany({}), ExpenseUnpaidMark.deleteMany({}), IcountPaidReport.deleteMany({})]);
+
+  console.log('זהות לפי סוג מסמך — חשבונית 45 וזיכוי 45 אינם אותו מסמך');
+  await resetAll();
+  {
+    const refund = await mirrorRow({ doc_number: '45', amount_total: 45, doctype: 'refund' });
+    const inv = await ours({ doc_number: '45', amount_total: 45, doc_type: 'tax_invoice' });
+    const refund2 = await mirrorRow({ doc_number: 'R-9', amount_total: 77, doctype: 'refund' });
+    const inv2 = await ours({ doc_number: 'Q-9', amount_total: 77, doc_type: 'tax_invoice' });
+    eq((await bridge.pendingIdentityQuestions()).length, 0, 'אין שאלת "אותו מסמך?" בין חשבונית לזיכוי');
+    const r = await bridge.syncBridge();
+    eq(r.linked, 0, 'הגשר לא מקשר חשבונית לזיכוי');
+    eq(r.created, 2, 'לכל זיכוי נוצר מסמך משלו');
+    eq((await ExpenseDocument.findById(inv._id).lean()).icount_id, null, 'החשבונית שלנו לא קיבלה את icount_id של הזיכוי');
+    eq((await ExpenseDocument.findById(inv2._id).lean()).icount_id, null, 'גם לא דרך "סביר"');
+    eq((await ExpenseDocument.findOne({ icount_id: refund.icount_id }).lean())?.doc_type, 'credit_note', 'מסמך הזיכוי — credit_note');
+    eq((await IcountExpense.findById(refund2._id).lean()).match_kind, null, 'הזיכוי לא סומן "סביר"');
+    await refuses(() => bridge.decideIdentity(inv._id, refund._id, true), 400, 'אישור ידני "אותו מסמך" בין חשבונית לזיכוי');
+  }
+
+  console.log('סוגי מסמכים שאינם הוצאה (הזמנה/תעודת משלוח/תלוש) — לא נוצר מסמך; import → חשבונית');
+  await resetAll();
+  {
+    eq(bridge.docTypeFor('order'), null, 'order → אין מסמך');
+    eq(bridge.docTypeFor('import'), 'tax_invoice', 'import → tax_invoice');
+    await mirrorRow({ doctype: 'order' });
+    await mirrorRow({ doctype: 'delcert' });
+    await mirrorRow({ doctype: 'paycheck' });
+    const imp = await mirrorRow({ doctype: 'import' });
+    const r = await bridge.syncBridge();
+    eq(r.created, 1, 'רק שורת היבוא הפכה למסמך');
+    eq(r.skipped_doctype, 3, 'שלוש שורות נספרו skipped_doctype');
+    eq((await ExpenseDocument.findOne({ icount_id: imp.icount_id }).lean())?.doc_type, 'tax_invoice', 'יבוא — חשבונית מס');
+    eq(await ExpenseDocument.countDocuments({}), 1, 'אין מסמכים נוספים');
+  }
+
+  console.log('לא יוצרים מסמך לשורה שמסמך פעיל אחר כבר מחזיק (מספר אייקאונט אחר)');
+  await resetAll();
+  {
+    const filedMine = await ours({ doc_number: 'F-1', icount_id: 'A-OLD' });
+    const row = await mirrorRow({ doc_number: 'F-1' });
+    const r = await bridge.syncBridge();
+    eq(r.created, 0, 'לא נוצר מסמך כפול');
+    eq(r.held, 1, 'השורה נעצרה (held)');
+    const held = await IcountExpense.findById(row._id).lean();
+    eq(held.match_kind, 'held', 'מסומנת held');
+    eq(String(held.matched_expense_id), id(filedMine), 'מצביעה על המסמך שמחזיק את המסמך');
+    ok(!(await ExpenseDocument.exists({ icount_id: row.icount_id })), 'אף מסמך לא קיבל את מספר השורה');
+
+    console.log('אורלי הקלידה את אותו מסמך פעמיים באייקאונט');
+    const t1 = await mirrorRow({ doc_number: 'T-2' });
+    const t2 = await mirrorRow({ doc_number: 'T-2' });
+    const r2 = await bridge.syncBridge();
+    eq(r2.created, 1, 'נוצר מסמך אחד בלבד');
+    eq(await ExpenseDocument.countDocuments({ icount_id: { $in: [t1.icount_id, t2.icount_id] } }), 1, 'מסמך אחד לשתי השורות');
+    eq((await IcountExpense.findById(t2._id).lean()).match_kind, 'held', 'השורה השנייה held');
+    const r3 = await bridge.syncBridge();
+    eq(r3.created, 0, 'הרצה חוזרת — עדיין לא נוצר');
+    eq(r3.held, 2, 'שתי השורות עדיין held');
+    // the holder is voided by a person → the held row may get its own document now
+    await ExpenseDocument.updateOne({ _id: filedMine._id }, { status: 'void' });
+    const r4 = await bridge.syncBridge();
+    eq(r4.created, 1, 'המחזיק בוטל — השורה מקבלת מסמך');
+    eq((await IcountExpense.findById(row._id).lean()).match_kind, null, 'סימון held נוקה');
+  }
+
+  console.log('מיזוג לתאום — החלטה, "עוד לא שולמה" ודיווח ששולם עוברים למסמך שלנו');
+  await resetAll();
+  {
+    const row = await mirrorRow({ doc_number: 'MV-1', amount_total: 300 });
+    await bridge.syncBridge();
+    const twin = await ExpenseDocument.findOne({ icount_id: row.icount_id }).lean();
+    await ExpenseDocDecision.create({ document_id: twin._id, kind: 'paid_outside_bank', note: 'מזומן' });
+    await ExpenseUnpaidMark.create({ document_id: twin._id });
+    await IcountPaidReport.create({ document_id: twin._id, icount_id: row.icount_id, paid_date: '2026-09-12' });
+    const typed = await ExpenseDocument.create({ source: 'manual', vendor_name: 'חשמל ישראל', supplier_tax_id: TAX_A,
+      doc_number: 'MV-1', doc_date: '2026-09-10', amount_total: 300 });
+
+    // a failure mid-move rolls the moves back
+    const realUpdate = IcountPaidReport.updateOne;
+    IcountPaidReport.updateOne = function () { IcountPaidReport.updateOne = realUpdate; throw new Error('boom'); };
+    const failed = await bridge.syncBridge().then(() => null, e => e);
+    IcountPaidReport.updateOne = realUpdate;
+    ok(!!failed && /boom/.test(failed.message), 'כשל באמצע המיזוג');
+    eq(String((await ExpenseDocDecision.findOne({}).lean()).document_id), id(twin), 'כשל — ההחלטה חזרה לתאום');
+    eq(String((await ExpenseUnpaidMark.findOne({}).lean()).document_id), id(twin), 'כשל — הסימון חזר לתאום');
+    eq((await ExpenseDocument.findById(typed._id).lean()).icount_id, null, 'כשל — המסמך שלנו לא קושר');
+
+    const r = await bridge.syncBridge();
+    eq(r.linked, 1, 'מוזג');
+    eq(String((await ExpenseDocDecision.findOne({}).lean()).document_id), id(typed), 'ההחלטה עברה למסמך שלנו');
+    eq(String((await ExpenseUnpaidMark.findOne({}).lean()).document_id), id(typed), '"עוד לא שולמה" עבר');
+    eq(String((await IcountPaidReport.findOne({}).lean()).document_id), id(typed), 'הדיווח ששולם עבר');
+
+    // ours already has its own decision → the twin's stays with the void twin
+    const row2 = await mirrorRow({ doc_number: 'MV-2', amount_total: 310 });
+    await bridge.syncBridge();
+    const twin2 = await ExpenseDocument.findOne({ icount_id: row2.icount_id }).lean();
+    await ExpenseDocDecision.create({ document_id: twin2._id, kind: 'closed_anyway' });
+    const typed2 = await ExpenseDocument.create({ source: 'manual', vendor_name: 'חשמל ישראל', supplier_tax_id: TAX_A,
+      doc_number: 'MV-2', doc_date: '2026-09-10', amount_total: 310 });
+    await ExpenseDocDecision.create({ document_id: typed2._id, kind: 'paid_outside_bank' });
+    eq((await bridge.syncBridge()).linked, 1, 'מוזג גם כשלמסמך שלנו יש החלטה');
+    eq((await ExpenseDocDecision.findOne({ document_id: typed2._id }).lean()).kind, 'paid_outside_bank', 'ההחלטה שלנו נשארה');
+    ok(!!(await ExpenseDocDecision.exists({ document_id: twin2._id })), 'של התאום נשארה עם התאום');
+  }
+
+  console.log('ביטול בגלל היעלמות — מסומן icount_voided_by_bridge באותה כתיבה');
+  await resetAll();
+  {
+    const g = await mirrorRow({ doc_number: 'VB-1' });
+    await bridge.syncBridge();
+    await IcountExpense.updateOne({ _id: g._id }, { $set: { gone_at: new Date() } });
+    eq((await bridge.syncBridge()).voided, 1, 'בוטל');
+    const v = await ExpenseDocument.findOne({ icount_id: g.icount_id }).lean();
+    eq(v.status, 'void', 'void'); eq(v.icount_voided_by_bridge, true, 'icount_voided_by_bridge'); ok(!!v.icount_gone_at, 'icount_gone_at');
+  }
+
   await mongoose.disconnect(); await mongod.stop();
   console.log(failures ? `\n❌ ${failures} כשלונות` : '\n✅ הכל עבר');
   process.exit(failures ? 1 : 0);

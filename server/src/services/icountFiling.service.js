@@ -22,7 +22,7 @@ const mongoose = require('mongoose');
 const { ExpenseDocument, BankTransaction, IcountExpense, IcountPaidReport, Setting, Supplier } = require('../models');
 const core = require('./expenseCore.service');
 const { withLocks } = require('./expenseWrites.service');
-const { compareToIcount, linkToRow } = require('./icountBridge.service');
+const { compareToIcount, docTypeFor, kindsAgree, linkToRow } = require('./icountBridge.service');
 const { mapExpenseRow } = require('./icountMirror.service');
 const { METHODS, fetchPaged, listSuppliers, resolveIn, trustedTaxId } = require('./icountSuppliers.service');
 const { getClient } = require('./ganIcount.client');
@@ -42,7 +42,14 @@ const MSG = Object.freeze({
   already: 'המסמך כבר באייקאונט',
   needsReview: 'הפרטים שנקראו מהמסמך עוד לא אושרו',
   sourceIcount: 'המסמך הזה נוצר מאייקאונט — הוא כבר שם',
+  notVerified: 'משכו מאייקאונט קודם — המסמך עוד לא אומת שם',
+  saveFailed: (id) => `המסמך נוצר באייקאונט אך לא נשמר כאן — ניסיון חוזר יקשר אותו${id ? ` (מספר באייקאונט: ${id})` : ''}`,
 });
+
+/** Report-paid touches only a document a pull has seen in iCount and not seen leave it. */
+async function assertVerified(icountId) {
+  if (!(await IcountExpense.exists({ icount_id: icountId, gone_at: null }))) throw fail(409, 'NOT_VERIFIED', MSG.notVerified);
+}
 
 const fail = (status, code, message, extra = {}) => Object.assign(new Error(message), { status, code, ...extra });
 const isYmd = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
@@ -150,18 +157,22 @@ async function gateFailures(doc) {
 
 /**
  * Dry run: what would be sent, and to which iCount supplier. Reads the
- * supplier list only (and not even that when a gate already refuses) —
- * never searches, never writes.
- * → { ok, blockers, payload|null, icount_supplier|null }
+ * supplier list only (and not even that when a gate already refuses, or
+ * `remote:false` — the viewer's preview) — never searches, never writes.
+ * → { ok, blockers, payload|null, icount_supplier|null, remote_checked }
  */
-async function previewFiling(documentId, { expense_type_id, client = getClient() } = {}) {
+async function previewFiling(documentId, { expense_type_id, remote = true, client = getClient() } = {}) {
   const doc = await loadDoc(documentId);
   const gates = (await gateFailures(doc)).map(g => g.message);
   const typeId = await expenseTypeId(expense_type_id);
   const supplier = await ourSupplier(doc);
   if (gates.length) {
     // It cannot be filed whatever iCount says — no reason to ask iCount anything.
-    return { ok: false, blockers: [...gates, ...fileBlockers(doc, { supplier, expense_type_id: typeId })], payload: null, icount_supplier: null };
+    return { ok: false, blockers: [...gates, ...fileBlockers(doc, { supplier, expense_type_id: typeId })], payload: null, icount_supplier: null, remote_checked: false };
+  }
+  if (!remote) {
+    // Not ready either way: without iCount's supplier there is nothing to send.
+    return { ok: false, blockers: fileBlockers(doc, { supplier, expense_type_id: typeId }), payload: null, icount_supplier: null, remote_checked: false };
   }
   let icount;
   try {
@@ -178,6 +189,7 @@ async function previewFiling(documentId, { expense_type_id, client = getClient()
     blockers,
     payload: ready ? payloadFor(doc, icount.supplier.id, typeId) : null,
     icount_supplier: icount.supplier ? { id: icount.supplier.id, name: icount.supplier.name } : null,
+    remote_checked: true,
   };
 }
 
@@ -199,6 +211,9 @@ async function searchExisting(doc, icountSupplier, suppliers, client) {
     const m = mapExpenseRow(raw);
     if (m.is_storno || !m.icount_id) continue;
     if (m.supplier_id && m.supplier_id !== icountSupplier.id) continue;
+    // A credit note or a receipt with our invoice's number is another document (and an order is none).
+    const theirType = docTypeFor(m.doctype);
+    if (!theirType || !kindsAgree(doc.doc_type, theirType)) continue;
     const card = cards.get(m.supplier_id || icountSupplier.id) || icountSupplier;
     // The card's ח.פ is the trusted one. The row's own counts only when the row
     // names no supplier and the number passes the check digit (a misread is ignored).
@@ -318,7 +333,7 @@ async function fileToIcount(documentId, { expense_type_id, confirm_duplicate = f
         }).catch(() => {});
       }
       console.error('[icountFiling] created in iCount but not saved here', { document_id: String(doc._id), icount_id: icountId, error: saved.error && saved.error.message });
-      throw fail(500, 'SAVE_FAILED', `המסמך נוצר באייקאונט (${icountId || 'בלי מספר'}) אבל לא נשמר כאן — אל תעלו אותו שוב; משכו מאייקאונט`, { icount_id: icountId });
+      throw fail(500, 'SAVE_FAILED', MSG.saveFailed(icountId), { icount_id: icountId });
     }
     const out = { filed: true, icount_id: icountId };
     if (!icountId) out.warning = 'אייקאונט קיבל את המסמך אבל לא החזיר מספר — המשיכה הבאה מאייקאונט תקשר אותו';
@@ -331,7 +346,8 @@ async function fileToIcount(documentId, { expense_type_id, confirm_duplicate = f
 /**
  * Tell iCount the document was paid: expense_paid + expense_paid_date only.
  * Allowed only when bank charges cover it within 2 ₪ (no "closed anyway",
- * no "paid outside the bank") and it is in iCount. The date is the latest
+ * no "paid outside the bank") and it is in iCount — as a pull has seen it
+ * there and not seen it leave (409 NOT_VERIFIED otherwise; the undo too). The date is the latest
  * linked charge's date unless one is given — never the day of the press.
  * → { reported: true, paid_date }
  */
@@ -353,6 +369,7 @@ async function reportPaid(documentId, { date, by = null, client = getClient() } 
     if (!isYmd(paidDate) || Number.isNaN(Date.parse(paidDate)) || !chargeDates.includes(paidDate)) {
       throw fail(400, 'BAD_DATE', 'תאריך התשלום חסר או לא תקין — הוא חייב להיות תאריך של אחד מחיובי הבנק המקושרים, לא היום');
     }
+    await assertVerified(doc.icount_id);
     if (!client.isConfigured()) throw fail(503, 'NOT_CONFIGURED', MSG.notConnected);
 
     let resp;
@@ -380,6 +397,7 @@ async function undoReportPaid(documentId, { by = null, client = getClient() } = 
   return withLocks([`icount:${pre._id}`], async () => {
     const report = await IcountPaidReport.findOne({ document_id: pre._id }).lean();
     if (!report || report.undone_at) throw fail(400, 'NOT_REPORTED', 'לא דווח לאייקאונט ששולם');
+    await assertVerified(report.icount_id);
     if (!client.isConfigured()) throw fail(503, 'NOT_CONFIGURED', MSG.notConnected);
     let resp;
     try {

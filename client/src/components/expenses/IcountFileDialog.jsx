@@ -115,7 +115,7 @@ export default function IcountFileDialog({ doc, open, onClose, onDone }) {
             <Stack spacing={0.5}>
               <Line label="ספק אצלנו">{doc.vendor_name || '—'}{doc.supplier_tax_id ? ` · ח.פ ${doc.supplier_tax_id}` : ''}</Line>
               <Line label="ספק באייקאונט">
-                {preview?.icount_supplier ? preview.icount_supplier.name || `מס׳ ${preview.icount_supplier.id}` : loading ? 'בודק…' : 'לא נמצא'}
+                {preview?.icount_supplier ? preview.icount_supplier.name || `מס׳ ${preview.icount_supplier.id}` : loading ? 'בודק…' : preview?.remote_checked === false ? 'לא נבדק' : 'לא נמצא'}
               </Line>
               <Line label="סוג מסמך">{p ? ICOUNT_DOCTYPE_LABEL[p.expense_doctype] || p.expense_doctype : DOC_TYPE_LABEL[doc.doc_type] || '—'}</Line>
               <Line label="מספר מסמך">{p ? p.expense_docnum : doc.doc_number || '—'}</Line>

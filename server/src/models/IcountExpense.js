@@ -16,7 +16,8 @@ const icountExpenseSchema = new mongoose.Schema({
   doctype: { type: String, default: '' },         // iCount's expense_doctype (invoice|invrec|receipt|refund|…)
   is_storno: { type: Boolean, default: false },   // cancelled / cancelling doc: mirrored, never a document
   matched_expense_id: { type: mongoose.Schema.Types.ObjectId, ref: 'ExpenseDocument', default: null },
-  match_kind: { type: String, enum: ['same_document', 'probable', null], default: null },
+  // 'held': an active document already answers for this row under another icount_id — no document created (bridge).
+  match_kind: { type: String, enum: ['same_document', 'probable', 'held', null], default: null },
   match_why: { type: String, default: '' },
   first_seen_at: { type: Date, default: Date.now },
   last_seen_at: { type: Date, default: Date.now },

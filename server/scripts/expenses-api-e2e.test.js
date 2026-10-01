@@ -489,9 +489,15 @@ async function main() {
   eq(stOn.body?.configured, true, 'מוגדר — configured:true');
 
   const before = await ExpenseDocument.findById(fid).lean();
-  const pv = await request({ path: `${A}/documents/${fid}/icount-preview`, token: viewer });
-  eq(pv.status, 200, 'צופה קורא תצוגה מקדימה');
-  eq(pv.body?.ok, true, 'התצוגה המקדימה מאשרת');
+  const supplierReads = ofM('/supplier/get_list').length;
+  clearSupplierCache();
+  const vpv = await request({ path: `${A}/documents/${fid}/icount-preview`, token: viewer });
+  eq(vpv.status, 200, 'צופה קורא תצוגה מקדימה');
+  eq(ofM('/supplier/get_list').length, supplierReads, 'תצוגה של צופה — אייקאונט לא נשאל (אין קריאת ספקים)');
+  ok(vpv.body?.remote_checked === false && vpv.body?.icount_supplier === null && vpv.body?.payload === null, 'צופה — בלי ספק אייקאונט ובלי payload');
+  const pv = await request({ path: `${A}/documents/${fid}/icount-preview`, token: accountant });
+  eq(pv.body?.ok, true, 'התצוגה המקדימה (רואת חשבון) מאשרת');
+  eq(pv.body?.remote_checked, true, 'remote_checked');
   eq(pv.body?.payload?.expense_sum, 100, 'ה-payload בתצוגה');
   eq(ofM('/expense/create').length + ofM('/expense/update').length, 0, 'תצוגה מקדימה — אפס כתיבות לאייקאונט');
   eq(JSON.stringify(await ExpenseDocument.findById(fid).lean()), JSON.stringify(before), 'תצוגה מקדימה — המסמך לא השתנה');
@@ -527,7 +533,12 @@ async function main() {
   const nc2 = await request({ method: 'POST', path: `${A}/documents/${open._id}/icount-file`, token: accountant, body: {} });
   eq(nc2.status, 409, 'מסמך לא סגור — 409'); eq(nc2.body?.code, 'NOT_CLOSED', 'NOT_CLOSED');
 
-  // report paid / undo
+  // report paid / undo — only once a pull has seen the document in iCount
+  const nv = await request({ method: 'POST', path: `${A}/documents/${fid}/icount-paid`, token: accountant, body: {} });
+  eq(nv.status, 409, 'עוד לא נמשך מאייקאונט — 409'); eq(nv.body?.code, 'NOT_VERIFIED', 'NOT_VERIFIED');
+  ok(/משכו מאייקאונט קודם/.test(nv.body?.error || ''), 'ההודעה: משכו מאייקאונט קודם');
+  eq(ofM('/expense/update').length, 0, 'לא אומת — לא נשלח עדכון');
+  await IcountExpense.create({ icount_id: afterFile.icount_id, supplier_id: '11', supplier_name: 'חשמל ישראל', supplier_tax_id: TAX, doc_number: afterFile.doc_number, doc_date: afterFile.doc_date, amount_total: 100, doctype: 'invoice' });
   const rp = await request({ method: 'POST', path: `${A}/documents/${fid}/icount-paid`, token: accountant, body: {} });
   eq(rp.status, 200, 'דיווח ששולם'); eq(rp.body?.paid_date, '2026-09-12', 'תאריך מהחיוב');
   eq(ofM('/expense/update').length, 1, 'עדכון אחד באייקאונט');
@@ -538,6 +549,23 @@ async function main() {
   eq((await request({ method: 'DELETE', path: `${A}/documents/${fid}/icount-paid`, token: accountant })).body?.code, 'NOT_REPORTED', 'ביטול שני — NOT_REPORTED');
   eq((await IcountPaidReport.findOne({ document_id: fid }).lean())?.undone_at ? 1 : 0, 1, 'הרשומה נשארת עם undone_at');
   eq((await request({ path: `${A}/closed`, token: viewer })).body?.documents?.find(d => d._id === fid)?.icount?.paid_reported, false, 'אחרי ביטול — paid_reported:false');
+
+  // created in iCount but not saved here → 500 SAVE_FAILED reaches the screen, with the id
+  {
+    const sf = await mkClosed(3);
+    icountApi.__setClientForTests(fake({ '/expense/create': async () => {
+      await ExpenseDocument.updateOne({ _id: sf._id }, { $set: { status: 'void' } });
+      return { status: true, expense_id: 'ESF1', docnum: '901' };
+    } }));
+    clearSupplierCache();
+    const origErr = console.error; console.error = () => {};
+    let r;
+    try { r = await request({ method: 'POST', path: `${A}/documents/${sf._id}/icount-file`, token: accountant, body: {} }); } finally { console.error = origErr; }
+    eq(r.status, 500, 'נוצר באייקאונט ולא נשמר — 500');
+    eq(r.body?.code, 'SAVE_FAILED', 'הקוד SAVE_FAILED עובר למסך');
+    eq(r.body?.icount_id, 'ESF1', 'עם icount_id');
+    ok(/נוצר באייקאונט אך לא נשמר כאן — ניסיון חוזר יקשר אותו/.test(r.body?.error || ''), 'ההודעה תואמת לחלון');
+  }
 
   // iCount refusal → 502 with its reason; throttle → 503 THROTTLED
   const fdoc2 = await mkClosed(2);
@@ -578,6 +606,16 @@ async function main() {
     eq((await request({ path: `${A}/closed`, token: viewer })).body?.documents?.find(d => d._id === String(g._id))?.icount?.status, 'in_icount', 'מסמך שמקורו באייקאונט — in_icount');
     await ExpenseDocument.updateOne({ _id: g._id }, { $set: { icount_gone_at: new Date() } });
     eq((await request({ path: `${A}/closed`, token: viewer })).body?.documents?.find(d => d._id === String(g._id))?.icount?.status, 'gone', 'נעלם מאייקאונט — gone');
+  }
+  // the mass-void brake and held rows are shown by /icount/status
+  {
+    await IcountPull.create({ started_at: new Date(Date.now() + 3600e3), finished_at: new Date(Date.now() + 3600e3), complete: true, foreign: 2, gone_suppressed: { count: 25, reason: 'יותר מ-20 מסמכים נעלמו במשיכה אחת' } });
+    await IcountExpense.create({ icount_id: 'HELD1', supplier_id: '11', supplier_name: 'חשמל ישראל', doc_number: 'H-1', doc_date: '2026-09-11', amount_total: 12, match_kind: 'held', match_why: 'מסמך פעיל אחר כבר מחזיק' });
+    const st = await request({ path: `${A}/icount/status`, token: viewer });
+    eq(st.body?.last_pull?.gone_suppressed?.count, 25, 'סטטוס — gone_suppressed');
+    eq(st.body?.last_pull?.foreign, 2, 'סטטוס — foreign');
+    eq(st.body?.held_total, 1, 'סטטוס — held_total');
+    eq(st.body?.held_rows?.[0]?.icount_id, 'HELD1', 'סטטוס — held_rows');
   }
   icountApi.__setClientForTests(null);
 
