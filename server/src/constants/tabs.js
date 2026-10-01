@@ -33,6 +33,9 @@ const TAB_DEFAULT_ROLES = {
   bank: ['system_admin', 'admin_viewer', 'accountant'],
   // Not a screen — the write grant for תנועות בנק. See the client file.
   bank_write: ['system_admin', 'accountant'],
+  expenses: ['system_admin', 'admin_viewer', 'accountant'],
+  // Not a screen — the write grant for הוצאות. See the client file.
+  expenses_write: ['system_admin', 'accountant'],
   proposed_changes: ['system_admin', 'accountant', 'admin_viewer'],
   contact_inbox: ['system_admin', 'accountant', 'admin_viewer'],
   parent_letters: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'],

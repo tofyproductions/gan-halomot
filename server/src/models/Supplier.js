@@ -9,6 +9,8 @@ const supplierSchema = new mongoose.Schema({
   customer_id: { type: String, default: '' },
   min_order_amount: { type: Number, default: 0 },
   vat_rate: { type: Number, default: 1.18 },
+  tax_id: { type: String, default: '' },
+  receipt_is_document: { type: Boolean, default: false },
   is_active: { type: Boolean, default: true },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 

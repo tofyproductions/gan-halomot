@@ -170,7 +170,8 @@
     "test:max-import": "node scripts/max-import.test.js",
     "test:finance-agent": "node scripts/finance-agent-e2e.test.js",
     "test:finance-api": "node scripts/finance-api-e2e.test.js",
-    "test:bank-watch": "node scripts/bank-watch.test.js"
+    "test:bank-watch": "node scripts/bank-watch.test.js",
+    "test:expense-models": "node scripts/expense-models.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

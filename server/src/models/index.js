@@ -103,6 +103,13 @@ const BankAccount = require('./BankAccount');
 const BankTransaction = require('./BankTransaction');
 const FinanceSyncLog = require('./FinanceSyncLog');
 const FinanceSyncRequest = require('./FinanceSyncRequest');
+const ExpenseDocument = require('./ExpenseDocument');
+const ExpenseFile = require('./ExpenseFile');
+const ExpensePayment = require('./ExpensePayment');
+const ExpensePairRejection = require('./ExpensePairRejection');
+const ExpenseUnpaidMark = require('./ExpenseUnpaidMark');
+const ExpenseDocDecision = require('./ExpenseDocDecision');
+const NoInvoiceRule = require('./NoInvoiceRule');
 const ProductScanMark = require('./ProductScanMark');
 const ParentAccount = require('./ParentAccount');
 const ParentPortalChange = require('./ParentPortalChange');
@@ -218,6 +225,13 @@ const real = {
   BankTransaction,
   FinanceSyncLog,
   FinanceSyncRequest,
+  ExpenseDocument,
+  ExpenseFile,
+  ExpensePayment,
+  ExpensePairRejection,
+  ExpenseUnpaidMark,
+  ExpenseDocDecision,
+  NoInvoiceRule,
   ProductScanMark,
   ParentAccount,
   ParentPortalChange,
