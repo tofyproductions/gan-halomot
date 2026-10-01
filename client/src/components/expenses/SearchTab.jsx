@@ -5,7 +5,7 @@ import {
 import api, { apiError } from '../../api/client';
 import EmptyState from '../ui/EmptyState';
 import { BusyButton } from '../shared/UploadControls';
-import { formatILS, formatDay, LANE_LABEL, LANE_TAB, GENERAL } from './expenseFormat';
+import { formatILS, formatDay, LANE_LABEL, LANE_TAB, GENERAL, NO_BRANCH } from './expenseFormat';
 
 const KIND_ICON = { invoice: '🧾', receipt: '🧾', bank: '🏦', card: '💳' };
 const LIMIT = 200;
@@ -46,6 +46,7 @@ export default function SearchTab({ branch, onJump }) {
   const [error, setError] = useState('');
   const seq = useRef(0);
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
+  const realBranch = branch && branch !== GENERAL && branch !== NO_BRANCH;
 
   const run = async (e) => {
     e?.preventDefault();
@@ -56,8 +57,8 @@ export default function SearchTab({ branch, onJump }) {
       if (form.q.trim()) params.q = form.q.trim();
       if (form.min !== '') params.min = form.min;
       if (form.max !== '') params.max = form.max;
-      // "כללי" is not a branch id — the search filters by a real branch only.
-      if (branch && branch !== GENERAL) params.branch = branch;
+      // "כללי" / "בלי סניף" are not branch ids — the search filters by a real branch only.
+      if (realBranch) params.branch = branch;
       const { data } = await api.get('/expenses/search', { params });
       if (my === seq.current) setResult({ documents: data.documents || [], charges: data.charges || [] });
     } catch (err) {
@@ -76,8 +77,8 @@ export default function SearchTab({ branch, onJump }) {
           <TextField size="small" label="סכום עד" value={form.max} onChange={set('max')} inputProps={{ inputMode: 'decimal' }} sx={{ width: { md: 120 } }} />
           <BusyButton type="submit" variant="contained" loading={loading} loadingText="מחפש…">🔎 חפש</BusyButton>
         </Stack>
-        {branch === GENERAL && <Typography variant="caption" color="text.secondary">בחיפוש אין סינון "כללי" — מוצגים כל הסניפים.</Typography>}
-        {branch && branch !== GENERAL && <Typography variant="caption" color="text.secondary">מסונן לפי סניף — חיובי בנק אינם שייכים לסניף ולא יוצגו.</Typography>}
+        {branch && !realBranch && <Typography variant="caption" color="text.secondary">בחיפוש אפשר לסנן רק לפי סניף מסוים — מוצגים כל הסניפים.</Typography>}
+        {realBranch && <Typography variant="caption" color="text.secondary">מסונן לפי סניף — חיובי בנק אינם שייכים לסניף ולא יוצגו.</Typography>}
       </Paper>
 
       {error ? (

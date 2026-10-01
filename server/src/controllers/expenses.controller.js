@@ -41,7 +41,11 @@ function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-va
 }
 
 // ── reads ──────────────────────────────────────────────────────────────────
-const pairQueue = async (req, res) => res.json(await pairs.pairQueue());
+async function pairQueue(req, res) {
+  const q = await pairs.pairQueue();
+  await orders.attachOrderInfo([...q.pairs.map(p => p.doc), ...q.unmatchedDocs]);
+  res.json(q);
+}
 
 async function pairAlternatives(req, res) {
   const { document_id: docId, transaction_id: txId } = req.query;
@@ -77,6 +81,7 @@ async function closed(req, res) {
       };
     });
   }
+  await orders.attachOrderInfo(docs);
   res.json({ documents: docs });
 }
 

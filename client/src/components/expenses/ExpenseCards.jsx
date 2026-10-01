@@ -1,12 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { toast } from 'react-toastify';
 import {
-  Box, Stack, Typography, Paper, Chip, Menu, MenuItem, Tooltip, TextField, Link, Divider, CircularProgress,
+  Box, Stack, Typography, Paper, Chip, Menu, MenuItem, TextField, Link, Divider, CircularProgress,
 } from '@mui/material';
 import api, { apiError, openApiFile } from '../../api/client';
 import {
   DOC_TYPE_LABEL, DOC_TYPES, formatILS, formatDay, docAmountText, hasFile, txTitle, refLabel, tintSx, scoreColor,
-  branchLabel,
+  branchLabel, GENERAL,
 } from './expenseFormat';
 
 /**
@@ -20,16 +20,19 @@ export function Tint({ verdict, children, sx }) {
 }
 
 export function FileLink({ docId, label = '📎 המסמך' }) {
+  const open = () => openApiFile(`/api/expenses/documents/${docId}/file`).catch((e) => {
+    // fetch rejects with TypeError when the server never answered; otherwise the server's own words.
+    toast.error(e instanceof TypeError ? apiError(e, 'פתיחת הקובץ נכשלה') : (e.message || 'פתיחת הקובץ נכשלה'));
+  });
   return (
-    <Link component="button" type="button" variant="body2" underline="hover"
-      onClick={() => openApiFile(`/api/expenses/documents/${docId}/file`).catch(e => toast.error(e.message))}>
+    <Link component="button" type="button" variant="body2" underline="hover" onClick={open}>
       {label}
     </Link>
   );
 }
 
-/** Inline correction form for a machine-read document (`needs_review`). */
-export function ReviewForm({ doc, value, onChange }) {
+/** Inline correction form for a machine-read document (`needs_review`), with the branch chosen in the same step. */
+export function ReviewForm({ doc, value, onChange, branches = [] }) {
   const foreign = (doc.currency || 'ILS') !== 'ILS';
   const set = (k) => (e) => onChange({ ...value, [k]: e.target.value });
   return (
@@ -47,21 +50,28 @@ export function ReviewForm({ doc, value, onChange }) {
         <TextField size="small" select label="סוג" value={value.doc_type} onChange={set('doc_type')}>
           {DOC_TYPES.map(t => <MenuItem key={t} value={t}>{DOC_TYPE_LABEL[t]}</MenuItem>)}
         </TextField>
+        <TextField size="small" select label="סניף" value={value.branch} onChange={set('branch')} sx={{ gridColumn: { sm: '1 / -1' } }}>
+          <MenuItem value="">לא נבחר</MenuItem>
+          <MenuItem value={GENERAL}>כללי (לכל הגן)</MenuItem>
+          {branches.map(b => <MenuItem key={b._id} value={b._id}>{b.name}</MenuItem>)}
+        </TextField>
       </Box>
     </Box>
   );
 }
 
-/** Branch chip — pick a branch or "כללי" right on the row. */
+/**
+ * Branch chip — pick a branch or "כללי" right on the row. Works on a document
+ * still awaiting review too: tagging does not confirm the reading (server rule).
+ */
 export function BranchChip({ doc, branches, canWrite, onChanged }) {
   const [anchor, setAnchor] = useState(null);
   const [busy, setBusy] = useState(false);
-  const blocked = doc.needs_review;
   const save = async (value) => {
     setAnchor(null);
     setBusy(true);
     try {
-      const fields = value === 'general' ? { branch_id: null, is_general: true } : { branch_id: value, is_general: false };
+      const fields = value === GENERAL ? { branch_id: null, is_general: true } : { branch_id: value, is_general: false };
       await api.patch(`/expenses/documents/${doc._id}`, fields);
       toast.success('הסניף נשמר');
       onChanged?.();
@@ -73,15 +83,11 @@ export function BranchChip({ doc, branches, canWrite, onChanged }) {
   if (!canWrite) return <Chip size="small" variant="outlined" label={label} />;
   return (
     <>
-      <Tooltip title={blocked ? 'קודם אשרו את הקריאה של המסמך' : ''}>
-        <span>
-          <Chip size="small" variant="outlined" label={label} disabled={blocked || busy}
-            color={!doc.branch_id && !doc.is_general ? 'warning' : 'default'}
-            onClick={(e) => setAnchor(e.currentTarget)} />
-        </span>
-      </Tooltip>
+      <Chip size="small" variant="outlined" label={busy ? 'שומר…' : label}
+        color={!doc.branch_id && !doc.is_general ? 'warning' : 'default'}
+        onClick={busy ? undefined : (e) => setAnchor(e.currentTarget)} />
       <Menu anchorEl={anchor} open={!!anchor} onClose={() => setAnchor(null)}>
-        <MenuItem selected={!!doc.is_general} onClick={() => save('general')}>כללי (לכל הגן)</MenuItem>
+        <MenuItem selected={!!doc.is_general} onClick={() => save(GENERAL)}>כללי (לכל הגן)</MenuItem>
         <Divider />
         {branches.map(b => (
           <MenuItem key={b._id} selected={String(doc.branch_id) === String(b._id)} onClick={() => save(b._id)}>{b.name}</MenuItem>
@@ -94,32 +100,31 @@ export function BranchChip({ doc, branches, canWrite, onChanged }) {
 const orderLine = (c) => `הזמנה ${c.order.order_number} · ${formatDay(c.order.received_at || c.order.created_at)} · ${formatILS(c.compare_amount)}`;
 const diffText = (diff) => (Math.abs(diff) > 2 ? `פער ${formatILS(Math.abs(diff))}` : 'סכום תואם');
 
-/** Order chip — link the document to the order it bills; warns when the amounts differ by more than 2 ₪. */
+/**
+ * Order chip — link the document to the order it bills. The linked order's
+ * number and mismatch come on the row (`doc.order`, from the server); the
+ * candidate list loads only when the menu opens.
+ */
 export function OrderChip({ doc, canWrite, onChanged }) {
   const [anchor, setAnchor] = useState(null);
   const [cands, setCands] = useState(null); // null = not loaded
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const seq = useRef(0);
+  const noSupplier = !doc.supplier_id;
 
-  const load = async (quiet) => {
+  const load = async () => {
     const my = ++seq.current;
     setLoading(true);
     try {
       const { data } = await api.get(`/expenses/documents/${doc._id}/orders`);
       if (my === seq.current) setCands(data.candidates || []);
     } catch (err) {
-      if (my === seq.current && !quiet) toast.error(apiError(err, 'לא הצלחנו לטעון הזמנות'));
+      if (my === seq.current) { setCands(null); toast.error(apiError(err, 'לא הצלחנו לטעון הזמנות')); }
     } finally { if (my === seq.current) setLoading(false); }
   };
 
-  // A linked order needs its number and the amount check, so it loads once.
-  useEffect(() => { if (doc.order_id) load(true); }, [doc._id, doc.order_id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const linked = doc.order_id && cands ? cands.find(c => String(c.order._id) === String(doc.order_id)) : null;
-  const mismatch = linked && Math.abs(linked.diff) > 2;
-
-  const open = (e) => { setAnchor(e.currentTarget); if (cands == null) load(false); };
+  const open = (e) => { setAnchor(e.currentTarget); if (cands == null && !noSupplier) load(); };
 
   const link = async (orderId) => {
     setAnchor(null); setBusy(true);
@@ -137,29 +142,21 @@ export function OrderChip({ doc, canWrite, onChanged }) {
     finally { setBusy(false); }
   };
 
-  const label = doc.order_id
-    ? (linked ? `הזמנה ${linked.order.order_number}` : 'הזמנה מקושרת')
-    : 'בלי הזמנה';
-  const noSupplier = !doc.supplier_id;
+  const info = doc.order || null;
+  const label = doc.order_id ? (info ? `הזמנה ${info.order_number}` : 'הזמנה מקושרת') : 'בלי הזמנה';
+  const warning = doc.order_id && info && info.warning;
+  if (!canWrite && !doc.order_id) return null;
 
   return (
     <>
-      <Tooltip title={noSupplier && !doc.order_id ? 'אין ספק מזוהה — אי אפשר להציע הזמנות' : ''}>
-        <span>
-          <Chip size="small" variant="outlined" label={label}
-            color={mismatch ? 'warning' : 'default'}
-            disabled={busy || (!canWrite && !doc.order_id) || (noSupplier && !doc.order_id)}
-            onClick={canWrite ? open : undefined} />
-        </span>
-      </Tooltip>
-      {mismatch && (
-        <Typography variant="caption" sx={{ color: 'warning.dark' }}>
-          ⚠️ {linked.diff > 0 ? 'החשבונית גבוהה' : 'החשבונית נמוכה'} ב-{formatILS(Math.abs(linked.diff))} ממה שהתקבל
-        </Typography>
-      )}
+      <Chip size="small" variant="outlined" label={busy ? 'שומר…' : label}
+        color={warning ? 'warning' : 'default'}
+        onClick={canWrite && !busy ? open : undefined} />
+      {warning && <Typography variant="caption" sx={{ color: 'warning.dark' }}>⚠️ {warning}</Typography>}
       <Menu anchorEl={anchor} open={!!anchor} onClose={() => setAnchor(null)}>
+        {noSupplier && <MenuItem disabled sx={{ whiteSpace: 'normal' }}>אין ספק מזוהה למסמך — אי אפשר להציע הזמנות</MenuItem>}
         {loading && <MenuItem disabled><CircularProgress size={16} sx={{ mr: 1 }} /> טוען…</MenuItem>}
-        {!loading && cands && !cands.length && <MenuItem disabled>אין הזמנה מתאימה של הספק הזה</MenuItem>}
+        {!noSupplier && !loading && cands && !cands.length && <MenuItem disabled>אין הזמנה מתאימה של הספק הזה</MenuItem>}
         {!loading && (cands || []).map(c => (
           <MenuItem key={c.order._id} selected={String(doc.order_id) === String(c.order._id)} onClick={() => link(c.order._id)}>
             <Stack>

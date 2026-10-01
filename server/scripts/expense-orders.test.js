@@ -133,6 +133,13 @@ async function suite() {
     eq(String((await o.linkOrder(keep._id, o2._id, null)).document.branch_id), String(br2._id), 'סניף קיים לא נדרס');
     eq((await o.linkOrder(gen._id, o3._id, null)).document.branch_id, null, 'כללי — בלי סניף');
 
+    // order info for the rows (one query, no per-row request)
+    const rows = [{ ...(await ExpenseDocument.findById(keep._id).lean()), amount_total: 150 }, { order_id: null }];
+    await o.attachOrderInfo(rows);
+    eq(rows[0].order && rows[0].order.order_number, o2.order_number, 'attachOrderInfo — מספר הזמנה');
+    ok(rows[0].order && typeof rows[0].order.diff === 'number' && 'warning' in rows[0].order, 'attachOrderInfo — פער ואזהרה');
+    ok(!('order' in rows[1]), 'מסמך בלי הזמנה לא נגוע');
+
     const un = await o.unlinkOrder(keep._id);
     eq(un.order_id, null, 'unlink מנקה');
     await refuses(() => o.unlinkOrder(keep._id), 409, 'לא מקושר');

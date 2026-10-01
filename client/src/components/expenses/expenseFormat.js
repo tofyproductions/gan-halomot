@@ -32,11 +32,14 @@ export const LANE_TAB = {
 
 /** The branch filter value for "כללי" (no single branch). */
 export const GENERAL = 'general';
+/** The branch filter value for "בלי סניף" (no branch and not general — still to tag). */
+export const NO_BRANCH = 'none';
 
 /** Does a document pass the top branch filter? '' = all. */
 export function matchesBranch(doc, filter) {
   if (!filter) return true;
   if (filter === GENERAL) return !!doc.is_general;
+  if (filter === NO_BRANCH) return !doc.branch_id && !doc.is_general;
   return String(doc.branch_id || '') === String(filter);
 }
 
@@ -92,8 +95,12 @@ export function reviewInit(doc) {
     doc_date: doc.doc_date || '',
     amount_total: foreignUnknown ? '' : String(doc.amount_ils ?? doc.amount_total ?? ''),
     doc_type: doc.doc_type || 'tax_invoice',
+    branch: branchValue(doc),
   };
 }
+
+/** The branch select value of a document: '' (none), GENERAL, or a branch id. */
+export const branchValue = (doc) => (doc.is_general ? GENERAL : doc.branch_id ? String(doc.branch_id) : '');
 
 /** Only the fields the person changed; null when the amount typed is not a positive number. */
 export function reviewPatchOf(doc, form) {
@@ -107,6 +114,10 @@ export function reviewPatchOf(doc, form) {
     const n = Number(String(form.amount_total).replace(/[^\d.]/g, ''));
     if (!(n > 0)) return null;
     patch.amount_total = n;
+  }
+  if ((form.branch ?? '') !== init.branch) {
+    if (form.branch === GENERAL) { patch.is_general = true; patch.branch_id = null; }
+    else { patch.is_general = false; patch.branch_id = form.branch || null; }
   }
   return patch;
 }

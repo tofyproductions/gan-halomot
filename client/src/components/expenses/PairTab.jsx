@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'react-toastify';
 import {
-  Box, Stack, Typography, Paper, Button, Alert, Collapse, Tooltip, useMediaQuery,
+  Box, Stack, Typography, Paper, Button, Alert, Collapse, useMediaQuery,
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import api, { apiError } from '../../api/client';
@@ -120,7 +120,7 @@ function PairRow({ pair, branches, canWrite, onDone, onCounts }) {
       <PairGrid
         left={(
           <DocCard doc={doc} fields={pair.fields} branches={branches} canWrite={canWrite} onChanged={onDone}>
-            {doc.needs_review && canWrite && !rejected && <ReviewForm doc={doc} value={review} onChange={setReview} />}
+            {doc.needs_review && canWrite && <ReviewForm doc={doc} value={review} onChange={setReview} branches={branches} />}
           </DocCard>
         )}
         middle={<Reasons score={pair.score} reasons={pair.reasons} vertical={phone} />}
@@ -184,7 +184,7 @@ function LonelyDoc({ doc, branches, canWrite, onDone }) {
   return (
     <DocCard doc={doc} branches={branches} canWrite={canWrite} onChanged={onDone}>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>{doc.why}</Typography>
-      {doc.needs_review && canWrite && <ReviewForm doc={doc} value={review} onChange={setReview} />}
+      {doc.needs_review && canWrite && <ReviewForm doc={doc} value={review} onChange={setReview} branches={branches} />}
       {canWrite && (
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
           {doc.needs_review && <Button size="small" variant="contained" disabled={busy} onClick={confirmReading}>✓ אשר קריאה</Button>}
@@ -198,11 +198,65 @@ function LonelyDoc({ doc, branches, canWrite, onDone }) {
   );
 }
 
+/**
+ * One suggested document for a lonely charge. A document still awaiting
+ * review opens its reading inline: "אשר ושייך" sends the corrections with the
+ * accept (the server confirms and links in one step).
+ */
+function ChargeOption({ alt, tx, branches, canWrite, onDone }) {
+  const { doc } = alt;
+  const [reviewing, setReviewing] = useState(false);
+  const [review, setReview] = useState(() => reviewInit(doc));
+  const [busy, setBusy] = useState(false);
+
+  const accept = async () => {
+    const patch = doc.needs_review ? reviewPatchOf(doc, review) : {};
+    if (patch === null) { toast.error(BAD_AMOUNT); return; }
+    setBusy(true);
+    try {
+      await api.post('/expenses/pairs/accept', {
+        document_id: doc._id, transaction_id: tx._id, ...(doc.needs_review ? { review: patch } : {}),
+      });
+      toast.success('שויך');
+      onDone();
+    } catch (err) { toast.error(apiError(err, 'השיוך נכשל')); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Box sx={{ p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+      <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="body2">{doc.vendor_name || '—'}{doc.doc_number ? ` · ${doc.doc_number}` : ''} · {DOC_TYPE_LABEL[doc.doc_type] || ''}</Typography>
+          <Typography variant="caption" color="text.secondary">
+            {formatILS(doc.remaining)}{alt.reasons.length ? ` · ${alt.reasons.join(' · ')}` : ''}
+          </Typography>
+          {doc.needs_review && <Typography variant="caption" sx={{ display: 'block', color: 'warning.dark' }}>הקריאה של המסמך עוד לא אושרה — בדקו אותה לפני השיוך</Typography>}
+        </Box>
+        {canWrite && !doc.needs_review && (
+          <BusyButton size="small" variant="contained" loading={busy} onClick={accept}>שייך</BusyButton>
+        )}
+        {canWrite && doc.needs_review && !reviewing && (
+          <Button size="small" variant="contained" onClick={() => setReviewing(true)}>בדוק ושייך</Button>
+        )}
+      </Stack>
+      {reviewing && (
+        <>
+          <ReviewForm doc={doc} value={review} onChange={setReview} branches={branches} />
+          <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+            <BusyButton size="small" variant="contained" color="success" loading={busy} onClick={accept}>✓ אשר ושייך</BusyButton>
+            <Button size="small" disabled={busy} onClick={() => setReviewing(false)}>ביטול</Button>
+          </Stack>
+        </>
+      )}
+    </Box>
+  );
+}
+
 /** A charge with no document: "which invoice is this?" */
-function LonelyCharge({ tx, canWrite, onDone }) {
+function LonelyCharge({ tx, branches, canWrite, onDone }) {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState({ loading: false, error: '', list: [] });
-  const [busy, setBusy] = useState(false);
   const seq = useRef(0);
 
   const load = async () => {
@@ -217,13 +271,6 @@ function LonelyCharge({ tx, canWrite, onDone }) {
   };
   const toggle = () => { if (!open) load(); setOpen(o => !o); };
 
-  const accept = async (doc) => {
-    setBusy(true);
-    try { await api.post('/expenses/pairs/accept', { document_id: doc._id, transaction_id: tx._id }); toast.success('שויך'); onDone(); }
-    catch (err) { toast.error(apiError(err, 'השיוך נכשל')); }
-    finally { setBusy(false); }
-  };
-
   return (
     <TxCard tx={tx}>
       <Button size="small" variant="outlined" sx={{ mt: 1 }} onClick={toggle}>איזו חשבונית זו?</Button>
@@ -235,22 +282,7 @@ function LonelyCharge({ tx, canWrite, onDone }) {
             : (
               <Stack spacing={0.75}>
                 {state.list.map(a => (
-                  <Stack key={a.doc._id} direction="row" spacing={1} alignItems="center" justifyContent="space-between"
-                    sx={{ p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                    <Box sx={{ minWidth: 0 }}>
-                      <Typography variant="body2">{a.doc.vendor_name || '—'}{a.doc.doc_number ? ` · ${a.doc.doc_number}` : ''} · {DOC_TYPE_LABEL[a.doc.doc_type] || ''}</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {formatILS(a.doc.remaining)}{a.reasons.length ? ` · ${a.reasons.join(' · ')}` : ''}
-                      </Typography>
-                    </Box>
-                    {canWrite && (
-                      <Tooltip title={a.doc.needs_review ? 'קודם אשרו את קריאת החשבונית למעלה' : ''}>
-                        <span>
-                          <Button size="small" variant="contained" disabled={busy || a.doc.needs_review} onClick={() => accept(a.doc)}>שייך</Button>
-                        </span>
-                      </Tooltip>
-                    )}
-                  </Stack>
+                  <ChargeOption key={a.doc._id} alt={a} tx={tx} branches={branches} canWrite={canWrite} onDone={onDone} />
                 ))}
               </Stack>
             )}
@@ -331,7 +363,7 @@ export default function PairTab({ branch, branches, canWrite, onChanged }) {
       <Section title="💸 חיובים בלי מסמך — איזו חשבונית זו?" count={charges.length}>
         {!charges.length ? <Typography variant="body2" color="text.secondary">כל החיובים מוסברים ✓</Typography> : (
           <Box sx={cardsGrid}>
-            {charges.map(t => <LonelyCharge key={t._id} tx={t} canWrite={canWrite} onDone={done} />)}
+            {charges.map(t => <LonelyCharge key={t._id} tx={t} branches={branches} canWrite={canWrite} onDone={done} />)}
           </Box>
         )}
       </Section>

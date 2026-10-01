@@ -21,6 +21,8 @@ const EDITABLE = ['supplier_id', 'vendor_name', 'supplier_tax_id', 'doc_type', '
   'amount_total', 'currency', 'amount_original', 'branch_id', 'is_general', 'order_id'];
 const FILE_MIMES = ['application/pdf', 'image/jpeg', 'image/png', 'image/heic', 'image/webp'];
 const ID_FIELDS = ['supplier_id', 'branch_id', 'order_id'];
+// Fields that tag a document without correcting what was read from it.
+const TAG_FIELDS = ['branch_id', 'is_general', 'order_id'];
 
 const fail = (status, message, extra) => Object.assign(new Error(message), { status }, extra);
 const str = (v) => String(v ?? '').trim();
@@ -167,9 +169,16 @@ async function updateDocument(id, fields = {}, by = null) {
   }, id);
   if (dup) throw duplicateError(dup);
   applyFx(patch, doc);
-  patch.needs_review = false;
-  patch.confirmed_by = by || null;
-  patch.confirmed_at = new Date();
+  // Tagging (branch / general / order) is not a check of the machine reading:
+  // the owner sets the branch on mail-sorter documents before reviewing them.
+  // Any other field is a correction and confirms the document.
+  const keys = Object.keys(patch).filter(k => k !== 'fx_confirmed' || patch.fx_confirmed !== doc.fx_confirmed);
+  const taggingOnly = keys.length > 0 && keys.every(k => TAG_FIELDS.includes(k));
+  if (!taggingOnly) {
+    patch.needs_review = false;
+    patch.confirmed_by = by || null;
+    patch.confirmed_at = new Date();
+  }
   return ExpenseDocument.findByIdAndUpdate(id, { $set: patch }, { new: true, runValidators: true }).lean();
 }
 

@@ -125,6 +125,17 @@ function pickReview(review) {
     if (patch[k] !== undefined) patch[k] = String(patch[k]).trim();
   }
   if (patch.doc_date && !/^\d{4}-\d{2}-\d{2}$/.test(patch.doc_date)) throw fail(400, 'התאריך לא תקין');
+  // Branch tagging may ride along with the review (null / '' clears it).
+  if (review && review.branch_id !== undefined) {
+    const b = review.branch_id;
+    if (b === null || b === '') patch.branch_id = null;
+    else if (mongoose.isValidObjectId(b)) patch.branch_id = String(b);
+    else throw fail(400, 'מזהה סניף לא תקין');
+  }
+  if (review && review.is_general !== undefined && review.is_general !== null) {
+    patch.is_general = !!review.is_general;
+    if (patch.is_general) patch.branch_id = null;
+  }
   return patch;
 }
 

@@ -111,6 +111,14 @@ async function suite() {
     await refuses(() => intake.updateDocument(other._id, { amount_total: 1 }), 409, 'מסמך מבוטל');
     // a mail-sorter row becomes confirmed by an edit
     const ms = await ExpenseDocument.create({ source: 'mail_sorter', mail_sorter_id: 9001, vendor_name: 'x', needs_review: true });
+    // tagging only (branch / general / order) keeps the reading unconfirmed
+    const branchId = new mongoose.Types.ObjectId();
+    const tagged = await intake.updateDocument(ms._id, { branch_id: String(branchId) }, user);
+    eq(tagged.needs_review, true, 'סניף בלבד — needs_review נשאר true');
+    eq(String(tagged.branch_id), String(branchId), 'הסניף נשמר');
+    ok(!tagged.confirmed_by, 'סניף בלבד — confirmed_by לא נקבע');
+    const gen = await intake.updateDocument(ms._id, { is_general: true, branch_id: null }, user);
+    eq(gen.needs_review, true, 'כללי בלבד — needs_review נשאר true');
     const mu = await intake.updateDocument(ms._id, { amount_total: 5 }, user);
     eq(mu.needs_review, false, 'עריכה מאשרת מסמך ממערכת המיון');
     eq(String(mu.confirmed_by), String(user), 'confirmed_by אחרי עריכה');

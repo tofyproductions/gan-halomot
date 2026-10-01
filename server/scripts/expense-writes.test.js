@@ -56,6 +56,15 @@ async function suite(label) {
     eq((await paysOf(d2._id)).length, 0, 'ולא נוצר תשלום');
     await refuses(() => w.acceptPair({ document_id: 'zzz', transaction_id: t._id }), 400, 'מזהה לא תקין');
     await refuses(() => w.acceptPair({ document_id: new mongoose.Types.ObjectId(), transaction_id: t._id }), 404, 'מסמך לא קיים');
+    // branch chosen in the same step as the review
+    const bd = await doc({ needs_review: true, amount_total: 70 });
+    const bt = await tx({ amount: -70 });
+    const branchId = new mongoose.Types.ObjectId();
+    await w.acceptPair({ document_id: bd._id, transaction_id: bt._id, review: { branch_id: String(branchId) } });
+    const bs = await stateOf(bd._id);
+    eq(String(bs.branch_id), String(branchId), 'סניף מתוך review נשמר באישור');
+    eq(bs.needs_review, false, 'ואישור ההתאמה מאשר את המסמך');
+    await refuses(() => w.acceptPair({ document_id: d2._id, transaction_id: bt._id, review: { branch_id: 'zzz' } }), 400, 'סניף לא תקין ב-review');
     const inc = await tx({ amount: 50 });
     await refuses(() => w.acceptPair({ document_id: d2._id, transaction_id: inc._id }), 400, 'תקבול נכנס');
     const t3 = await tx({ amount: -100 });

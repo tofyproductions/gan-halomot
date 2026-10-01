@@ -112,4 +112,23 @@ async function unlinkOrder(docId) {
   });
 }
 
-module.exports = { LINKABLE_STATUSES, compareAmount, orderMismatch, orderCandidates, linkOrder, unlinkOrder };
+/**
+ * Mutates each document that has an order_id: adds
+ * `order: { _id, order_number, compare_amount, diff, warning }` (null when the
+ * order no longer exists). One query for the whole list. Pure read.
+ */
+async function attachOrderInfo(docs) {
+  const ids = [...new Set(docs.filter(d => d && d.order_id).map(d => String(d.order_id)))];
+  const orders = ids.length ? await Order.find({ _id: { $in: ids } }, 'order_number items total_amount').lean() : [];
+  const map = new Map(orders.map(o => [String(o._id), o]));
+  for (const d of docs) {
+    if (!d || !d.order_id) continue;
+    const o = map.get(String(d.order_id));
+    d.order = o
+      ? { _id: o._id, order_number: o.order_number, compare_amount: compareAmount(o), ...orderMismatch(d, o) }
+      : null;
+  }
+  return docs;
+}
+
+module.exports = { LINKABLE_STATUSES, compareAmount, orderMismatch, orderCandidates, linkOrder, unlinkOrder, attachOrderInfo };

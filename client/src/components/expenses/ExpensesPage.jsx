@@ -7,7 +7,7 @@ import api, { apiError } from '../../api/client';
 import PageHeader from '../ui/PageHeader';
 import { useAuth } from '../../hooks/useAuth';
 import { hasTabAccess } from '../../config/tabs';
-import { GENERAL } from './expenseFormat';
+import { GENERAL, NO_BRANCH } from './expenseFormat';
 import PairTab from './PairTab';
 import ReceiptsTab from './ReceiptsTab';
 import ClosedTab from './ClosedTab';
@@ -96,6 +96,7 @@ export default function ExpensesPage() {
           <TextField select size="small" label="סניף" value={branch} onChange={e => setBranch(e.target.value)} sx={{ minWidth: 180 }}>
             <MenuItem value="">כל הסניפים</MenuItem>
             <MenuItem value={GENERAL}>כללי</MenuItem>
+            <MenuItem value={NO_BRANCH}>בלי סניף (לתיוג)</MenuItem>
             {branches.map(b => <MenuItem key={b._id} value={b._id}>{b.name}</MenuItem>)}
           </TextField>
         )}

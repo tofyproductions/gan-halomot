@@ -294,6 +294,14 @@ async function main() {
   eq((await request({ path: `${A}/documents/${d4}/orders`, token: viewer })).status, 200, 'מועמדי הזמנות');
   eq((await request({ method: 'DELETE', path: `${A}/documents/${d4}/order`, token: accountant })).status, 409, 'ביטול קישור בלי קישור — 409');
   eq((await request({ method: 'POST', path: `${A}/documents/${d4}/order`, token: accountant, body: { order_id: 'bad' } })).status, 400, 'קישור הזמנה לא תקין — 400');
+  // the owner tags a mail-sorter document with its branch before reviewing it
+  const ms = await ExpenseDocument.create({ source: 'mail_sorter', mail_sorter_id: 77001, vendor_name: 'מיון', doc_date: '2026-09-02', amount_total: 33, needs_review: true });
+  const tag = await request({ method: 'PATCH', path: `${A}/documents/${ms._id}`, token: accountant, body: { fields: { branch_id: String(branch._id) } } });
+  eq(tag.status, 200, 'סניף על מסמך לבדיקה', tag.text);
+  eq(tag.body?.document?.needs_review, true, 'סניף בלבד — המסמך עדיין לבדיקה');
+  eq(String(tag.body?.document?.branch_id), String(branch._id), 'הסניף נשמר');
+  const qMs = (await request({ path: `${A}/pairs`, token: viewer })).body;
+  ok([...qMs.pairs.map(p => p.doc), ...qMs.unmatchedDocs].some(d => String(d._id) === String(ms._id)), 'מסמך לבדיקה עם סניף עדיין במסך ההתאמות');
   eq((await request({ method: 'POST', path: `${A}/documents/${d4}/void`, token: accountant })).status, 200, 'ביטול מסמך');
   eq((await request({ method: 'PATCH', path: `${A}/documents/${d4}`, token: accountant, body: { fields: { amount_total: 1 } } })).status, 409, 'עריכת מבוטל — 409');
   eq((await request({ method: 'POST', path: `${A}/documents/${d4}/supplier`, token: accountant })).status, 409, 'ספק ממסמך מבוטל — 409');
