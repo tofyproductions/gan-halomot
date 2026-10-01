@@ -172,7 +172,8 @@
     "test:finance-api": "node scripts/finance-api-e2e.test.js",
     "test:bank-watch": "node scripts/bank-watch.test.js",
     "test:expense-models": "node scripts/expense-models.test.js",
-    "test:expense-core": "node scripts/expense-core.test.js"
+    "test:expense-core": "node scripts/expense-core.test.js",
+    "test:expense-pairs": "node scripts/expense-pairs.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
