@@ -625,9 +625,12 @@ connectDB().then(() => {
     const expenseIntake = require('./services/expenseIntake.service');
     const mailSorterClient = require('./services/mailSorter.service');
     const runExpenseMailPull = () => withJobLock('expense-mail-pull', 15 * 60 * 1000, () => expenseIntake.pullFromMailSorter())
-      .then(({ ran, result: n }) => { if (ran && n && n.created) console.log(`[expense-pull] created ${n.created}, skipped ${n.skipped}, errors ${n.errors}`); })
+      .then(({ ran, result: n }) => { if (ran && n && (n.created || n.errors)) console.log(`[expense-pull] created ${n.created}, skipped ${n.skipped}, too old ${n.skipped_old}, errors ${n.errors}`); })
       .catch(e => console.error('[expense-pull] failed:', e.message));
     if (!platformMode && mailSorterClient.isConfigured()) {
+      // First run shortly after boot — deploys restart the server more often
+      // than every 6 hours, so an interval alone would never fire.
+      setTimeout(runExpenseMailPull, 8 * 60 * 1000);
       setInterval(runExpenseMailPull, 6 * 60 * 60 * 1000);
     }
   });

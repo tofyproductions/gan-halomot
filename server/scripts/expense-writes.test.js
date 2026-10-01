@@ -247,6 +247,52 @@ async function suite(label) {
       ok(logged.length === 1 && String(logged[0][1].document_id) === String(u._id) && String(logged[0][1].transaction_id) === String(ut._id), 'נרשם ללוג עם מזהים');
     } else eq(!!err.rollbackFailed, false, 'בטרנזקציה אין גלגול ידני');
   }
+
+  console.log('\nacceptPair — רק חיוב מהמאגר הפתוח');
+  {
+    const d = await doc({ amount_total: 100 });
+    const cases = [
+      [{ is_internal_transfer: true }, 'העברה פנימית'],
+      [{ status: 'pending' }, 'חיוב ממתין'],
+      [{ matched_card_account_id: new mongoose.Types.ObjectId() }, 'שורת חיוב חודשי של כרטיס'],
+      [{ description: 'משכורת ספטמבר' }, 'חיוב פטור לפי כלל'],
+      [{ date: '2026-08-20' }, 'חיוב לפני תאריך ההתחלה'],
+    ];
+    for (const [o, l] of cases) {
+      const t = await tx({ amount: -100, ...o });
+      await refuses(() => w.acceptPair({ document_id: d._id, transaction_id: t._id }), 409, `${l} — 409`);
+    }
+    eq((await paysOf(d._id)).length, 0, 'ולא נוצר אף תשלום');
+    const ex = await tx({ amount: -100, description: 'משכורת אוקטובר' });
+    try { await w.acceptPair({ document_id: d._id, transaction_id: ex._id }); } catch (e) { ok(/פטור/.test(e.message), 'הודעה בעברית שמסבירה שהחיוב פטור'); }
+
+    // explicit amount is capped at the document's remaining + 2 ₪
+    const small = await doc({ amount_total: 100 });
+    const big = await tx({ amount: -500 });
+    await refuses(() => w.acceptPair({ document_id: small._id, transaction_id: big._id, amount: 103 }), 409, 'סכום מפורש מעל יתרת המסמך + 2 ₪');
+    const r = await w.acceptPair({ document_id: small._id, transaction_id: big._id, amount: 102 });
+    eq(r.payment.amount, 102, 'עד 2 ₪ מעל היתרה — מתקבל (עיגול)');
+
+    // a credit note is never paired, even when asked directly
+    const cr = await doc({ doc_type: 'credit_note', amount_total: 100 });
+    const ct = await tx({ amount: -100 });
+    await refuses(() => w.acceptPair({ document_id: cr._id, transaction_id: ct._id }), 409, 'זיכוי — 409');
+  }
+
+  console.log('\nvoidDocument משחרר קבלות');
+  {
+    const inv = await doc({ amount_total: 80 });
+    const r1 = await doc({ doc_type: 'receipt', amount_total: 80, linked_invoice_id: inv._id, receipt_disposition: 'has_invoice', receipt_disposition_at: new Date() });
+    const other = await doc({ amount_total: 80 });
+    const r2 = await doc({ doc_type: 'receipt', amount_total: 80, linked_invoice_id: other._id, receipt_disposition: 'has_invoice' });
+    const res = await w.voidDocument(inv._id);
+    eq(res.released_receipts, 1, 'קבלה אחת שוחררה');
+    const after = await ExpenseDocument.findById(r1._id).lean();
+    eq(after.linked_invoice_id, null, 'linked_invoice_id נוקה');
+    eq(after.receipt_disposition, null, 'והקבלה חזרה להמתין');
+    eq((await stateOf(r1._id)).lane, 'receipt', 'מסלול קבלות');
+    eq(String((await ExpenseDocument.findById(r2._id).lean()).linked_invoice_id), String(other._id), 'קבלה של חשבונית אחרת לא נגעה');
+  }
 }
 
 (async () => {

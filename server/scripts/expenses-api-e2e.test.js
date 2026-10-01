@@ -156,10 +156,11 @@ async function main() {
     await ExpenseDocument.countDocuments(), await ExpensePayment.countDocuments(), await NoInvoiceRule.countDocuments(),
     await mongo.ExpenseUnpaidMark.countDocuments(), await mongo.ExpenseDocDecision.countDocuments(),
     await mongo.ExpensePairRejection.countDocuments(), await mongo.Supplier.countDocuments(),
+    (await mongo.Setting.findOne({ key: 'expenses_start_date' }).lean())?.value ?? null,
   ]);
 
   head('הרשאות קריאה');
-  for (const p of ['/pairs', '/receipts', '/closed', '/counts', '/rules', '/intake/status', '/suppliers-missing-tax-id', '/search']) {
+  for (const p of ['/pairs', '/receipts', '/closed', '/counts', '/rules', '/intake/status', '/suppliers-missing-tax-id', '/search', '/credits', '/settings/start-date']) {
     eq((await request({ path: A + p, token: teacher })).status, 403, `גננת לא קוראת ${p}`);
     eq((await request({ path: A + p })).status, 401, `בלי התחברות ${p} — 401`);
     eq((await request({ path: A + p, token: viewer })).status, 200, `צופה קורא ${p}`);
@@ -233,7 +234,7 @@ async function main() {
 
   head('ספירות מול נתיבים');
   const d2 = await request({ method: 'POST', path: `${A}/documents`, token: admin, body: { fields: { vendor_name: 'ספק ב', doc_type: 'tax_invoice', doc_number: 'E-3', doc_date: '2026-09-01', amount_total: 500 } } });
-  const d3 = await request({ method: 'POST', path: `${A}/documents`, token: admin, body: { fields: { vendor_name: 'ספק ג', doc_type: 'receipt', doc_number: 'R-1', doc_date: '2026-08-01', amount_total: 40 } } });
+  const d3 = await request({ method: 'POST', path: `${A}/documents`, token: admin, body: { fields: { vendor_name: 'ספק ג', doc_type: 'receipt', doc_number: 'R-1', doc_date: '2026-09-02', amount_total: 40 } } });
   eq(d2.status, 201, 'מסמך שני'); eq(d3.status, 201, 'קבלה');
   eq((await request({ method: 'POST', path: `${A}/documents/${d2.body.document._id}/unpaid`, token: accountant })).status, 200, 'סימון "לא שולם"');
   const cnt = (await request({ path: `${A}/counts`, token: viewer })).body;
@@ -318,6 +319,32 @@ async function main() {
   eq((await request({ method: 'POST', path: `${A}/intake/pull`, token: accountant })).status, 409, 'משיכה בלי mail-sorter מוגדר — 409');
   eq((await request({ path: `${A}/intake/status`, token: viewer })).body?.mail_sorter_configured, false, 'סטטוס קליטה');
 
+  head('תאריך התחלה, זיכויים, נעילת משיכה');
+  const sd = await request({ path: `${A}/settings/start-date`, token: viewer });
+  eq(sd.body?.start_date, '2026-09-01', 'ברירת המחדל של תאריך ההתחלה');
+  eq((await request({ method: 'PUT', path: `${A}/settings/start-date`, token: accountant, body: { start_date: 'אתמול' } })).status, 400, 'תאריך לא תקין — 400');
+  const put = await request({ method: 'PUT', path: `${A}/settings/start-date`, token: accountant, body: { start_date: '2026-08-15' } });
+  eq(put.status, 200, 'חשבת משנה תאריך התחלה'); eq(put.body?.start_date, '2026-08-15', 'הערך החדש חוזר');
+  eq((await request({ path: `${A}/settings/start-date`, token: viewer })).body?.start_date, '2026-08-15', 'נקרא בחזרה');
+  eq((await request({ method: 'PUT', path: `${A}/settings/start-date`, token: accountant, body: { start_date: '2026-09-01' } })).status, 200, 'החזרה לברירת המחדל');
+  const crd = await request({ method: 'POST', path: `${A}/documents`, token: admin, body: { fields: { vendor_name: 'ספק זיכוי', doc_type: 'credit_note', doc_number: 'CR-1', doc_date: '2026-09-03', amount_total: 60 } } });
+  eq(crd.status, 201, 'זיכוי נוצר');
+  const credits = await request({ path: `${A}/credits`, token: viewer });
+  ok((credits.body?.documents || []).some(d => d._id === crd.body?.document?._id && d.lane === 'credit'), 'הזיכוי ברשימת הזיכויים');
+  const srch = await request({ path: `${A}/search?q=${encodeURIComponent('ספק זיכוי')}`, token: viewer });
+  ok((srch.body?.documents || []).some(d => d.key === crd.body?.document?._id && d.kind === 'credit' && d.lane === 'credit'), 'הזיכוי מופיע בחיפוש');
+  {
+    const env = require('../src/config/env');
+    const saved = [env.MAIL_SORTER_URL, env.MAIL_SORTER_TOKEN];
+    env.MAIL_SORTER_URL = 'http://127.0.0.1:9'; env.MAIL_SORTER_TOKEN = 'e2e';
+    const { JobLock } = require('../src/services/jobLock');
+    await JobLock.create({ name: 'expense-mail-pull', holder: 'other@job', expires_at: new Date(Date.now() + 60000) });
+    const busy = await request({ method: 'POST', path: `${A}/intake/pull`, token: accountant });
+    eq(busy.status, 409, 'משיכה בזמן שהעבודה רצה — 409'); eq(busy.body?.error, 'משיכה כבר רצה', 'הודעה: משיכה כבר רצה');
+    await JobLock.deleteMany({ name: 'expense-mail-pull' });
+    [env.MAIL_SORTER_URL, env.MAIL_SORTER_TOKEN] = saved;
+  }
+
   head('מטריצת הרשאות — כל נתיבי הכתיבה');
   const mid = String(oid()); const mid2 = String(oid());
   const WRITES = [
@@ -342,6 +369,7 @@ async function main() {
     ['POST', '/rules', { pattern: 'מטריצה-כלל' }],
     ['DELETE', `/rules/${builtIn._id}`, undefined],
     ['POST', '/intake/pull', {}],
+    ['PUT', '/settings/start-date', { start_date: '2026-01-01' }],
   ];
   for (const [method, path, b] of WRITES) {
     const label = `${method} ${path.replace(/[0-9a-f]{24}/g, ':id')}`;

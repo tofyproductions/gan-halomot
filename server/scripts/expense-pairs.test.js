@@ -260,6 +260,38 @@ const eq = (a, b, l) => ok(a === b, l, `קיבלנו ${JSON.stringify(a)}, צי�
     await reset();
   }
 
+  console.log('\nזיכוי לא מוצע לעולם');
+  {
+    await reset();
+    const charge = await tx({ amount: -450, description: 'ספק זיכויים' });
+    const inv = await doc({ vendor_name: 'ספק זיכויים', amount_total: 450, doc_number: '1001' });
+    const credit = await doc({ vendor_name: 'ספק זיכויים', doc_type: 'credit_note', amount_total: 450, doc_number: '1002' });
+    const q = await pairQueue();
+    ok(!q.pairs.some(p => id(p.doc) === id(credit)), 'זיכוי בסכום החיוב — לא מוצע');
+    ok(!q.unmatchedDocs.some(d => id(d) === id(credit)), 'וגם לא ברשימת המסמכים הממתינים');
+    eq(pairOf(q, inv) && id(pairOf(q, inv).tx), id(charge), 'החשבונית עצמה כן מוצעת לחיוב');
+    await ExpenseDocument.deleteOne({ _id: inv._id });
+    const q2 = await pairQueue();
+    eq(q2.pairs.length, 0, 'בלי החשבונית — אין שום הצעה (הזיכוי לא תופס את החיוב)');
+    eq(await alternativesForDoc(id(credit)), null, 'אין חלופות לזיכוי');
+    const altTx = await alternativesForTx(id(charge));
+    ok(!altTx.some(a => id(a.doc) === id(credit)), 'זיכוי לא מופיע בחלופות של חיוב');
+    await reset();
+  }
+
+  console.log('\nמסמך ממייל בלי סכום');
+  {
+    await reset();
+    await tx({ amount: -2, description: 'משהו' });
+    const noAmount = await doc({ source: 'mail_sorter', mail_sorter_id: 77, needs_review: true, amount_total: 0 });
+    const q = await pairQueue();
+    const row = q.unmatchedDocs.find(d => id(d) === id(noAmount));
+    eq(row && row.lane, 'review', 'מסלול review');
+    eq(row && row.why, 'חסר סכום — הקלידו אותו', 'הסיבה: חסר סכום (לא "שולם כמעט במלואו")');
+    ok(!q.pairs.some(p => id(p.doc) === id(noAmount)), 'לא מוצע לשום חיוב');
+    await reset();
+  }
+
   await mongoose.disconnect();
   await mongod.stop();
   console.log(failures ? `\n❌ ${failures} כשלונות\n` : '\n✅ הכול עבר\n');

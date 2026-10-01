@@ -19,6 +19,7 @@ const DAY_MS = 86400000;
 const WHY_FX = 'מטבע חוץ — חסר הסכום בשקלים שהבנק חייב';
 const WHY_ALMOST_PAID = 'שולם כמעט במלואו — סגור ידנית או הוסף תנועה';
 const WHY_NONE = 'לא נמצאה תנועה מתאימה';
+const WHY_NO_AMOUNT = 'חסר סכום — הקלידו אותו';
 
 /** Whole days from `b` to `a` (a − b), both YYYY-MM-DD, at UTC midnight. */
 function daysBetween(a, b) {
@@ -149,6 +150,9 @@ async function pairQueue() {
   const why = new Map();
   const scorable = docs.filter((d) => {
     if (d.amount_ils == null) { why.set(key(d), WHY_FX); return false; }
+    // An amount the reader could not see arrives as 0 — that is "type it in",
+    // not "almost paid".
+    if (Number(d.amount_ils) === 0) { why.set(key(d), WHY_NO_AMOUNT); return false; }
     if (d.remaining <= core.COVERAGE_TOLERANCE_ILS) { why.set(key(d), WHY_ALMOST_PAID); return false; }
     return true;
   });
@@ -255,6 +259,7 @@ async function alternativesForTx(txId, limit = ALTERNATIVES_LIMIT) {
 
 module.exports = {
   SUGGEST_THRESHOLD,
+  WHY_NO_AMOUNT,
   daysBetween,
   nameOverlap,
   docNumberInNote,

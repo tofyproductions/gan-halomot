@@ -178,7 +178,8 @@
     "test:expense-receipts": "node scripts/expense-receipts.test.js",
     "test:expense-intake": "node scripts/expense-intake.test.js",
     "test:expense-orders": "node scripts/expense-orders.test.js",
-    "test:expense-search": "node scripts/expense-search.test.js"
+    "test:expense-search": "node scripts/expense-search.test.js",
+    "test:expenses-api-e2e": "node scripts/expenses-api-e2e.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

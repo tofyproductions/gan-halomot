@@ -10,7 +10,7 @@
  */
 const mongoose = require('mongoose');
 const {
-  BankTransaction, ExpenseDocument, ExpensePayment, ExpenseDocDecision, ExpenseUnpaidMark, Supplier,
+  BankTransaction, ExpenseDocument, ExpensePayment, ExpenseDocDecision, ExpenseUnpaidMark, Supplier, Setting,
 } = require('../models');
 const noInvoiceRules = require('./noInvoiceRules.service');
 
@@ -31,6 +31,28 @@ function vendorKey(name) {
 
 const digits = (v) => String(v || '').replace(/\D/g, '');
 
+// ── start date (Ruling: the screen starts on a date) ──────────────────────
+// Charges and documents dated before it are not shown and not pulled. A
+// document with no readable date is always shown — hiding it would lose it.
+const START_DATE_KEY = 'expenses_start_date';
+const DEFAULT_START_DATE = '2026-09-01';
+const isYmd = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) && !Number.isNaN(Date.parse(v));
+
+async function getStartDate() {
+  const row = await Setting.findOne({ key: START_DATE_KEY }).lean();
+  return row && isYmd(row.value) ? row.value : DEFAULT_START_DATE;
+}
+
+async function setStartDate(value) {
+  const v = String(value || '').trim();
+  if (!isYmd(v)) throw Object.assign(new Error('תאריך התחלה לא תקין (YYYY-MM-DD)'), { status: 400 });
+  await Setting.findOneAndUpdate({ key: START_DATE_KEY }, { $set: { value: v } }, { upsert: true });
+  return v;
+}
+
+/** True when a YYYY-MM-DD date is before the start date; an empty date never is. */
+const beforeStart = (ymd, start) => !!ymd && String(ymd) < start;
+
 /**
  * The charges still waiting for a document: money out, not an internal
  * transfer (incl. a card's monthly settlement line in the bank — the card's
@@ -39,7 +61,9 @@ const digits = (v) => String(v || '').replace(/\D/g, '');
  * never dropped.
  */
 async function chargePool() {
+  const start = await getStartDate();
   const txs = await BankTransaction.find({
+    date: { $gte: start },
     amount: { $lt: 0 },
     is_internal_transfer: { $ne: true },
     matched_card_account_id: null,
@@ -90,6 +114,7 @@ function isReceiptLike(doc, supplier) {
 
 /**
  * Port notes §4.2, single source. Lanes in gan:
+ *   credit        a credit note — shown (search, ⚙️ כלים), never owed, never paired
  *   review        machine-read fields nobody confirmed yet
  *   receipt       waiting receipt (see isReceiptLike)
  *   closed        covered within 2 ₪, or a closed_anyway / paid_outside_bank decision
@@ -100,17 +125,20 @@ function isReceiptLike(doc, supplier) {
 function computeState(doc, { payments = [], decision = null, marked = false, supplier = null } = {}) {
   const amount_ils = amountIls(doc);
   const paid = round2(payments.reduce((s, p) => s + (Number(p.amount) || 0), 0));
-  const remaining = amount_ils == null ? 0 : round2(amount_ils - paid);
+  const isCredit = doc.doc_type === 'credit_note';
+  const remaining = amount_ils == null || isCredit ? 0 : round2(amount_ils - paid);
 
   let state;
-  if (amount_ils == null) state = 'awaiting_fx';           // first: no number to cover, even with money linked
+  if (isCredit) state = 'credit';
+  else if (amount_ils == null) state = 'awaiting_fx';           // first: no number to cover, even with money linked
   else if (decision) state = 'settled';
   else if (!payments.length) state = 'needs_match';
   else if (paid >= amount_ils - COVERAGE_TOLERANCE_ILS) state = 'settled';
   else state = 'partial';
 
   let lane;
-  if (doc.needs_review) lane = 'review';
+  if (doc.doc_type === 'credit_note') lane = 'credit';     // neutral: never owed, never paired
+  else if (doc.needs_review) lane = 'review';
   else if (isReceiptLike(doc, supplier)) lane = 'receipt';
   else if (state === 'settled') lane = 'closed';
   else if (marked) lane = 'unpaid_marked';
@@ -165,9 +193,13 @@ async function withStates(docs) {
   });
 }
 
-/** Every active document with its computed paid / remaining / state / lane. */
+/** Every active document from the start date on (or undated), with its computed paid / remaining / state / lane. */
 async function documentsWithState() {
-  const docs = await ExpenseDocument.find({ status: 'active' }).sort({ doc_date: -1, _id: -1 }).lean();
+  const start = await getStartDate();
+  const docs = await ExpenseDocument.find({
+    status: 'active',
+    $or: [{ doc_date: { $gte: start } }, { doc_date: '' }, { doc_date: null }],
+  }).sort({ doc_date: -1, _id: -1 }).lean();
   return withStates(docs);
 }
 
@@ -232,6 +264,11 @@ async function matchSupplier({ supplier_tax_id, vendor_name } = {}) {
 
 module.exports = {
   COVERAGE_TOLERANCE_ILS,
+  START_DATE_KEY,
+  DEFAULT_START_DATE,
+  getStartDate,
+  setStartDate,
+  beforeStart,
   vendorKey,
   chargePool,
   computeState,

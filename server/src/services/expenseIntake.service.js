@@ -11,7 +11,7 @@
  */
 const crypto = require('crypto');
 const mongoose = require('mongoose');
-const { ExpenseDocument, ExpenseFile, Supplier } = require('../models');
+const { ExpenseDocument, ExpenseFile, ExpensePayment, Supplier } = require('../models');
 const core = require('./expenseCore.service');
 const mailSorter = require('./mailSorter.service');
 
@@ -152,6 +152,26 @@ async function createManual({ fields = {}, file = null, by = null } = {}) {
   }
 }
 
+/**
+ * A document that already has money linked may not be edited out from under
+ * it: its total may not drop below what is paid (2 ₪ rounding), and it may
+ * not become a receipt or a credit note (neither is paired with a charge).
+ */
+async function paymentsGuard(doc, patch) {
+  if (patch.amount_total === undefined && patch.doc_type === undefined) return;
+  const rows = await ExpensePayment.find({ document_id: doc._id }, 'amount').lean();
+  if (!rows.length) return;
+  const paid = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  if (patch.doc_type !== undefined && patch.doc_type !== doc.doc_type && ['receipt', 'credit_note'].includes(patch.doc_type)) {
+    throw fail(409, 'למסמך משויכים חיובים — בטלו קודם את השיוך');
+  }
+  const next = { ...doc, ...patch };
+  const ils = isIls(next.currency) || next.fx_confirmed ? Number(next.amount_total) : null;
+  if (patch.amount_total !== undefined && ils != null && ils < paid - core.COVERAGE_TOLERANCE_ILS) {
+    throw fail(409, `הסכום נמוך ממה שכבר שויך (${Math.round(paid * 100) / 100} ₪) — בטלו קודם את השיוך`);
+  }
+}
+
 /** A person's edit also confirms a mail-sorter document (needs_review -> false). */
 async function updateDocument(id, fields = {}, by = null) {
   checkId(id, 'מזהה מסמך');
@@ -169,6 +189,7 @@ async function updateDocument(id, fields = {}, by = null) {
   }, id);
   if (dup) throw duplicateError(dup);
   applyFx(patch, doc);
+  await paymentsGuard(doc, patch);
   // Tagging (branch / general / order) is not a check of the machine reading:
   // the owner sets the branch on mail-sorter documents before reviewing them.
   // Any other field is a correction and confirms the document.
@@ -230,12 +251,19 @@ function mapItem(item, kind) {
   return out;
 }
 
+/**
+ * Copies the not-yet-acknowledged invoices and receipts. Each item is acked
+ * exactly once — when it is created, when its mail_sorter_id already exists,
+ * or when it is skipped (duplicate, or dated before the start date) — and
+ * then drops off mail-sorter's list (asked WITHOUT `all=1`).
+ */
 async function pullFromMailSorter({ client = mailSorter } = {}) {
-  const result = { fetched: 0, created: 0, skipped: 0, errors: 0 };
+  const result = { fetched: 0, created: 0, skipped: 0, skipped_old: 0, errors: 0 };
+  const start = await core.getStartDate();
   for (const kind of ['invoice', 'receipt']) {
     let list;
     try {
-      const raw = await client.listDocuments(kind);
+      const raw = await client.listDocuments(kind, { all: false });
       list = Array.isArray(raw) ? raw : (raw && raw.items) || [];
     } catch (e) {
       console.error(`[expense-pull] list ${kind} failed:`, e.message);
@@ -247,18 +275,22 @@ async function pullFromMailSorter({ client = mailSorter } = {}) {
       try {
         if (!item || item.id == null || item.id === '') throw new Error('פריט בלי מזהה');
         // No status filter: a void document keeps its mail_sorter_id, and the
-        // item must not come back to life on the next run. Re-ack is safe (it is
-        // saved) and recovers an ack that failed on an earlier run.
+        // item must not come back to life. It is only listed again if an
+        // earlier ack failed, so acking it here recovers that.
         if (await ExpenseDocument.exists({ mail_sorter_id: item.id })) {
           result.skipped++;
           await client.ack(item.id);
           continue;
         }
         const data = mapItem(item, kind);
+        if (core.beforeStart(data.doc_date, start)) {
+          result.skipped_old++;
+          await client.ack(item.id);
+          continue;
+        }
         const supplier = await core.matchSupplier(data);
         if (supplier) data.supplier_id = supplier._id;
-        // Already represented by another active document: acked so it stops
-        // coming back every 6 hours.
+        // Already represented by another active document: acked so it drops off the list.
         if (await core.findDuplicate(data)) {
           result.skipped++;
           await client.ack(item.id);

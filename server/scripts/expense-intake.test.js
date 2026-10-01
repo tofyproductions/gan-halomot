@@ -245,6 +245,52 @@ async function suite() {
     await refuses(() => intake.getFile(none._id), 404, 'אין קובץ');
     await refuses(() => intake.getFile(new mongoose.Types.ObjectId()), 404, 'מסמך לא קיים');
   }
+
+  console.log('\nמשיכה — רק מה שלא אושר, ותאריך התחלה');
+  await reset();
+  {
+    const opts = [];
+    const c = fake({ invoice: [item(60, { doc_date: '2026-08-31' }), item(61, { doc_date: '' }), item(62)] });
+    c.listDocuments = async (k, o) => { opts.push(o); return k === 'invoice' ? [item(60, { doc_date: '2026-08-31' }), item(61, { doc_date: '' }), item(62)] : []; };
+    const r = await intake.pullFromMailSorter({ client: c });
+    ok(opts.length === 2 && opts.every(o => o && o.all === false), 'המשיכה מבקשת בלי all (רק מה שלא אושר)');
+    eq(r.skipped_old, 1, 'פריט לפני תאריך ההתחלה — skipped_old');
+    eq(r.created, 2, 'פריט בלי תאריך ופריט רגיל — נוצרו');
+    ok(c.acks.includes(60), 'הפריט הישן קיבל ack (יורד מהרשימה)');
+    eq(await ExpenseDocument.countDocuments({ mail_sorter_id: 60 }), 0, 'ולא נוצר ממנו מסמך');
+    eq(c.acks.length, 3, 'ack אחד לכל פריט');
+
+    // the mail-sorter client itself: `all=1` only when asked (form101/recruitment keep it)
+    const env = require('../src/config/env');
+    const ms = require('../src/services/mailSorter.service');
+    const saved = { url: env.MAIL_SORTER_URL, token: env.MAIL_SORTER_TOKEN, fetch: global.fetch };
+    env.MAIL_SORTER_URL = 'http://127.0.0.1:9'; env.MAIL_SORTER_TOKEN = 't';
+    const urls = [];
+    global.fetch = async (u) => { urls.push(String(u)); return { ok: true, status: 200, json: async () => [] }; };
+    try {
+      await ms.listDocuments('invoice', { all: false });
+      await ms.listDocuments('form101');
+    } finally { env.MAIL_SORTER_URL = saved.url; env.MAIL_SORTER_TOKEN = saved.token; global.fetch = saved.fetch; }
+    ok(!/all=1/.test(urls[0]) && /system=gan/.test(urls[0]) && /doc_type=invoice/.test(urls[0]), 'הוצאות: בלי all=1');
+    ok(/all=1/.test(urls[1]), 'טופס 101: עדיין all=1');
+  }
+
+  console.log('\nעריכת מסמך עם תשלומים');
+  await reset();
+  {
+    const { ExpensePayment } = require('../src/models');
+    const d = await intake.createManual({ fields: { ...base, doc_number: 'P-1', amount_total: 500 }, by: user });
+    await ExpensePayment.create({ document_id: d._id, transaction_id: new mongoose.Types.ObjectId(), amount: 400 });
+    await refuses(() => intake.updateDocument(d._id, { amount_total: 397 }, user), 409, 'סכום מתחת לשולם פחות 2 ₪');
+    try { await intake.updateDocument(d._id, { amount_total: 300 }, user); } catch (e) { ok(/בטלו קודם את השיוך/.test(e.message), 'ההודעה: בטלו קודם את השיוך'); }
+    eq((await intake.updateDocument(d._id, { amount_total: 398 }, user)).amount_total, 398, 'עד 2 ₪ מתחת — מתקבל');
+    await refuses(() => intake.updateDocument(d._id, { doc_type: 'receipt' }, user), 409, 'שינוי לקבלה כשיש שיוך');
+    await refuses(() => intake.updateDocument(d._id, { doc_type: 'credit_note' }, user), 409, 'שינוי לזיכוי כשיש שיוך');
+    eq((await intake.updateDocument(d._id, { doc_type: 'invoice_receipt' }, user)).doc_type, 'invoice_receipt', 'שינוי לחשבונית/קבלה — מותר');
+    const free = await intake.createManual({ fields: { ...base, doc_number: 'P-2', amount_total: 500 }, by: user });
+    eq((await intake.updateDocument(free._id, { doc_type: 'receipt', amount_total: 1 }, user)).doc_type, 'receipt', 'בלי שיוך — מותר');
+    await ExpensePayment.deleteMany({});
+  }
 }
 
 (async () => {

@@ -206,6 +206,49 @@ const eq = (a, b, l) => ok(a === b, l, `קיבלנו ${JSON.stringify(a)}, צי�
     eq(await Supplier.countDocuments(), before + 2, 'ולא נוצר ספק');
   }
 
+  console.log('\nתאריך התחלה');
+  {
+    const { Setting } = require('../src/models');
+    await BankTransaction.deleteMany({}); await ExpenseDocument.deleteMany({}); await ExpensePayment.deleteMany({});
+    eq(await core.getStartDate(), '2026-09-01', 'בלי הגדרה — ברירת מחדל 2026-09-01');
+    const oldTx = await tx({ date: '2026-08-31', description: 'ספק ישן' });
+    const newTx = await tx({ date: '2026-09-01', description: 'ספק חדש' });
+    const oldDoc = await doc({ doc_date: '2026-08-31' });
+    const newDoc = await doc({ doc_date: '2026-09-01' });
+    const undated = await doc({ doc_date: '' });
+    let pool = await core.chargePool();
+    ok(!pool.open.some(t => String(t._id) === String(oldTx._id)), 'חיוב לפני תאריך ההתחלה — לא במאגר');
+    ok(pool.open.some(t => String(t._id) === String(newTx._id)), 'חיוב ביום ההתחלה — במאגר');
+    let ids = (await core.documentsWithState()).map(d => String(d._id));
+    ok(!ids.includes(String(oldDoc._id)), 'מסמך לפני תאריך ההתחלה — לא מוצג');
+    ok(ids.includes(String(newDoc._id)), 'מסמך ביום ההתחלה — מוצג');
+    ok(ids.includes(String(undated._id)), 'מסמך בלי תאריך — תמיד מוצג (לא נעלם)');
+    eq(await core.setStartDate('2026-08-01'), '2026-08-01', 'שינוי תאריך ההתחלה');
+    eq((await Setting.findOne({ key: 'expenses_start_date' }).lean()).value, '2026-08-01', 'נשמר במפתח expenses_start_date');
+    pool = await core.chargePool();
+    ok(pool.open.some(t => String(t._id) === String(oldTx._id)), 'אחרי הקדמת התאריך — החיוב הישן חוזר');
+    ids = (await core.documentsWithState()).map(d => String(d._id));
+    ok(ids.includes(String(oldDoc._id)), 'אחרי הקדמת התאריך — המסמך הישן חוזר');
+    let bad = null;
+    try { await core.setStartDate('1.9.2026'); } catch (e) { bad = e; }
+    eq(bad && bad.status, 400, 'תאריך לא תקין — 400');
+    await Setting.updateOne({ key: 'expenses_start_date' }, { $set: { value: 'junk' } });
+    eq(await core.getStartDate(), '2026-09-01', 'ערך שמור פגום — ברירת המחדל');
+    await Setting.deleteMany({ key: 'expenses_start_date' });
+    await BankTransaction.deleteMany({}); await ExpenseDocument.deleteMany({});
+  }
+
+  console.log('\nזיכוי — מסלול ניטרלי');
+  {
+    const cr = await doc({ doc_type: 'credit_note', amount_total: 300, doc_date: '2026-09-05' });
+    const s = await stateOf(cr._id);
+    eq(s.lane, 'credit', 'חשבונית זיכוי — מסלול credit');
+    eq(s.remaining, 0, 'זיכוי לא נספר כחוב');
+    const crReview = await doc({ doc_type: 'credit_note', amount_total: 300, doc_date: '2026-09-05', needs_review: true, source: 'mail_sorter' });
+    eq((await stateOf(crReview._id)).lane, 'credit', 'גם זיכוי שלא נבדק — credit, לא review');
+    await ExpenseDocument.deleteMany({});
+  }
+
   await mongoose.disconnect();
   await mongod.stop();
   console.log(failures ? `\n❌ ${failures} נכשלו\n` : '\n✅ הכל עבר\n');

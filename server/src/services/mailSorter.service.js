@@ -50,8 +50,11 @@ async function call(path, init = {}) {
  * prevents rework, and a form that vanished from the list the first time it was
  * fetched could never be re-examined after a fix.
  */
-async function listDocuments(docType) {
-  const q = new URLSearchParams({ system: 'gan', all: '1' });
+async function listDocuments(docType, { all = true } = {}) {
+  // `all: false` asks only for what gan has not acked yet (the expenses pull);
+  // form101 and recruitment keep their full list.
+  const q = new URLSearchParams({ system: 'gan' });
+  if (all) q.set('all', '1');
   if (docType) q.set('doc_type', docType);
   const res = await call(`/api/pull?${q.toString()}`);
   return res.json();

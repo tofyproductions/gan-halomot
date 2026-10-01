@@ -31,8 +31,10 @@ const shiftYmd = (ymd, days) => new Date((ymdToDay(ymd) + days) * DAY).toISOStri
 // ── lane (pure read) ───────────────────────────────────────────────────────
 async function receiptsLane(now = new Date()) {
   const today = todayYmd(now);
+  const lookback = shiftYmd(today, -LOOKBACK_DAYS);
+  const start = await core.getStartDate(); // nothing before the screen's start date is shown
   const docs = await ExpenseDocument.find({
-    doc_type: 'receipt', status: 'active', doc_date: { $gte: shiftYmd(today, -LOOKBACK_DAYS) },
+    doc_type: 'receipt', status: 'active', doc_date: { $gte: start > lookback ? start : lookback },
   }).sort({ doc_date: 1, _id: 1 }).lean();
   if (!docs.length) return { waiting: [], overdue: [], linkedRecently: [], grace_days: GRACE_DAYS };
 
@@ -88,7 +90,7 @@ async function loadReceipt(id, session) {
 async function invoiceCandidates(receiptId, limit = 8) {
   const r = (await loadReceipt(receiptId)).toObject();
   const rows = await ExpenseDocument.find({
-    _id: { $ne: r._id }, status: 'active', doc_type: { $ne: 'receipt' },
+    _id: { $ne: r._id }, status: 'active', doc_type: { $nin: ['receipt', 'credit_note'] },
     doc_date: { $gte: shiftYmd(r.doc_date, -CANDIDATE_WINDOW_DAYS), $lte: shiftYmd(r.doc_date, CANDIDATE_WINDOW_DAYS) },
   }).lean();
   const rKey = core.vendorKey(r.vendor_name);
@@ -146,6 +148,7 @@ async function linkReceipt(receiptId, invoiceId, by) {
     const invoice = await ExpenseDocument.findById(invoiceId).session(session || null);
     if (!invoice || invoice.status === 'void') throw fail(404, 'החשבונית לא נמצאה');
     if (invoice.doc_type === 'receipt') throw fail(400, 'אי אפשר לקשר קבלה לקבלה');
+    if (invoice.doc_type === 'credit_note') throw fail(400, 'אי אפשר לקשר קבלה לזיכוי');
 
     const before = {
       linked_invoice_id: receipt.linked_invoice_id, receipt_disposition: receipt.receipt_disposition,

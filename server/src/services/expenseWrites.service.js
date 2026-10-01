@@ -157,6 +157,24 @@ async function receiptGuard(docLike) {
   }
 }
 
+/**
+ * Only a charge the pair screen would offer may be paired: not an internal
+ * transfer, not a card's settlement line, settled, not exempt by a rule, and
+ * not before the start date — the same `chargePool().open` the screen shows.
+ */
+async function poolGuard(tx) {
+  const pool = await core.chargePool();
+  const id = String(tx._id);
+  if (pool.open.some(t => String(t._id) === id)) return;
+  const ex = pool.exempt.find(e => String(e.tx._id) === id);
+  if (ex) throw fail(409, `החיוב פטור מחשבונית לפי הכלל "${ex.rule.label}"`);
+  if (tx.is_internal_transfer) throw fail(409, 'זו העברה פנימית — לא חיוב של ספק');
+  if (tx.matched_card_account_id) throw fail(409, 'זו שורת החיוב החודשי של הכרטיס — שייכו את הקניות עצמן');
+  if (tx.status !== 'completed') throw fail(409, 'החיוב עוד לא נקלט סופית בבנק');
+  if (core.beforeStart(tx.date, await core.getStartDate())) throw fail(409, 'החיוב לפני תאריך ההתחלה של מסך ההוצאות');
+  throw fail(409, 'החיוב לא נמצא בין החיובים הפתוחים');
+}
+
 // ── accept ─────────────────────────────────────────────────────────────────
 /**
  * Port §3.1. Optional field corrections + confirmation + the payment, all or
@@ -187,6 +205,8 @@ async function acceptPair({ document_id, transaction_id, amount, review, by } = 
     }
     const chargeRemaining = round2(charge - await paidOn({ transaction_id }, session));
     if (chargeRemaining <= core.COVERAGE_TOLERANCE_ILS) throw fail(409, 'החיוב כבר מכוסה במלואו');
+    await poolGuard(tx);
+    if ({ ...doc.toObject(), ...patch }.doc_type === 'credit_note') throw fail(409, 'זיכוי לא משויך לחיוב');
 
     // A foreign document takes its shekel figure from the charge (what the
     // bank charged — never a conversion rate); that also confirms the figure.
@@ -206,6 +226,7 @@ async function acceptPair({ document_id, transaction_id, amount, review, by } = 
     let pay = amount !== undefined && amount !== null ? round2(amount) : Math.min(docRemaining, chargeRemaining);
     if (!(pay > 0)) throw fail(409, 'המסמך כבר מכוסה — אין מה לשייך');
     if (pay > chargeRemaining + core.COVERAGE_TOLERANCE_ILS) throw fail(409, 'הסכום גדול מיתרת החיוב');
+    if (pay > docRemaining + core.COVERAGE_TOLERANCE_ILS) throw fail(409, 'הסכום גדול מיתרת המסמך');
 
     let payment;
     try {
@@ -294,6 +315,7 @@ async function confirmDocument(document_id, fields, by) {
 /**
  * Void a document. Its payments go with it: a void document must not keep
  * covering a bank charge, or that charge would never reach the pool again.
+ * Receipts linked to it are released back to the receipts lane.
  */
 async function voidDocument(document_id, by) {
   oid(document_id, 'מזהה מסמך');
@@ -302,9 +324,19 @@ async function voidDocument(document_id, by) {
     const pays = await ExpensePayment.find({ document_id }).session(session || null).lean();
     await ExpensePayment.deleteMany({ document_id }, { session });
     if (pays.length) undo(() => ExpensePayment.insertMany(pays));
+    // Receipts attached to this invoice go back to waiting for one.
+    const receipts = await ExpenseDocument.find({ linked_invoice_id: doc._id }, 'linked_invoice_id receipt_disposition receipt_disposition_at')
+      .session(session || null).lean();
+    if (receipts.length) {
+      await ExpenseDocument.updateMany({ _id: { $in: receipts.map(r => r._id) } },
+        { $set: { linked_invoice_id: null, receipt_disposition: null, receipt_disposition_at: null } }, { session });
+      undo(() => Promise.all(receipts.map(r => ExpenseDocument.updateOne({ _id: r._id }, {
+        $set: { linked_invoice_id: r.linked_invoice_id, receipt_disposition: r.receipt_disposition ?? null, receipt_disposition_at: r.receipt_disposition_at ?? null },
+      }))));
+    }
     await ExpenseDocument.updateOne({ _id: doc._id }, { $set: { status: 'void' } }, { session });
     undo(() => ExpenseDocument.updateOne({ _id: doc._id }, { $set: { status: 'active' } }));
-    return { ok: true, removed_payments: pays.length };
+    return { ok: true, removed_payments: pays.length, released_receipts: receipts.length };
   }, { document_id });
 }
 

@@ -48,11 +48,13 @@ async function search({ q, min, max, branch } = {}) {
     if (!inAmount(Math.abs(d.amount_ils ?? d.amount_total ?? 0))) return false;
     return !needle || haystack([d.vendor_name, d.doc_number, d.supplier_tax_id]).includes(needle);
   });
+  const KIND = { receipt: 'receipt', credit_note: 'credit' };
+  const KIND_LABEL = { receipt: 'קבלה', credit: 'זיכוי', invoice: 'חשבונית' };
   const documents = docs.slice(0, LIMIT).map(d => ({
-    kind: d.doc_type === 'receipt' ? 'receipt' : 'invoice',
+    kind: KIND[d.doc_type] || 'invoice',
     key: String(d._id),
     title: d.vendor_name,
-    subtitle: [d.doc_type === 'receipt' ? 'קבלה' : 'חשבונית', d.doc_number && `מס׳ ${d.doc_number}`,
+    subtitle: [KIND_LABEL[KIND[d.doc_type] || 'invoice'], d.doc_number && `מס׳ ${d.doc_number}`,
       d.supplier_tax_id && `ח.פ ${d.supplier_tax_id}`].filter(Boolean).join(' · '),
     date: d.doc_date,
     amount: Math.abs(d.amount_ils ?? d.amount_total ?? 0),

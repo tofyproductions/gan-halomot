@@ -16,6 +16,7 @@ const intake = require('../services/expenseIntake.service');
 const orders = require('../services/expenseOrders.service');
 const search = require('../services/expenseSearch.service');
 const mailSorter = require('../services/mailSorter.service');
+const { withJobLock } = require('../services/jobLock');
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const by = (req) => (req.user && (req.user.id || req.user._id)) || null;
@@ -128,6 +129,14 @@ async function suppliersMissingTaxId(req, res) {
   res.json({ suppliers });
 }
 
+/** Credit notes — a neutral list (never owed, never paired), shown in ⚙️ כלים. */
+async function credits(req, res) {
+  res.json({ documents: (await core.documentsWithState()).filter(d => d.lane === 'credit') });
+}
+
+const getStartDate = async (req, res) => res.json({ start_date: await core.getStartDate(), default: core.DEFAULT_START_DATE });
+const putStartDate = async (req, res) => res.json({ start_date: await core.setStartDate(body(req).start_date) });
+
 async function intakeStatus(req, res) {
   const [needsReview, last] = await Promise.all([
     ExpenseDocument.countDocuments({ status: 'active', needs_review: true }),
@@ -217,15 +226,18 @@ async function deleteRule(req, res) {
   res.json({ ok: true });
 }
 
+// Same lock as the 6-hour job (same name, same lease), so a click never overlaps a run.
 const intakePull = async (req, res) => {
   if (!mailSorter.isConfigured()) throw fail(409, 'מיון המיילים לא מוגדר בשרת');
-  res.json(await intake.pullFromMailSorter());
+  const { ran, result } = await withJobLock('expense-mail-pull', 15 * 60 * 1000, () => intake.pullFromMailSorter());
+  if (!ran) throw fail(409, 'משיכה כבר רצה');
+  res.json(result);
 };
 
 module.exports = {
   errorHandler,
   pairQueue, pairAlternatives, receiptsLane, receiptCandidates, closed, searchAll, counts, getDocument, getFile,
-  documentOrders, listRules, suppliersMissingTaxId, intakeStatus,
+  documentOrders, listRules, suppliersMissingTaxId, intakeStatus, credits, getStartDate, putStartDate,
   createDocument, patchDocument, voidDoc, confirmDoc, createSupplier, acceptPair, rejectPair, unpair,
   markUnpaid, unmarkUnpaid, decide, undecide, linkReceipt, unlinkReceipt, receiptIsDocument, supplierReceiptIsDocument,
   linkOrder, unlinkOrder, createRule, deleteRule, intakePull,

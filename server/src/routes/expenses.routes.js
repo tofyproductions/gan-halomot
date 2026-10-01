@@ -21,6 +21,8 @@ router.get('/documents/:id/orders', read, w(c.documentOrders));
 router.get('/rules', read, w(c.listRules));
 router.get('/suppliers-missing-tax-id', read, w(c.suppliersMissingTaxId));
 router.get('/intake/status', read, w(c.intakeStatus));
+router.get('/credits', read, w(c.credits));
+router.get('/settings/start-date', read, w(c.getStartDate));
 
 // writes
 router.post('/documents', write, w(c.createDocument));
@@ -44,6 +46,7 @@ router.delete('/documents/:id/order', write, w(c.unlinkOrder));
 router.post('/rules', write, w(c.createRule));
 router.delete('/rules/:id', write, w(c.deleteRule));
 router.post('/intake/pull', write, w(c.intakePull));
+router.put('/settings/start-date', write, w(c.putStartDate));
 
 router.use(c.errorHandler);
 
