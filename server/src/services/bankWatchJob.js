@@ -1,7 +1,8 @@
 /**
  * Once a day: has the bank-pi agent gone quiet on the gan's account?
  * A feed that stops says nothing — the first sign would otherwise be a month
- * with no bank lines. Admins only; not before a bank account exists.
+ * with no bank lines. Admins and the bookkeeper (owner's call, 01.10.2026);
+ * not before a bank account exists.
  */
 const { BankAccount, FinanceSyncLog, Setting, User } = require('../models');
 const { notifyOnce } = require('./notification.service');
@@ -19,7 +20,7 @@ async function tick(now = new Date()) {
   const sent = await Setting.findOne({ key: KEY }).lean();
   if (sent?.value === today) return { notified: 0, reason: 'already-today' };
 
-  const admins = await User.find({ role: 'system_admin', is_active: { $ne: false } }).select('_id').lean();
+  const admins = await User.find({ role: { $in: ['system_admin', 'accountant'] }, is_active: { $ne: false } }).select('_id').lean();
   const since = last ? new Date(last.created_at).toLocaleDateString('he-IL', { timeZone: 'Asia/Jerusalem' }) : 'אף פעם';
   for (const a of admins) {
     await notifyOnce({

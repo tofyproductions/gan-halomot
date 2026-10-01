@@ -22,15 +22,17 @@ const eq = (a, b, l) => { const g = a === b; console.log(`  ${g ? '✅' : '❌'}
   console.log('\n🔕 הבנק שותק\n');
 
   await User.create({ full_name: 'מנהל', id_number: '900000001', email: 'a@x.l', password_hash: 'x', role: 'system_admin', is_active: true });
+  await User.create({ full_name: 'אורלי הנה״ח', id_number: '900000002', email: 'o@x.l', password_hash: 'x', role: 'accountant', is_active: true });
+  await User.create({ full_name: 'גננת', id_number: '900000009', email: 't@x.l', password_hash: 'x', role: 'teacher', is_active: true });
   eq((await tick()).notified, 0, 'אין חשבון בנק עדיין — אין התראה');
 
   await BankAccount.create({ external_id: 'beinleumi:••••0463', institution: 'beinleumi', label: 'ב', type: 'bank' });
   const old = await FinanceSyncLog.create({ source: 'agent', status: 'ok' });
   // created_at is immutable under mongoose timestamps — backdate via the raw collection.
   await FinanceSyncLog.collection.updateOne({ _id: old._id }, { $set: { created_at: new Date(Date.now() - 72 * 3600e3) } });
-  eq((await tick()).notified, 1, '72 שעות בלי קליטה — מנהל המערכת מקבל התראה');
+  eq((await tick()).notified, 2, '72 שעות בלי קליטה — מנהל המערכת והנה״ח מקבלים התראה, הגננת לא');
   eq((await tick()).notified, 0, 'ולא פעמיים באותו יום');
-  eq(await NotificationEvent.countDocuments({ type: 'bank_feed_stale' }), 1, 'אירוע אחד נרשם');
+  eq(await NotificationEvent.countDocuments({ type: 'bank_feed_stale' }), 2, 'אירוע לכל נמען');
 
   await FinanceSyncLog.create({ source: 'agent', status: 'ok' });
   eq((await tick(new Date(Date.now() + 86400e3))).notified, 0, 'קליטה טרייה — שקט');
