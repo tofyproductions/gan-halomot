@@ -611,7 +611,9 @@ async function main() {
   {
     await IcountPull.create({ started_at: new Date(Date.now() + 3600e3), finished_at: new Date(Date.now() + 3600e3), complete: true, foreign: 2, gone_suppressed: { count: 25, reason: 'יותר מ-20 מסמכים נעלמו במשיכה אחת' } });
     await IcountExpense.create({ icount_id: 'HELD1', supplier_id: '11', supplier_name: 'חשמל ישראל', doc_number: 'H-1', doc_date: '2026-09-11', amount_total: 12, match_kind: 'held', match_why: 'מסמך פעיל אחר כבר מחזיק' });
+    await IcountExpense.create({ icount_id: 'HELDST', supplier_id: '11', supplier_name: 'חשמל ישראל', doc_number: 'H-2', doc_date: '2026-09-11', amount_total: 13, match_kind: 'held', is_storno: true });
     const st = await request({ path: `${A}/icount/status`, token: viewer });
+    ok(!(st.body?.held_rows || []).some(r => r.icount_id === 'HELDST'), 'סטטוס — שורת סטורנו לא ברשימת held');
     eq(st.body?.last_pull?.gone_suppressed?.count, 25, 'סטטוס — gone_suppressed');
     eq(st.body?.last_pull?.foreign, 2, 'סטטוס — foreign');
     eq(st.body?.held_total, 1, 'סטטוס — held_total');

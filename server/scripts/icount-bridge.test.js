@@ -472,6 +472,12 @@ const TAX_BAD = '510000555'; // fails the check digit — ignored
     const held = await IcountExpense.findById(row._id).lean();
     eq(held.match_kind, 'held', 'מסומנת held');
     eq(String(held.matched_expense_id), id(filedMine), 'מצביעה על המסמך שמחזיק את המסמך');
+    // a probable twin of ours for the held row: no question, and "same" is refused
+    const probableOfHeld = await ours({ doc_number: 'F-1x', amount_total: 100, doc_date: '2026-09-10' });
+    ok(!(await bridge.pendingIdentityQuestions()).some(q => String(q.icount_expense._id) === String(row._id)), 'שורה held — אין שאלת "אותו מסמך?"');
+    await refuses(() => bridge.decideIdentity(probableOfHeld._id, row._id, true), 409, 'אישור "אותו מסמך" לשורה held');
+    eq((await ExpenseDocument.findById(probableOfHeld._id).lean()).icount_id, null, 'לא קושר מסמך שני');
+    await ExpenseDocument.updateOne({ _id: probableOfHeld._id }, { status: 'void' });
     ok(!(await ExpenseDocument.exists({ icount_id: row.icount_id })), 'אף מסמך לא קיבל את מספר השורה');
 
     console.log('אורלי הקלידה את אותו מסמך פעמיים באייקאונט');

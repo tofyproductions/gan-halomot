@@ -192,7 +192,7 @@ async function intakeStatus(req, res) {
 async function icountStatus(req, res) {
   // `held_rows`: iCount rows the bridge did not turn into documents because an
   // active document already answers for them under another icount_id.
-  const HELD = { match_kind: 'held', gone_at: null };
+  const HELD = { match_kind: 'held', gone_at: null, is_storno: { $ne: true } };
   const [last, lastComplete, heldRows, heldTotal] = await Promise.all([
     IcountPull.findOne().sort({ started_at: -1 }).lean(),
     IcountPull.findOne({ complete: true }).sort({ started_at: -1 }).lean(),

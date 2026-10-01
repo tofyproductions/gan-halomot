@@ -419,6 +419,7 @@ async function pendingIdentityQuestions() {
   const out = [];
   for (const row of ctx.rows) {
     if (isDead(row)) continue;
+    if (row.match_kind === 'held') continue; // "same" would link a second document to it
     const holder = ctx.holders.get(row.icount_id);
     if (holder && (holder.source !== 'icount' || holder.status !== 'active')) continue;
     const doc = ctx.pool.find(d => !ctx.verdict(d, row) && compareToRow(d, row) === 'probable');
@@ -444,6 +445,7 @@ async function decideIdentity(documentId, icountExpenseId, same, by = null) {
   if (doc.status === 'void') throw fail(409, 'המסמך מבוטל — אי אפשר לשנות אותו');
   if (doc.source === 'icount') throw fail(400, 'זה מסמך שנוצר מאייקאונט — בחרו את המסמך שלנו');
   if (same) {
+    if (row.match_kind === 'held') throw fail(409, 'המסמך כבר מוחזק על ידי מסמך אחר');
     const theirType = docTypeFor(row.doctype);
     if (!theirType || !kindsAgree(doc.doc_type, theirType)) throw fail(400, 'סוג מסמך אחר (חשבונית / קבלה / זיכוי) — אלה לא אותו מסמך');
     if (compareToIcount(doc, row) === 'different') throw fail(400, 'ספק אחר או סכום/תאריך רחוקים — אלה לא אותו מסמך');
