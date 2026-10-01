@@ -49,6 +49,11 @@ const eq = (a, b, l) => ok(a === b, l, `קיבלנו ${JSON.stringify(a)}, צי�
     eq(await NoInvoiceRule.countDocuments(), n1, 'זריעה פעמיים — אותו מספר חוקים');
     eq(n1, 10, 'עשרה חוקים מובנים');
     eq(await NoInvoiceRule.countDocuments({ built_in: true }), 10, 'כולם מסומנים מובנים');
+    const sal = await NoInvoiceRule.findOne({ pattern: 'משכורת', built_in: true }).lean();
+    eq(sal && sal.note, 'התלוש הוא המסמך, לא חשבונית ספק', 'לחוק המשכורות נשמרה ההערה');
+    await NoInvoiceRule.syncIndexes();
+    await Promise.all([rules.seed(), rules.seed(), rules.seed()]);
+    eq(await NoInvoiceRule.countDocuments({ built_in: true }), 10, 'שלוש זריעות במקביל — עדיין עשרה, בלי כפולים');
     const all = await NoInvoiceRule.find().lean();
     const m = rules.matchRule('העברה - משכורת ספטמבר', all);
     eq(m && m.label, 'משכורות', '"משכורת" נתפס בחוק המשכורות');
@@ -87,6 +92,7 @@ const eq = (a, b, l) => ok(a === b, l, `קיבלנו ${JSON.stringify(a)}, צי�
     const ex = exempt.find(e => String(e.tx._id) === String(salary._id));
     ok(!!ex, 'אבל מוחזרות בנפרד — לא נעלמות');
     eq(ex && ex.rule.label, 'משכורות', 'עם החוק שתפס אותן');
+    eq(ex && ex.rule.note, 'התלוש הוא המסמך, לא חשבונית ספק', 'ועם ההערה שלו');
     await BankTransaction.deleteMany({});
     await ExpensePayment.deleteMany({});
     await ExpenseDocument.deleteMany({});
@@ -125,6 +131,12 @@ const eq = (a, b, l) => ok(a === b, l, `קיבלנו ${JSON.stringify(a)}, צי�
     await ExpenseUnpaidMark.create({ document_id: marked._id });
     eq((await stateOf(marked._id)).lane, 'unpaid_marked', 'סומן "עוד לא שולם" — בלשונית הסגורים, מסומן');
     eq(await core.isClosed(marked), true, 'ו-isClosed מאפשר להעלות בכל זאת');
+
+    const paidMarked = await doc({});
+    await ExpensePayment.create({ document_id: paidMarked._id, transaction_id: t._id, amount: 1000 });
+    await ExpenseUnpaidMark.create({ document_id: paidMarked._id });
+    eq((await stateOf(paidMarked._id)).lane, 'closed', 'שולם במלואו וגם סומן "עוד לא שולם" — נשאר סגור');
+    eq(await core.isClosed('not-an-id'), false, 'isClosed עם מזהה פגום — false, בלי שגיאה');
 
     const review = await doc({ needs_review: true });
     eq((await stateOf(review._id)).lane, 'review', 'מסמך שלא אושר — לבדיקה');
@@ -173,6 +185,9 @@ const eq = (a, b, l) => ok(a === b, l, `קיבלנו ${JSON.stringify(a)}, צי�
     const b = await doc({ supplier_id: sup._id, vendor_name: 'חח"י', doc_number: '55' });
     const bySup = await core.findDuplicate({ supplier_id: sup._id, vendor_name: 'חברת החשמל לישראל', doc_number: '55' });
     eq(bySup && String(bySup._id), String(b._id), 'אותו ספק במערכת + אותו מספר — כפילות גם כשהשם נקרא אחרת');
+    const sup2 = await Supplier.create({ name: 'חברת חשמל' });
+    eq(await core.findDuplicate({ supplier_id: sup2._id, vendor_name: 'חח"י', doc_number: '55' }), null,
+      'שני ספקים שונים במערכת עם אותו שם — לא כפילות (המזהה מכריע כשיש לשניהם)');
     await ExpenseDocument.updateOne({ _id: a._id }, { status: 'void' });
     eq(await core.findDuplicate({ vendor_name: 'אבי ספקים', doc_number: '777' }), null, 'מסמך מבוטל משחרר את המספר');
     await ExpenseDocument.deleteMany({});

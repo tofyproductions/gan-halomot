@@ -69,7 +69,7 @@ async function chargePool() {
       remaining,
     };
     const rule = noInvoiceRules.matchRule(t.description, rules);
-    if (rule) exempt.push({ tx: out, rule });
+    if (rule) exempt.push({ tx: out, rule: { _id: rule._id, label: rule.label, pattern: rule.pattern, note: rule.note || '', built_in: !!rule.built_in } });
     else open.push(out);
   }
   return { open, exempt };
@@ -178,6 +178,7 @@ async function documentsWithState() {
  */
 async function isClosed(docOrId) {
   const isId = typeof docOrId === 'string' || docOrId instanceof mongoose.Types.ObjectId;
+  if (isId && !mongoose.isValidObjectId(docOrId)) return false;
   const doc = isId
     ? await ExpenseDocument.findById(docOrId).lean()
     : (docOrId && typeof docOrId.toObject === 'function' ? docOrId.toObject() : docOrId);

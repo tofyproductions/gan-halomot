@@ -22,8 +22,7 @@ const AUTHORITY_NOTE = 'תשלום לרשות, לא לספק';
 const LOANS = 'החזרי הלוואה';
 const LOANS_NOTE = 'החזר, לא הוצאה עם חשבונית';
 
-// Port notes §6.2 — the 5 groups, 10 rows. `note` is kept here for the
-// reader; the model stores label + pattern only.
+// Port notes §6.2 — the 5 groups, 10 rows.
 const BUILT_IN = [
   { pattern: 'משכורת', label: SALARIES, note: SALARIES_NOTE },
   { pattern: 'העברת משכורות', label: SALARIES, note: SALARIES_NOTE },
@@ -43,13 +42,20 @@ const BUILT_IN = [
  * only a missing row is created.
  */
 async function seed() {
-  await NoInvoiceRule.bulkWrite(BUILT_IN.map(({ pattern, label }) => ({
-    updateOne: {
-      filter: { pattern, built_in: true },
-      update: { $setOnInsert: { pattern, label, built_in: true, is_active: true } },
-      upsert: true,
-    },
-  })), { ordered: false });
+  try {
+    await NoInvoiceRule.bulkWrite(BUILT_IN.map(({ pattern, label, note }) => ({
+      updateOne: {
+        filter: { pattern, built_in: true },
+        update: { $setOnInsert: { pattern, label, note, built_in: true, is_active: true } },
+        upsert: true,
+      },
+    })), { ordered: false });
+  } catch (e) {
+    // A second instance booting at the same moment inserted the same row
+    // first — the unique index refused ours, and the row exists. Fine.
+    const errs = e.writeErrors || (e.code === 11000 ? [e] : null);
+    if (!errs || !errs.every(w => (w.code ?? w.err?.code) === 11000)) throw e;
+  }
 }
 
 /** Active rules, built-ins first, then by creation — first match wins. */
