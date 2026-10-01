@@ -7,7 +7,7 @@ const ref = (model) => ({ type: mongoose.Schema.Types.ObjectId, ref: model, defa
  * amount_total includes VAT — the gan is VAT-exempt, so there is no VAT split.
  */
 const expenseDocumentSchema = new mongoose.Schema({
-  source: { type: String, enum: ['mail_sorter', 'manual'], required: true },
+  source: { type: String, enum: ['mail_sorter', 'manual', 'icount'], required: true },
   mail_sorter_id: { type: Number, default: undefined },
   file_id: ref('ExpenseFile'),
   attachment_sha256: { type: String, default: '' },
@@ -32,11 +32,18 @@ const expenseDocumentSchema = new mongoose.Schema({
   created_by: ref('User'),
   confirmed_by: ref('User'),
   confirmed_at: { type: Date, default: null },
+  // iCount standing (part 2ב): icount_id is iCount's expense id, set once the doc is there.
+  icount_id: { type: String, default: null },
+  icount_docnum: { type: String, default: '' },
+  icount_filed_at: { type: Date, default: null },
+  icount_filed_by: ref('User'),
+  icount_gone_at: { type: Date, default: null },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 expenseDocumentSchema.index({ mail_sorter_id: 1 }, { unique: true, sparse: true });
 expenseDocumentSchema.index({ status: 1, doc_date: -1 });
 expenseDocumentSchema.index({ supplier_id: 1 });
 expenseDocumentSchema.index({ attachment_sha256: 1 });
+expenseDocumentSchema.index({ icount_id: 1 }, { unique: true, partialFilterExpression: { icount_id: { $type: 'string' } } });
 
 module.exports = mongoose.model('ExpenseDocument', expenseDocumentSchema);

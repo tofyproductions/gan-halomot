@@ -109,6 +109,10 @@ const ExpensePayment = require('./ExpensePayment');
 const ExpensePairRejection = require('./ExpensePairRejection');
 const ExpenseUnpaidMark = require('./ExpenseUnpaidMark');
 const ExpenseDocDecision = require('./ExpenseDocDecision');
+const IcountExpense = require('./IcountExpense');
+const IcountPull = require('./IcountPull');
+const ExpenseIdentityDecision = require('./ExpenseIdentityDecision');
+const IcountPaidReport = require('./IcountPaidReport');
 const NoInvoiceRule = require('./NoInvoiceRule');
 const ProductScanMark = require('./ProductScanMark');
 const ParentAccount = require('./ParentAccount');
@@ -231,6 +235,10 @@ const real = {
   ExpensePairRejection,
   ExpenseUnpaidMark,
   ExpenseDocDecision,
+  IcountExpense,
+  IcountPull,
+  ExpenseIdentityDecision,
+  IcountPaidReport,
   NoInvoiceRule,
   ProductScanMark,
   ParentAccount,
