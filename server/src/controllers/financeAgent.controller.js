@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const { FinanceSyncRequest } = require('../models');
 const { ingest } = require('../services/financeIngest.service');
 
@@ -22,10 +23,10 @@ async function claim(req, res) {
 
 async function finish(req, res) {
   const { id, ok, result } = req.body || {};
-  if (!id) return res.status(400).json({ error: 'id חסר' });
+  if (!id || !mongoose.isValidObjectId(id)) return res.status(400).json({ error: 'id חסר או שגוי' });
   await FinanceSyncRequest.updateOne(
     { _id: id, status: 'claimed' },
-    { $set: { status: ok ? 'done' : 'failed', finished_at: new Date(), result: String(result || '').slice(0, 500) } },
+    { $set: { status: ok === true ? 'done' : 'failed', finished_at: new Date(), result: String(result || '').slice(0, 500) } },
   );
   return res.json({ ok: true });
 }

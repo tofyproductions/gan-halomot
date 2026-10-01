@@ -15,8 +15,16 @@ const safeEqual = (a, b) => {
   return x.length === y.length && crypto.timingSafeEqual(x, y);
 };
 
+const configuredKey = () => env.FINANCE_INGEST_KEY || process.env.FINANCE_INGEST_KEY;
+
+/** Header-only check: is the caller holding the configured (>=32 char) key? */
+function hasFinanceKey(req) {
+  const key = configuredKey();
+  return !!key && key.length >= 32 && safeEqual(req.get('X-Finance-Key'), key);
+}
+
 function financeAuth(req, res, next) {
-  const key = env.FINANCE_INGEST_KEY || process.env.FINANCE_INGEST_KEY;
+  const key = configuredKey();
   if (!key || key.length < 32) return res.status(503).json({ error: 'קליטת הבנק לא מוגדרת' });
 
   if (!safeEqual(req.get('X-Finance-Key'), key)) return res.status(401).json({ error: 'מפתח שגוי' });
@@ -24,10 +32,13 @@ function financeAuth(req, res, next) {
   if (!Number.isFinite(ts) || Math.abs(Date.now() / 1000 - ts) > WINDOW_S) {
     return res.status(401).json({ error: 'חותמת זמן לא בתוקף' });
   }
+  // Fail closed: a body-bearing request whose raw bytes were not captured
+  // (e.g. a path-case mismatch) must never validate against an empty-body sig.
+  if (req.method !== 'GET' && !req.rawBody) return res.status(401).json({ error: 'חתימה שגויה' });
   const raw = req.method === 'GET' ? '' : (req.rawBody ? req.rawBody.toString('utf8') : '');
   const expected = crypto.createHmac('sha256', key).update(`${ts}.${raw}`).digest('hex');
   if (!safeEqual(req.get('X-Finance-Sig'), expected)) return res.status(401).json({ error: 'חתימה שגויה' });
   return next();
 }
 
-module.exports = { financeAuth };
+module.exports = { financeAuth, hasFinanceKey };

@@ -163,10 +163,36 @@ async function main() {
   const claimed = await signed('/api/finance/agent/sync/claim');
   eq(claimed.body?.id, String(req1._id), 'בקשה ממתינה נמסרה');
   eq((await signed('/api/finance/agent/sync/claim')).body?.id, null, 'ולא נמסרת פעמיים');
-  await signed('/api/finance/agent/sync/finish', { id: claimed.body.id, ok: true, result: 'ok' });
+  eq((await signed('/api/finance/agent/sync/finish', { id: claimed.body.id, ok: true, result: 'ok' })).status, 200, 'finish — 200');
   eq((await FinanceSyncRequest.findById(req1._id).lean()).status, 'done', 'סיום נרשם');
 
+  head('הקשחה');
+  const before = await BankTransaction.countDocuments();
+  {
+    const ts = Math.floor(Date.now() / 1000);
+    const getSig = crypto.createHmac('sha256', KEY).update(`${ts}.`).digest('hex');
+    const evil = { agent_version: 'x', accounts: [{ external_id: 'evil:1', institution: 'evil', label: 'evil', type: 'bank', balance: 1,
+      transactions: [{ date: '2026-09-11', amount: -1, description: 'evil', bank_ref: 'e' }] }] };
+    const r = await request({ method: 'POST', path: '/API/Finance/Agent/ingest', body: evil,
+      headers: { 'X-Finance-Key': KEY, 'X-Finance-Ts': String(ts), 'X-Finance-Sig': getSig } });
+    eq(r.status, 401, 'נתיב באותיות מעורבות + חתימת GET — נדחה');
+    eq(await BankTransaction.countDocuments(), before, 'ולא נקלט דבר');
+  }
+  const big = { agent_version: 'x', accounts: [], pad: 'a'.repeat(2.2 * 1024 * 1024) };
+  eq((await request({ method: 'POST', path: '/api/finance/agent/ingest', body: big,
+    headers: { 'X-Finance-Key': 'x'.repeat(40) } })).status, 413, 'גוף גדול עם מפתח שגוי — 413');
+  {
+    const ts = Math.floor(Date.now() / 1000);
+    const g = await request({ path: '/api/finance/agent/sync/claim',
+      headers: { 'X-Finance-Key': KEY, 'X-Finance-Ts': String(ts), 'X-Finance-Sig': 'deadbeef' } });
+    eq(g.status, 401, 'חתימה שגויה על GET — נדחה');
+  }
+  eq((await signed('/api/finance/agent/sync/finish', { id: 'not-an-id', ok: true })).status, 400, 'finish עם id לא תקין — 400');
+
   head('הדלת סגורה בלי מפתח');
+  process.env.FINANCE_INGEST_KEY = 'short';
+  require('../src/config/env').FINANCE_INGEST_KEY = 'short';
+  eq((await signed('/api/finance/agent/ingest', payload, { key: 'short' })).status, 503, 'מפתח קצר מ-32 — הדלת סגורה');
   delete process.env.FINANCE_INGEST_KEY;
   require('../src/config/env').FINANCE_INGEST_KEY = undefined;
   eq((await signed('/api/finance/agent/ingest', payload)).status, 503, 'בלי מפתח מוגדר — הדלת סגורה');
