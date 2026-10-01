@@ -7,7 +7,7 @@ import EmptyState from '../ui/EmptyState';
 import { BusyButton } from '../shared/UploadControls';
 import { formatILS, formatDay, LANE_LABEL, LANE_TAB, GENERAL, NO_BRANCH } from './expenseFormat';
 
-const KIND_ICON = { invoice: '🧾', receipt: '🧾', bank: '🏦', card: '💳' };
+const KIND_ICON = { invoice: '🧾', receipt: '🧾', credit: '↩️', bank: '🏦', card: '💳' };
 const LIMIT = 200;
 
 function amountText(row) {

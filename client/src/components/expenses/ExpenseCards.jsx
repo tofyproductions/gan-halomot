@@ -6,7 +6,7 @@ import {
 import api, { apiError, openApiFile } from '../../api/client';
 import {
   DOC_TYPE_LABEL, DOC_TYPES, formatILS, formatDay, docAmountText, hasFile, txTitle, refLabel, tintSx, scoreColor,
-  branchLabel, GENERAL,
+  branchLabel, GENERAL, missingAmount,
 } from './expenseFormat';
 
 /**
@@ -35,6 +35,8 @@ export function FileLink({ docId, label = '📎 המסמך' }) {
 export function ReviewForm({ doc, value, onChange, branches = [] }) {
   const foreign = (doc.currency || 'ILS') !== 'ILS';
   const set = (k) => (e) => onChange({ ...value, [k]: e.target.value });
+  // The reader missed the amount: highlight the field until a positive number is typed.
+  const noAmount = missingAmount(doc) && !(Number(String(value.amount_total).replace(/[^\d.]/g, '')) > 0);
   return (
     <Box sx={{ mt: 1, p: 1.25, border: '1px dashed', borderColor: 'warning.main', borderRadius: 1, bgcolor: 'background.default' }}>
       <Typography variant="caption" sx={{ color: 'warning.dark', fontWeight: 700, display: 'block', mb: 1 }}>
@@ -46,7 +48,8 @@ export function ReviewForm({ doc, value, onChange, branches = [] }) {
         <TextField size="small" label="ח.פ / עוסק" value={value.supplier_tax_id} onChange={set('supplier_tax_id')} />
         <TextField size="small" label="תאריך" type="date" value={value.doc_date} onChange={set('doc_date')} InputLabelProps={{ shrink: true }} />
         <TextField size="small" label={foreign ? 'סכום בשקלים (מהחיוב)' : 'סכום כולל'} placeholder={foreign ? 'יילקח מהחיוב' : ''}
-          value={value.amount_total} onChange={set('amount_total')} inputProps={{ inputMode: 'decimal' }} />
+          value={value.amount_total} onChange={set('amount_total')} inputProps={{ inputMode: 'decimal' }}
+          error={noAmount} helperText={noAmount ? 'חסר סכום — הקלידו אותו' : undefined} />
         <TextField size="small" select label="סוג" value={value.doc_type} onChange={set('doc_type')}>
           {DOC_TYPES.map(t => <MenuItem key={t} value={t}>{DOC_TYPE_LABEL[t]}</MenuItem>)}
         </TextField>

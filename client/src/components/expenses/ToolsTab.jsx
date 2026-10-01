@@ -7,6 +7,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import api, { apiError } from '../../api/client';
 import { useConfirm } from '../shared/ConfirmProvider';
 import { BusyButton } from '../shared/UploadControls';
+import { formatDay, docAmountText, DOC_TYPE_LABEL } from './expenseFormat';
 
 /** One independent block: its own load, its own error — a failing block never hides the others. */
 function useLoad(url, pick) {
@@ -46,7 +47,7 @@ function Intake({ canWrite, onChanged }) {
     setBusy(true);
     try {
       const { data: r } = await api.post('/expenses/intake/pull');
-      toast[r.errors ? 'warning' : 'success'](`נמשכו ${r.fetched} · נוספו ${r.created} · דולגו ${r.skipped}${r.errors ? ` · ${r.errors} שגיאות` : ''}`);
+      toast[r.errors ? 'warning' : 'success'](`נמשכו ${r.fetched} · נוספו ${r.created} · דולגו ${r.skipped}${r.skipped_old ? ` · ${r.skipped_old} לפני תאריך ההתחלה` : ''}${r.errors ? ` · ${r.errors} שגיאות` : ''}`);
       reload(); onChanged();
     } catch (err) { toast.error(apiError(err, 'המשיכה נכשלה')); }
     finally { setBusy(false); }
@@ -148,12 +149,77 @@ function MissingTaxId() {
   );
 }
 
-/** ⚙️ כלים — no-invoice rules, the mail-sorter pull, suppliers missing a tax id. */
+function StartDate({ canWrite, onChanged }) {
+  const [state, reload] = useLoad('/expenses/settings/start-date', d => d.start_date || '');
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (state.data) setValue(state.data); }, [state.data]);
+  const save = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await api.put('/expenses/settings/start-date', { start_date: value });
+      toast.success('תאריך ההתחלה נשמר');
+      reload(); onChanged();
+    } catch (err) { toast.error(apiError(err, 'השמירה נכשלה')); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Block title="📅 תאריך התחלה" state={state} reload={reload}>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+        מסמכים וחיובים לפני התאריך הזה לא מוצגים ולא נמשכים
+      </Typography>
+      {canWrite ? (
+        <Stack component="form" onSubmit={save} direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
+          <TextField size="small" type="date" label="מתאריך" value={value} onChange={e => setValue(e.target.value)}
+            InputLabelProps={{ shrink: true }} required />
+          <BusyButton type="submit" variant="outlined" loading={busy} disabled={!value || value === state.data}>שמור</BusyButton>
+        </Stack>
+      ) : (
+        <Typography variant="body2">מתאריך: {formatDay(state.data)}</Typography>
+      )}
+    </Block>
+  );
+}
+
+/** Credit notes: never owed and never paired — listed here so they are not lost. */
+function Credits() {
+  const [state, reload] = useLoad('/expenses/credits', d => d.documents || []);
+  return (
+    <Block title="↩️ זיכויים" state={state} reload={reload}>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+        חשבוניות זיכוי לא משויכות לחיובים ולא נספרות כחוב.
+      </Typography>
+      {state.data && !state.data.length ? (
+        <Typography variant="body2" color="text.secondary">אין זיכויים.</Typography>
+      ) : (
+        <Stack spacing={0.75}>
+          {(state.data || []).map(d => (
+            <Stack key={d._id} direction="row" spacing={1} alignItems="center" justifyContent="space-between"
+              sx={{ p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="body2" noWrap>{d.vendor_name || '—'}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {[DOC_TYPE_LABEL[d.doc_type], d.doc_number && `מס׳ ${d.doc_number}`, formatDay(d.doc_date)].filter(Boolean).join(' · ')}
+                </Typography>
+              </Box>
+              <Typography variant="body2" sx={{ fontWeight: 700, flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>{docAmountText(d)}</Typography>
+            </Stack>
+          ))}
+        </Stack>
+      )}
+    </Block>
+  );
+}
+
+/** ⚙️ כלים — start date, the mail-sorter pull, no-invoice rules, credit notes, suppliers missing a tax id. */
 export default function ToolsTab({ canWrite, onChanged }) {
   return (
     <Stack spacing={2}>
+      <StartDate canWrite={canWrite} onChanged={onChanged} />
       <Intake canWrite={canWrite} onChanged={onChanged} />
       <Rules canWrite={canWrite} onChanged={onChanged} />
+      <Credits />
       <MissingTaxId />
     </Stack>
   );

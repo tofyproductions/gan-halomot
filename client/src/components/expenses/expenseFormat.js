@@ -23,11 +23,12 @@ export const LANE_LABEL = {
   closed: 'סגור',
   unpaid_marked: 'סגור — עוד לא שולמה',
   no_invoice: 'לא צריך חשבונית',
+  credit: 'זיכוי',
 };
 
 /** Which tab a lane lives in (search rows jump there). */
 export const LANE_TAB = {
-  review: 'pair', open: 'pair', pair: 'pair', awaiting_fx: 'pair', no_invoice: 'pair', receipt: 'receipts', closed: 'closed', unpaid_marked: 'closed',
+  review: 'pair', open: 'pair', pair: 'pair', awaiting_fx: 'pair', no_invoice: 'pair', receipt: 'receipts', closed: 'closed', unpaid_marked: 'closed', credit: 'tools',
 };
 
 /** The branch filter value for "כללי" (no single branch). */
@@ -86,6 +87,9 @@ export function tintSx(verdict) {
 export const scoreColor = (score) => (score >= 85 ? 'success' : score >= 55 ? 'warning' : 'default');
 
 /** Empty review form from a document (what the person may correct). */
+/** A machine-read shekel amount of 0: the reader did not see the amount. */
+export const missingAmount = (doc) => (doc.currency || 'ILS') === 'ILS' && Number(doc.amount_ils ?? doc.amount_total) === 0;
+
 export function reviewInit(doc) {
   const foreignUnknown = (doc.currency || 'ILS') !== 'ILS' && doc.amount_ils == null;
   return {
@@ -93,7 +97,8 @@ export function reviewInit(doc) {
     doc_number: doc.doc_number || '',
     supplier_tax_id: doc.supplier_tax_id || '',
     doc_date: doc.doc_date || '',
-    amount_total: foreignUnknown ? '' : String(doc.amount_ils ?? doc.amount_total ?? ''),
+    // An amount the reader missed arrives as 0 — start empty so it is typed, not confirmed.
+    amount_total: foreignUnknown || missingAmount(doc) ? '' : String(doc.amount_ils ?? doc.amount_total ?? ''),
     doc_type: doc.doc_type || 'tax_invoice',
     branch: branchValue(doc),
   };
