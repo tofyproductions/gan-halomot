@@ -7,7 +7,7 @@
  * turns those into responses. Reads never write (rules are seeded at boot).
  */
 const mongoose = require('mongoose');
-const { ExpenseDocument, Supplier, NoInvoiceRule } = require('../models');
+const { BankTransaction, ExpenseDocument, Supplier, NoInvoiceRule } = require('../models');
 const core = require('../services/expenseCore.service');
 const pairs = require('../services/expensePairs.service');
 const writes = require('../services/expenseWrites.service');
@@ -59,6 +59,24 @@ async function receiptCandidates(req, res) {
 
 async function closed(req, res) {
   const docs = (await core.documentsWithState()).filter(d => d.lane === 'closed' || d.lane === 'unpaid_marked');
+  // The closed tab lists each payment's charge (date, description, account),
+  // so the person can see what closed the document before "✗ לא שייך".
+  const txIds = [...new Set(docs.flatMap(d => d.payments.map(p => String(p.transaction_id))))];
+  const txs = txIds.length
+    ? await BankTransaction.find({ _id: { $in: txIds } }, 'date description counterparty transfer_note account_id')
+      .populate('account_id', 'label type').lean()
+    : [];
+  const txMap = new Map(txs.map(t => [String(t._id), t]));
+  for (const d of docs) {
+    d.payments = d.payments.map((p) => {
+      const t = txMap.get(String(p.transaction_id)) || {};
+      const acc = t.account_id && typeof t.account_id === 'object' ? t.account_id : {};
+      return {
+        ...p, date: t.date || '', description: t.description || '', counterparty: t.counterparty || '',
+        transfer_note: t.transfer_note || '', account_label: acc.label || '', account_type: acc.type || null,
+      };
+    });
+  }
   res.json({ documents: docs });
 }
 

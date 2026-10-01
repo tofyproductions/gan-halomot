@@ -241,6 +241,8 @@ async function main() {
   const lane = (await request({ path: `${A}/receipts`, token: viewer })).body;
   const queue2 = (await request({ path: `${A}/pairs`, token: viewer })).body;
   eq(cnt.closed + cnt.unpaid_marked, closedList.documents.length, 'closed+unpaid_marked = רשימת הסגורים');
+  const closedPay = closedList.documents.find(d => String(d._id) === String(docId))?.payments?.[0];
+  eq(closedPay && closedPay.date, t1.date, 'בלשונית סגור — לכל תשלום פרטי החיוב (תאריך)');
   eq(cnt.pair, queue2.pairs.length, 'pair = אורך התור');
   eq(cnt.receipts, lane.waiting.length, 'receipts = ממתינות');
   eq(cnt.overdue, lane.overdue.length, 'overdue = באיחור');

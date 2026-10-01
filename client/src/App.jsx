@@ -57,6 +57,7 @@ const BranchPayslips = lazy(() => import('./components/payroll/BranchPayslips'))
 const ClassTrackingPage = lazy(() => import('./components/classes/ClassTrackingPage'));
 const CollectionsTable = lazy(() => import('./components/collections/CollectionsTable'));
 const BankPage = lazy(() => import('./components/bank/BankPage'));
+const ExpensesPage = lazy(() => import('./components/expenses/ExpensesPage'));
 const ContactListPDF = lazy(() => import('./components/contacts/ContactListPDF'));
 const ContractSigning = lazy(() => import('./components/employees/ContractSigning'));
 const CoursesPage = lazy(() => import('./components/compliance/CoursesPage'));
@@ -234,6 +235,7 @@ function AppRoutes() {
         <Route path="tmt-reconcile" element={<Navigate to="/external-enrollment?view=tmt" replace />} />
         <Route path="collections" element={<CollectionsTable />} />
         <Route path="bank" element={<ProtectedRoute tab="bank"><BankPage /></ProtectedRoute>} />
+        <Route path="expenses" element={<ProtectedRoute tab="expenses"><ExpensesPage /></ProtectedRoute>} />
         <Route path="pricing" element={
           <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager', 'accountant']}>
             <PricingManager />
