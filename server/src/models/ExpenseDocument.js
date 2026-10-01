@@ -40,6 +40,10 @@ const expenseDocumentSchema = new mongoose.Schema({
   icount_gone_at: { type: Date, default: null },
   icount_voided_by_bridge: { type: Boolean, default: false }, // voided because it left iCount; only these come back
   icount_id_released: { type: String, default: null }, // icount_id a person's void let go of (the row gets its own document)
+  // Created in iCount but the local save failed: the id we created, so a retry that adopts it knows we filed it.
+  icount_pending_id: { type: String, default: null },
+  icount_pending_by: ref('User'),
+  icount_pending_at: { type: Date, default: null },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 expenseDocumentSchema.index({ mail_sorter_id: 1 }, { unique: true, sparse: true });

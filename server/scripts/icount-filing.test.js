@@ -165,8 +165,12 @@ const TAX_B = '510000094';
     await setType(2);
 
     const open = await doc({ doc_number: 'P-2' });
+    clearSupplierCache();
+    const reads = f.of('/supplier/get_list').length;
     const p5 = await filing.previewFiling(String(open._id), { client: f.client });
     ok(!p5.ok && p5.blockers.some(b => /סגור/.test(b)), 'לא בסגור — מופיע כחוסם בתצוגה');
+    eq(f.of('/supplier/get_list').length, reads, 'שער נכשל — לא קוראים את רשימת הספקים');
+    eq(p5.icount_supplier, null, 'ובלי ספק אייקאונט');
 
     const off = fakeIcount({ configured: false });
     const p6 = await filing.previewFiling(String(d._id), { client: off.client });
@@ -369,6 +373,19 @@ const TAX_B = '510000094';
     eq((await filing.fileToIcount(String(p._id), { by, client: fp.client, confirm_duplicate: true })).filed, true, 'עם אישור — הועלה');
 
     // cancelled rows never count; a different number far away is different
+    // iCount's supplier filter is not trusted: another supplier's row with the same printed number is not ours
+    const other = await closedDoc({ doc_number: 'SAME-1' });
+    const fo = hit([
+      { expense_id: 'X8', expense_docnum: 'SAME-1', expense_date: '2026-09-10', nis_sum: 100, supplier_id: 22 },
+      { expense_id: 'X9', expense_docnum: 'SAME-1', expense_date: '2026-09-10', nis_sum: 100, supplier_vat_id: TAX_B },
+    ]);
+    eq((await filing.fileToIcount(String(other._id), { by, client: fo.client })).filed, true, 'ספק אחר עם אותו מספר — נוצר, לא אומץ');
+    eq(fo.creates(), 1, 'create נקרא');
+    ok(!['X8', 'X9'].includes((await fresh(other)).icount_id), 'לא קיבל מזהה של ספק אחר');
+    const byName = await closedDoc({ doc_number: 'G-1', currency: 'USD', amount_original: 10, fx_confirmed: true, supplier_tax_id: '', vendor_name: 'Google Ireland' });
+    const fg = hit([{ expense_id: 'X10', expense_docnum: 'G-1', expense_date: '2026-09-10', nis_sum: 100, supplier_id: 22 }]);
+    deepEq(await filing.fileToIcount(String(byName._id), { by, client: fg.client }), { adopted: true, icount_id: 'X10' }, 'ספק לפי שם (בלי ח.פ) — אומץ לפי זהות אמיתית');
+
     const s = await closedDoc({ doc_number: 'S-1' });
     const fs = hit([
       { expense_id: 'X5', expense_docnum: 'S-1', expense_date: '2026-09-10', nis_sum: 100, is_storno: 1 },
@@ -382,6 +399,68 @@ const TAX_B = '510000094';
     const ei = await refuses(() => filing.fileToIcount(String(inc._id), { by, client: fi.client }), 502, 'ICOUNT_ERROR', 'חיפוש חלקי — נעצר');
     ok(ei && /900/.test(ei.message), 'ההודעה אומרת כמה לא נקראו');
     eq(fi.creates(), 0, 'create לא נקרא');
+  }
+
+  console.log('\nשמירה אחרי יצירה — מקרי קצה');
+  await reset();
+  {
+    // voided while the create was in flight → SAVE_FAILED; the next sync gives the row its own document
+    const v = await closedDoc({ doc_number: 'V-1' });
+    const fv = fakeIcount({ handlers: { '/expense/create': async () => {
+      await ExpenseDocument.updateOne({ _id: v._id }, { $set: { status: 'void' } });
+      return { status: true, expense_id: 'EV1' };
+    } } });
+    const origErr = console.error; console.error = () => {};
+    try {
+      const ev = await refuses(() => filing.fileToIcount(String(v._id), { by, client: fv.client }), 500, 'SAVE_FAILED', 'בוטל בזמן היצירה');
+      ok(ev && ev.icount_id === 'EV1' && ev.message.includes('EV1'), 'השגיאה נושאת את המזהה שנוצר');
+    } finally { console.error = origErr; }
+    const va = await fresh(v);
+    ok(va.icount_id === null && va.icount_filed_at === null, 'המסמך המבוטל לא סומן');
+    eq(va.icount_pending_id, 'EV1', 'המזהה שנוצר נזכר');
+    await IcountExpense.create({ icount_id: 'EV1', supplier_id: '11', supplier_name: 'חשמל ישראל', supplier_tax_id: TAX_A, doc_number: 'V-1', doc_date: '2026-09-10', amount_total: 100, doctype: 'invoice' });
+    const { syncBridge } = require('../src/services/icountBridge.service');
+    eq((await syncBridge()).created, 1, 'הסנכרון הבא יצר לשורה מסמך משלה');
+    eq((await ExpenseDocument.findOne({ icount_id: 'EV1' }).lean())?.source, 'icount', 'מסמך אייקאונט מחזיק אותה');
+
+    // the bridge linked our document to the new row while the create was in flight → filed
+    const l = await closedDoc({ doc_number: 'L-1' });
+    const fl = fakeIcount({ handlers: { '/expense/create': async () => {
+      await ExpenseDocument.updateOne({ _id: l._id }, { $set: { icount_id: 'EL1' } });
+      return { status: true, expense_id: 'EL1', docnum: '501' };
+    } } });
+    deepEq(await filing.fileToIcount(String(l._id), { by, client: fl.client }), { filed: true, icount_id: 'EL1' }, 'הגשר קישר בינתיים — הועלה');
+    const la = await fresh(l);
+    ok(la.icount_filed_at instanceof Date && String(la.icount_filed_by) === String(by) && la.icount_docnum === '501', 'סומן "הועלה" עם מי ומספר');
+
+    // the local save fails → SAVE_FAILED; the retry finds it in iCount and knows we filed it
+    const r = await closedDoc({ doc_number: 'RT-1' });
+    const fr = fakeIcount({ handlers: { '/expense/create': () => ({ status: true, expense_id: 'ER1' }) } });
+    const origUpd = ExpenseDocument.updateOne;
+    let broke = false;
+    ExpenseDocument.updateOne = function (filter, ...rest) {
+      if (!broke && filter && 'icount_filed_at' in filter) { broke = true; throw new Error('db down'); }
+      return origUpd.call(this, filter, ...rest);
+    };
+    console.error = () => {};
+    try {
+      await refuses(() => filing.fileToIcount(String(r._id), { by, client: fr.client }), 500, 'SAVE_FAILED', 'השמירה המקומית נכשלה');
+    } finally { ExpenseDocument.updateOne = origUpd; console.error = origErr; }
+    eq((await fresh(r)).icount_pending_id, 'ER1', 'המזהה שנוצר נזכר');
+    const other = new mongoose.Types.ObjectId();
+    const fr2 = fakeIcount({ handlers: { '/expense/search': () => ({ status: true, total_count: 1, results_list: [{ expense_id: 'ER1', expense_docnum: 'RT-1', expense_date: '2026-09-10', nis_sum: 100, supplier_id: 11 }] }) } });
+    deepEq(await filing.fileToIcount(String(r._id), { by: other, client: fr2.client }), { filed: true, icount_id: 'ER1', recovered: true }, 'ניסיון חוזר — נמצא, ומסומן שהעלינו אותו');
+    eq(fr2.creates(), 0, 'לא נוצר שוב');
+    const ra = await fresh(r);
+    ok(ra.icount_id === 'ER1' && ra.icount_filed_at instanceof Date && String(ra.icount_filed_by) === String(by), 'icount_filed_at/by — של מי שהעלה בפעם הראשונה');
+    eq(ra.icount_pending_id, null, 'המזהה הממתין נוקה');
+
+    // adopting a row we did NOT create stays "adopted"
+    const n = await closedDoc({ doc_number: 'NP-1' });
+    await ExpenseDocument.updateOne({ _id: n._id }, { $set: { icount_pending_id: 'SOMETHING-ELSE' } });
+    const fn = fakeIcount({ handlers: { '/expense/search': () => ({ status: true, total_count: 1, results_list: [{ expense_id: 'EN1', expense_docnum: 'NP-1', expense_date: '2026-09-10', nis_sum: 100 }] }) } });
+    eq((await filing.fileToIcount(String(n._id), { by, client: fn.client })).adopted, true, 'מזהה אחר — אימוץ רגיל');
+    eq((await fresh(n)).icount_filed_at, null, 'בלי "הועלה"');
   }
 
   console.log('\nreportPaid / undoReportPaid (spec §5, port notes §8)');
@@ -419,10 +498,13 @@ const TAX_B = '510000094';
     deepEq(f.of('/expense/update')[0].params, { expense_id: 'R9', expense_paid: '1', expense_paid_date: '2026-09-20' }, 'נשלחו רק שדות התשלום');
     const rep = await IcountPaidReport.findOne({ document_id: d._id }).lean();
     ok(rep && rep.icount_id === 'R9' && rep.paid_date === '2026-09-20' && String(rep.reported_by) === String(by), 'IcountPaidReport נשמר');
-    await rp(d, { date: '2026-09-21' });
+    await rp(d, { date: '2026-09-14' });
     eq(await IcountPaidReport.countDocuments({ document_id: d._id }), 1, 'דיווח חוזר — שורה אחת למסמך');
-    eq((await IcountPaidReport.findOne({ document_id: d._id }).lean()).paid_date, '2026-09-21', 'תאריך שניתן במפורש');
+    eq((await IcountPaidReport.findOne({ document_id: d._id }).lean()).paid_date, '2026-09-14', 'תאריך שניתן במפורש — של חיוב מקושר');
+    const calls = f.calls.length;
+    await refuses(() => rp(d, { date: '2026-09-21' }), 400, 'BAD_DATE', 'תאריך שאינו של אף חיוב מקושר');
     await refuses(() => rp(d, { date: '21/09/2026' }), 400, 'BAD_DATE', 'תאריך לא תקין');
+    eq(f.calls.length, calls, 'תאריך שגוי — אין קריאה לאייקאונט');
 
     const failing = fakeIcount({ handlers: { '/expense/update': () => ({ status: false, reason: 'expense_not_found' }) } });
     const d2 = await doc({ icount_id: 'R10' });
@@ -436,11 +518,15 @@ const TAX_B = '510000094';
     const n = f.of('/expense/update').length;
     deepEq(await filing.undoReportPaid(String(d._id), { by, client: f.client }), { undone: true }, 'ביטול הדיווח');
     deepEq(f.of('/expense/update')[n].params, { expense_id: 'R9', expense_paid: '0' }, 'ביטול: expense_paid=0 בלבד, בלי תאריך');
-    eq(await IcountPaidReport.countDocuments({ document_id: d._id }), 0, 'הדיווח נמחק');
+    const undone = await IcountPaidReport.findOne({ document_id: d._id }).lean();
+    ok(undone && undone.undone_at instanceof Date && String(undone.undone_by) === String(by), 'הדיווח סומן כמבוטל, עם מי ביטל');
+    await refuses(() => filing.undoReportPaid(String(d._id), { by, client: f.client }), 400, 'NOT_REPORTED', 'ביטול שני — אין דיווח פעיל');
     const undoFail = fakeIcount({ handlers: { '/expense/update': () => ({ status: false, reason: 'nope' }) } });
     await rp(d);
+    const again = await IcountPaidReport.findOne({ document_id: d._id }).lean();
+    ok(again.undone_at === null && again.undone_by === null, 'דיווח מחדש מנקה את הביטול');
     await refuses(() => filing.undoReportPaid(String(d._id), { by, client: undoFail.client }), 502, 'ICOUNT_ERROR', 'ביטול שאייקאונט סירב');
-    eq(await IcountPaidReport.countDocuments({ document_id: d._id }), 1, 'הדיווח נשאר');
+    eq((await IcountPaidReport.findOne({ document_id: d._id }).lean()).undone_at, null, 'הדיווח נשאר פעיל');
     ok(f.calls.every(c => !Object.keys(c.params).some(k => /payment|sum|vat/i.test(k)) || c.method !== '/expense/update'), 'שום עדכון לא שלח payments/סכום/מע״מ');
     eq(f.creates() + failing.creates() + undoFail.creates(), 0, 'עדכון ששולם לא יוצר מסמכים');
   }

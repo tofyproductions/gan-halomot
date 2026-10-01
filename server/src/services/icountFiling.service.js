@@ -135,7 +135,7 @@ async function icountSupplierFor(doc, client) {
   const { suppliers, complete } = await listSuppliers({ client });
   const hit = complete ? resolveIn(suppliers, { tax_id: doc.supplier_tax_id, name: doc.vendor_name }) : null;
   const supplier = hit ? suppliers.find(x => x.id === hit.id) || { ...hit, tax_id: '' } : null;
-  return { configured: true, complete, supplier };
+  return { configured: true, complete, supplier, suppliers };
 }
 
 /** Gate failures as [{status, code, message}], in the filing order (404 excluded). */
@@ -150,13 +150,19 @@ async function gateFailures(doc) {
 
 /**
  * Dry run: what would be sent, and to which iCount supplier. Reads the
- * supplier list only — never searches, never writes.
+ * supplier list only (and not even that when a gate already refuses) —
+ * never searches, never writes.
  * → { ok, blockers, payload|null, icount_supplier|null }
  */
 async function previewFiling(documentId, { expense_type_id, client = getClient() } = {}) {
   const doc = await loadDoc(documentId);
   const gates = (await gateFailures(doc)).map(g => g.message);
   const typeId = await expenseTypeId(expense_type_id);
+  const supplier = await ourSupplier(doc);
+  if (gates.length) {
+    // It cannot be filed whatever iCount says — no reason to ask iCount anything.
+    return { ok: false, blockers: [...gates, ...fileBlockers(doc, { supplier, expense_type_id: typeId })], payload: null, icount_supplier: null };
+  }
   let icount;
   try {
     icount = await icountSupplierFor(doc, client);
@@ -164,7 +170,7 @@ async function previewFiling(documentId, { expense_type_id, client = getClient()
     const err = fromIcount(e);
     icount = { configured: true, complete: false, supplier: null, error: err.message };
   }
-  const blockers = [...gates, ...fileBlockers(doc, { supplier: await ourSupplier(doc), expense_type_id: typeId, icount })];
+  const blockers = fileBlockers(doc, { supplier, expense_type_id: typeId, icount });
   if (icount.error) blockers.push(icount.error);
   const ready = blockers.length === 0;
   return {
@@ -179,20 +185,23 @@ async function previewFiling(documentId, { expense_type_id, client = getClient()
  * Port notes §6-§7 pre-create check: every iCount expense of that supplier
  * (no date filter). → { verdict: 'same_document'|'probable'|'different', row? }
  */
-async function searchExisting(doc, icountSupplier, client) {
+async function searchExisting(doc, icountSupplier, suppliers, client) {
   const { rows, total, complete } = await fetchPaged(client, METHODS.search, { supplier_id: icountSupplier.id });
   if (!complete) {
     throw fail(502, 'ICOUNT_ERROR', `אייקאונט דיווח על ${total ?? 'יותר'} מסמכים לספק הזה ולא הצלחנו לקרוא את כולם — ההעלאה נעצרה`);
   }
-  // The search is scoped to the resolved supplier, so both sides are that
-  // supplier by construction; compareToIcount then decides on number, or on
-  // amount + date for "probable".
-  const sameSupplier = { supplier_tax_id: '', supplier_name: `#${icountSupplier.id}` };
+  // iCount's supplier filter is not trusted: a row carrying another
+  // supplier_id is skipped, and every row is compared with its REAL supplier
+  // identity (ח.פ + name from the supplier list in hand) against ours.
+  const cards = new Map(suppliers.map(x => [x.id, x]));
   let probable = null;
   for (const raw of rows) {
     const m = mapExpenseRow(raw);
     if (m.is_storno || !m.icount_id) continue;
-    const v = compareToIcount({ ...doc, ...sameSupplier }, { ...m, ...sameSupplier });
+    if (m.supplier_id && m.supplier_id !== icountSupplier.id) continue;
+    const card = cards.get(m.supplier_id || icountSupplier.id) || icountSupplier;
+    const theirs = { ...m, supplier_tax_id: m.supplier_tax_id || card.tax_id || '', supplier_name: card.name || '' };
+    const v = compareToIcount(doc, theirs);
     if (v === 'same_document') return { verdict: v, row: m };
     if (v === 'probable' && !probable) probable = m;
   }
@@ -217,6 +226,13 @@ async function adopt(doc, icountId, by) {
     }
     throw e;
   }
+  if (doc.icount_pending_id && doc.icount_pending_id === icountId) {
+    // We created it ourselves on an earlier press whose local save failed: it is ours, filed.
+    await ExpenseDocument.updateOne({ _id: doc._id, icount_id: icountId }, {
+      $set: { icount_filed_at: doc.icount_pending_at || new Date(), icount_filed_by: doc.icount_pending_by || by || null, icount_pending_id: null, icount_pending_by: null, icount_pending_at: null },
+    });
+    return { filed: true, icount_id: icountId, recovered: true };
+  }
   return { adopted: true, icount_id: icountId };
 }
 
@@ -231,7 +247,9 @@ async function fileToIcount(documentId, { expense_type_id, confirm_duplicate = f
   const pre = await loadDoc(documentId);
   // Every iCount write for one document runs one at a time (a double click
   // must not create twice). Not the `doc:` key: adopting may merge a twin,
-  // which takes that lock itself.
+  // which takes that lock itself. The lock is IN-PROCESS: it protects a single
+  // server instance only (production runs one Render instance). Across
+  // instances the guarded save and the pre-create search are the only guards.
   return withLocks([`icount:${pre._id}`], async () => {
     const doc = await loadDoc(documentId);
     const [gate] = await gateFailures(doc);
@@ -249,7 +267,7 @@ async function fileToIcount(documentId, { expense_type_id, confirm_duplicate = f
     if (remote.length) throw fail(400, 'BLOCKED', remote[0], { blockers: remote });
 
     let found;
-    try { found = await searchExisting(doc, icount.supplier, client); } catch (e) { throw e.status ? e : fromIcount(e); }
+    try { found = await searchExisting(doc, icount.supplier, icount.suppliers, client); } catch (e) { throw e.status ? e : fromIcount(e); }
     if (found.verdict === 'same_document') return adopt(doc, found.row.icount_id, by);
     if (found.verdict === 'probable' && confirm_duplicate !== true) {
       throw fail(409, 'PROBABLE_DUPLICATE',
@@ -270,14 +288,32 @@ async function fileToIcount(documentId, { expense_type_id, confirm_duplicate = f
     const pick = (...vals) => { const v = vals.find(x => x !== undefined && x !== null && String(x).trim() !== ''); return v === undefined ? null : String(v); };
     const icountId = pick(resp.expense_id, resp.docnum, resp.id);
     const docnum = pick(resp.docnum, resp.expense_id, resp.id) || '';
-    const set = { icount_docnum: docnum, icount_filed_at: new Date(), icount_filed_by: by || null };
+    const set = { icount_docnum: docnum, icount_filed_at: new Date(), icount_filed_by: by || null, icount_pending_id: null, icount_pending_by: null, icount_pending_at: null };
     if (icountId) set.icount_id = icountId;
     let saved;
     try {
-      saved = await ExpenseDocument.updateOne({ _id: doc._id, icount_id: null, icount_filed_at: null }, { $set: set });
+      saved = await ExpenseDocument.updateOne({ _id: doc._id, status: 'active', icount_id: null, icount_filed_at: null }, { $set: set });
     } catch (e) { saved = { modifiedCount: 0, error: e }; }
+    if (!saved.modifiedCount && icountId) {
+      // The bridge may have linked this very row to our document meanwhile: then it is filed.
+      const now = await ExpenseDocument.findById(doc._id, 'status icount_id icount_filed_at').lean().catch(() => null);
+      if (now && now.status === 'active' && now.icount_id === icountId) {
+        if (!now.icount_filed_at) {
+          await ExpenseDocument.updateOne({ _id: doc._id, icount_id: icountId, icount_filed_at: null },
+            { $set: { icount_docnum: docnum, icount_filed_at: set.icount_filed_at, icount_filed_by: set.icount_filed_by } });
+        }
+        return { filed: true, icount_id: icountId };
+      }
+    }
     if (!saved.modifiedCount) {
-      // It IS in iCount now. Say so loudly; a retry's pre-create search adopts it.
+      // It IS in iCount now. Say so loudly, and remember the id we created so a
+      // retry (whose pre-create search adopts it) knows it was us who filed it.
+      // A document voided meanwhile ends up here too; the next sync gives the row its own document.
+      if (icountId) {
+        await ExpenseDocument.updateOne({ _id: doc._id }, {
+          $set: { icount_pending_id: icountId, icount_pending_by: by || null, icount_pending_at: set.icount_filed_at },
+        }).catch(() => {});
+      }
       console.error('[icountFiling] created in iCount but not saved here', { document_id: String(doc._id), icount_id: icountId, error: saved.error && saved.error.message });
       throw fail(500, 'SAVE_FAILED', `המסמך נוצר באייקאונט (${icountId || 'בלי מספר'}) אבל לא נשמר כאן — אל תעלו אותו שוב; משכו מאייקאונט`, { icount_id: icountId });
     }
@@ -307,13 +343,12 @@ async function reportPaid(documentId, { date, by = null, client = getClient() } 
     if (!(s.state === 'settled' && !s.decision && s.payments.length > 0)) {
       throw fail(400, 'NOT_SETTLED', 'אפשר לעדכן ששולם רק כשחיובי הבנק מכסים את המסמך');
     }
-    let paidDate = date;
-    if (paidDate === undefined || paidDate === null || paidDate === '') {
-      const txs = await BankTransaction.find({ _id: { $in: s.payments.map(p => p.transaction_id) } }, 'date').lean();
-      paidDate = txs.map(t => String(t.date || '').slice(0, 10)).sort().slice(-1)[0];
-    }
-    if (!isYmd(paidDate) || Number.isNaN(Date.parse(paidDate))) {
-      throw fail(400, 'BAD_DATE', 'תאריך התשלום חסר או לא תקין — זה תאריך החיוב בבנק, לא היום');
+    const txs = await BankTransaction.find({ _id: { $in: s.payments.map(p => p.transaction_id) } }, 'date').lean();
+    const chargeDates = txs.map(t => String(t.date || '').slice(0, 10)).filter(isYmd).sort();
+    const given = date !== undefined && date !== null && date !== '';
+    const paidDate = given ? String(date) : chargeDates.slice(-1)[0];
+    if (!isYmd(paidDate) || Number.isNaN(Date.parse(paidDate)) || !chargeDates.includes(paidDate)) {
+      throw fail(400, 'BAD_DATE', 'תאריך התשלום חסר או לא תקין — הוא חייב להיות תאריך של אחד מחיובי הבנק המקושרים, לא היום');
     }
     if (!client.isConfigured()) throw fail(503, 'NOT_CONFIGURED', MSG.notConnected);
 
@@ -326,26 +361,29 @@ async function reportPaid(documentId, { date, by = null, client = getClient() } 
     // Only now: a row written before the call would claim a statement possibly never made.
     await IcountPaidReport.findOneAndUpdate(
       { document_id: doc._id },
-      { $set: { icount_id: doc.icount_id, paid_date: paidDate, reported_by: by || null, reported_at: new Date() } },
+      { $set: { icount_id: doc.icount_id, paid_date: paidDate, reported_by: by || null, reported_at: new Date(), undone_at: null, undone_by: null } },
       { upsert: true },
     );
     return { reported: true, paid_date: paidDate };
   });
 }
 
-/** A press of its own: iCount back to unpaid (expense_paid:0, no date), then the record goes. */
-async function undoReportPaid(documentId, { client = getClient() } = {}) {
+/**
+ * A press of its own: iCount back to unpaid (expense_paid:0, no date). The
+ * record stays, marked undone_at / undone_by, so who undid it is kept.
+ */
+async function undoReportPaid(documentId, { by = null, client = getClient() } = {}) {
   const pre = await loadDoc(documentId);
   return withLocks([`icount:${pre._id}`], async () => {
     const report = await IcountPaidReport.findOne({ document_id: pre._id }).lean();
-    if (!report) throw fail(400, 'NOT_REPORTED', 'לא דווח לאייקאונט ששולם');
+    if (!report || report.undone_at) throw fail(400, 'NOT_REPORTED', 'לא דווח לאייקאונט ששולם');
     if (!client.isConfigured()) throw fail(503, 'NOT_CONFIGURED', MSG.notConnected);
     let resp;
     try {
       resp = await client.post(METHODS.update, { expense_id: report.icount_id, expense_paid: 0 });
     } catch (e) { throw fromIcount(e); }
     if (!resp || !resp.status) throw fail(502, 'ICOUNT_ERROR', String(resp?.reason ?? resp?.error_description ?? resp?.error ?? 'שגיאה לא ידועה מאייקאונט'));
-    await IcountPaidReport.deleteOne({ _id: report._id });
+    await IcountPaidReport.updateOne({ _id: report._id }, { $set: { undone_at: new Date(), undone_by: by || null } });
     return { undone: true };
   });
 }
