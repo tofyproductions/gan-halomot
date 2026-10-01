@@ -54,6 +54,7 @@ async function pullMirror({ client = getClient(), concurrency, gapMs, now = () =
   const pull = await IcountPull.create({ started_at: now(), date_from: dateFrom });
   const failures = [];
   let suppliersRead = 0;
+  let aborted = false; // first THROTTLED stops the pull: retrying through a throttle lengthens it
 
   const finish = async (error = '') => {
     result.partial = Boolean(error) || failures.length > 0;
@@ -84,7 +85,15 @@ async function pullMirror({ client = getClient(), concurrency, gapMs, now = () =
     let fetched;
     try {
       fetched = await fetchPaged(client, METHODS.search, { supplier_id: s.id });
-    } catch (e) { failures.push({ supplier: label, reason: short(e) }); return; }
+    } catch (e) {
+      if (e.code === 'THROTTLED') {
+        if (!aborted) failures.push({ supplier: label, reason: short(e) }); // ONE named failure
+        aborted = true;
+        return;
+      }
+      failures.push({ supplier: label, reason: short(e) });
+      return;
+    }
     if (!fetched.complete) { failures.push({ supplier: label, reason: 'לא כל המסמכים נקראו' }); return; }
     suppliersRead++;
 
@@ -124,7 +133,7 @@ async function pullMirror({ client = getClient(), concurrency, gapMs, now = () =
 
   let next = 0;
   const worker = async () => {
-    for (let i = next++; i < toRead.length; i = next++) {
+    for (let i = next++; i < toRead.length && !aborted; i = next++) {
       await readSupplier(toRead[i]);
       if (gap && i < toRead.length - 1) await sleep(gap);
     }

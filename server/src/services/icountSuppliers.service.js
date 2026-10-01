@@ -8,6 +8,7 @@
  */
 const { getClient } = require('./ganIcount.client');
 const { vendorKey } = require('./expenseCore.service');
+const { isValidIsraeliID } = require('../utils/id-generator');
 
 const METHODS = Object.freeze({
   search: '/expense/search',
@@ -78,6 +79,16 @@ async function listSuppliers({ refresh = false, client = getClient(), now = Date
   return value;
 }
 
+/**
+ * Port notes §4 trustedTaxId: a number longer than 9 digits, or failing the
+ * Israeli check digit, is a misread and is IGNORED so the name decides
+ * (incident 30.09: 510298946 read as 516298946 made a supplier look different).
+ */
+function trustedTaxId(v) {
+  const d = digits(v);
+  return d.length >= 1 && d.length <= 9 && isValidIsraeliID(d) ? d.padStart(9, '0') : '';
+}
+
 /** Build the lookup maps (port notes §4). */
 function buildIndex(suppliers) {
   const byId = new Map();
@@ -86,7 +97,8 @@ function buildIndex(suppliers) {
   const ambiguous = new Set();
   for (const s of suppliers) {
     byId.set(s.id, s);
-    if (s.tax_id && !idByVat.has(s.tax_id)) idByVat.set(s.tax_id, s.id); // first wins: stable
+    const tax = trustedTaxId(s.tax_id);
+    if (tax && !idByVat.has(tax)) idByVat.set(tax, s.id); // first wins: stable
     const key = vendorKey(s.name);
     if (!key || ambiguous.has(key)) continue;
     if (idByName.has(key) && idByName.get(key) !== s.id) { idByName.delete(key); ambiguous.add(key); } else idByName.set(key, s.id);
@@ -97,13 +109,13 @@ function buildIndex(suppliers) {
 /** Pure resolver over an already-read list. → { id, name } | null */
 function resolveIn(suppliers, { tax_id, name } = {}) {
   const { byId, idByVat, idByName } = buildIndex(suppliers);
-  const vat = digits(tax_id);
+  const vat = trustedTaxId(tax_id);
   if (vat && idByVat.has(vat)) { const s = byId.get(idByVat.get(vat)); return { id: s.id, name: s.name }; }
   const key = vendorKey(name);
   const hit = key ? idByName.get(key) : null;
   if (!hit) return null;
   const card = byId.get(hit);
-  if (card.tax_id && vat) return null; // the card carries a different ח.פ: another company
+  if (trustedTaxId(card.tax_id) && vat) return null; // the card carries a different ח.פ: another company
   return { id: card.id, name: card.name };
 }
 
@@ -116,5 +128,5 @@ async function resolveSupplier({ tax_id, name } = {}, opts = {}) {
 
 module.exports = {
   METHODS, PAGE_SIZE, fetchPaged, rowsOf, firstOf, digits,
-  listSuppliers, resolveSupplier, resolveIn, clearSupplierCache,
+  listSuppliers, resolveSupplier, resolveIn, trustedTaxId, clearSupplierCache,
 };

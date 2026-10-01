@@ -20,6 +20,7 @@ function fakeClient({ suppliers, expenses = {}, throttleFor = [], configured = t
   const calls = [];
   return {
     calls,
+    expenses,
     isConfigured: () => configured,
     async post(method, params = {}) {
       calls.push({ method, params });
@@ -75,21 +76,24 @@ const row = (id, no, date, sum, extra = {}) => ({ expense_id: id, expense_docnum
 
     const c2 = fakeClient({ suppliers: [
       ...SUP,
-      { supplier_id: 44, supplier_name: 'חשמל ישראל', vat_id: '510000099' },  // same name, different vat
+      { supplier_id: 44, supplier_name: 'חשמל ישראל', vat_id: '510000094' },  // same name, different vat
       { supplier_id: 55, supplier_name: 'שם כפול', vat_id: '' },
       { supplier_id: 66, supplier_name: 'שם   כפול', vat_id: '' },
-      { supplier_id: 77, supplier_name: 'ספק כפול ח"פ א', vat_id: '510000077' },
-      { supplier_id: 88, supplier_name: 'ספק כפול ח"פ ב', vat_id: '510000077' },
+      { supplier_id: 77, supplier_name: 'ספק כפול ח"פ א', vat_id: '510000771' },
+      { supplier_id: 88, supplier_name: 'ספק כפול ח"פ ב', vat_id: '510000771' },
     ] });
     const opts = { client: c2, refresh: true };
     eq((await suppliersSvc.resolveSupplier({ tax_id: '51-0000011', name: 'x' }, opts)).id, '11', 'לפי ח.פ (ספרות בלבד)');
     eq((await suppliersSvc.resolveSupplier({ tax_id: '', name: 'מים וביוב בע"מ' }, opts)).id, '22', 'לפי שם מנורמל');
     eq((await suppliersSvc.resolveSupplier({ tax_id: '', name: 'מים וביוב בע"מ' }, opts)).name, 'מים וביוב', 'מחזיר שם');
     eq(await suppliersSvc.resolveSupplier({ tax_id: '', name: 'שם כפול' }, opts), null, 'שם דו-משמעי — null');
-    eq((await suppliersSvc.resolveSupplier({ tax_id: '510000077', name: '' }, opts)).id, '77', 'ח.פ כפול — הראשון מנצח');
+    eq((await suppliersSvc.resolveSupplier({ tax_id: '510000771', name: '' }, opts)).id, '77', 'ח.פ כפול — הראשון מנצח');
     eq(await suppliersSvc.resolveSupplier({ tax_id: '510000011', name: 'אחר לגמרי' }, opts).then(r => r.id), '11', 'ח.פ מנצח שם');
-    eq(await suppliersSvc.resolveSupplier({ tax_id: '510000555', name: 'ספק כפול ח"פ א' }, opts), null, 'לכרטיס שם יש ח.פ אחר — חברה אחרת');
-    eq((await suppliersSvc.resolveSupplier({ tax_id: '510000555', name: 'מים וביוב' }, opts)).id, '22', 'לכרטיס אין ח.פ — השם מחליט');
+    eq(await suppliersSvc.resolveSupplier({ tax_id: '510000557', name: 'ספק כפול ח"פ א' }, opts), null, 'ח.פ תקין אבל שונה מזה שבכרטיס — חברה אחרת');
+    eq((await suppliersSvc.resolveSupplier({ tax_id: '510000555', name: 'ספק כפול ח"פ א' }, opts)).id, '77', 'ח.פ שגוי (ספרת ביקורת) — מתעלמים, השם מחליט');
+    eq((await suppliersSvc.resolveSupplier({ tax_id: '5100007710', name: 'ספק כפול ח"פ א' }, opts)).id, '77', 'ח.פ ארוך מ-9 ספרות — מתעלמים, השם מחליט');
+    eq(await suppliersSvc.resolveSupplier({ tax_id: '510000555', name: 'לא קיים' }, opts), null, 'ח.פ שגוי ושם לא מוכר — null');
+    eq((await suppliersSvc.resolveSupplier({ tax_id: '510000557', name: 'מים וביוב' }, opts)).id, '22', 'לכרטיס אין ח.פ — השם מחליט');
     eq(await suppliersSvc.resolveSupplier({ tax_id: '', name: 'לא קיים' }, opts), null, 'לא נמצא — null');
     eq(await suppliersSvc.resolveSupplier({ tax_id: '', name: '' }, opts), null, 'בלי כלום — null');
   }
@@ -155,7 +159,6 @@ const row = (id, no, date, sum, extra = {}) => ({ expense_id: id, expense_docnum
     console.log('gone_at');
     c.calls.length = 0;
     // supplier 22 loses S1; supplier 11 loses E0
-    const exp = { ...c };
     const c3 = fakeClient({ suppliers: SUP, expenses: {
       11: big.slice(1),
       22: [row('S2', 'C-9', '2026-09-21', 50), row('S3', 'C-10', '2026-09-22', 60, { is_storno: '1' }), row('S4', 'C-11', '2026-09-23', 70, { is_stornoed: 'true' })],
@@ -168,7 +171,7 @@ const row = (id, no, date, sum, extra = {}) => ({ expense_id: id, expense_docnum
     eq(await IcountExpense.countDocuments({}), 624, 'אין מחיקה');
     eq((await IcountExpense.findOne({ icount_id: 'E1' }).lean()).gone_at, null, 'מי שחזר — לא נעלם');
     // returns -> un-gone
-    await mirror.pullMirror({ client: exp, gapMs: 0 });
+    await mirror.pullMirror({ client: fakeClient({ suppliers: SUP, expenses: c.expenses }), gapMs: 0 });
     eq((await IcountExpense.findOne({ icount_id: 'S1' }).lean()).gone_at, null, 'מסמך שחזר — gone_at מתאפס');
     eq((await IcountExpense.findOne({ icount_id: 'OLD' }).lean()), null, 'OLD עדיין לא קיים');
   }
@@ -195,6 +198,21 @@ const row = (id, no, date, sum, extra = {}) => ({ expense_id: id, expense_docnum
     eq(pull.complete, false, 'IcountPull לא complete');
     eq(pull.suppliers_read, 2, 'suppliers_read 2');
     eq(pull.failures.length, 1, 'failures נשמר');
+  }
+
+  console.log('pullMirror — THROTTLED עוצר את השאר');
+  {
+    await IcountExpense.deleteMany({}); await IcountPull.deleteMany({}); suppliersSvc.clearSupplierCache();
+    const four = [...SUP, { supplier_id: 44, supplier_name: 'ספק רביעי', vat_id: '' }];
+    const c = fakeClient({ suppliers: four, throttleFor: ['22'], expenses: { 11: [row('A1', 'A', '2026-09-12', 1)], 33: [row('C1', 'C', '2026-09-12', 1)] } });
+    const r = await mirror.pullMirror({ client: c, concurrency: 1, gapMs: 0 });
+    const searched = c.calls.filter(x => x.method === '/expense/search').map(x => String(x.params.supplier_id));
+    eq(searched.join(','), '11,22', 'אחרי החסימה לא נקראים ספקים נוספים');
+    eq(r.partial, true, 'partial');
+    eq(r.errors.length, 1, 'כשל אחד בלבד');
+    ok(/מים וביוב/.test(r.errors[0]), 'נקוב בשם הספק', r.errors[0]);
+    eq(r.fetched, 1, 'מה שנקרא לפני — נשמר');
+    eq((await IcountPull.findOne({}).lean()).suppliers_read, 1, 'suppliers_read 1');
   }
 
   console.log('pullMirror — ספק שנקרא לא עד הסוף');
@@ -239,6 +257,22 @@ const row = (id, no, date, sum, extra = {}) => ({ expense_id: id, expense_docnum
     await IcountExpense.create({ icount_id: 'U1', doc_date: '2026-09-01', amount_total: 1 });
     try { await IcountExpense.create({ icount_id: 'U1', doc_date: '2026-09-01', amount_total: 1 }); } catch (e) { dup = e.code === 11000; }
     ok(dup, 'icount_id ייחודי');
+
+    await ExpenseDocument.init();
+    await ExpenseDocument.deleteMany({});
+    const base = { source: 'manual', vendor_name: 'x' };
+    let nullsOk = true;
+    try {
+      await ExpenseDocument.create({ ...base });
+      await ExpenseDocument.create({ ...base });
+      await ExpenseDocument.create({ ...base, icount_id: null });
+      await ExpenseDocument.create({ ...base, icount_id: null });
+    } catch { nullsOk = false; }
+    ok(nullsOk, 'ExpenseDocument: icount_id חסר/null חוזר — מותר');
+    await ExpenseDocument.create({ ...base, icount_id: 'I-1' });
+    let dupDoc = false;
+    try { await ExpenseDocument.create({ ...base, icount_id: 'I-1' }); } catch (e) { dupDoc = e.code === 11000; }
+    ok(dupDoc, 'ExpenseDocument: שני icount_id זהים — נדחה');
   }
 
   await mongoose.disconnect(); await mongod.stop();
