@@ -26,6 +26,8 @@ const bankTransactionSchema = new mongoose.Schema({
   is_internal_transfer: { type: Boolean, default: false },
   is_one_time: { type: Boolean, default: false },
   matched_card_account_id: { type: mongoose.Schema.Types.ObjectId, ref: 'BankAccount', default: null },
+  // The card bill (the card's processed_date) this bank line paid.
+  matched_bill_date: { type: String, default: null },
   // The office said "this is not the card bill" — the next pass must not re-link it.
   settlement_dismissed: { type: Boolean, default: false },
   flagged_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },

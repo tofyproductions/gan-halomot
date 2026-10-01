@@ -67,6 +67,51 @@ const ok = (c, l) => { console.log(`  ${c ? '✅' : '❌'} ${l}`); if (!c) failu
   const twoLines = await BankTransaction.find({ bank_ref: { $in: ['21', '22'] } }).lean();
   ok(twoLines.filter(t => t.matched_card_account_id).length === 1, 'שני חיובים תואמים לחשבון אחד — רק אחד קושר');
 
+  console.log('\nחיובים בהפרש יומיים לאותו כרטיס (8093: 3, 5, 7 במאי 2026)');
+  await ingest([{
+    external_id: 'max:••••8093', institution: 'max', label: 'Max ••••8093', type: 'card',
+    transactions: [
+      { date: '2026-05-01', processed_date: '2026-05-03', amount: -236.53, description: 'א' },
+      { date: '2026-05-02', processed_date: '2026-05-05', amount: -91.37, description: 'ב' },
+      { date: '2026-05-04', processed_date: '2026-05-07', amount: -291, description: 'ג' },
+    ],
+  }], { source: 'max_xlsx' });
+  await ingest([{
+    external_id: 'beinleumi:••••0463', institution: 'beinleumi', label: 'בינלאומי', type: 'bank',
+    transactions: [
+      { date: '2026-05-03', amount: -236.53, description: 'מקס הבינלאומי - 8093', bank_ref: '31' },
+      { date: '2026-05-05', amount: -91.37, description: 'מקס הבינלאומי - 8093', bank_ref: '32' },
+      { date: '2026-05-07', amount: -291, description: 'מקס הבינלאומי - 8093', bank_ref: '33' },
+    ],
+  }]);
+  const may = await BankTransaction.find({ bank_ref: { $in: ['31', '32', '33'] } }).lean();
+  ok(may.every(t => t.is_internal_transfer && t.matched_card_account_id), 'שלושה חיובים ביומיים הפרש — כל אחד קושר לחיוב שלו');
+
+  console.log('\nשני כרטיסים, אותו יום ואותו סכום — לפי הספרות בתיאור');
+  await ingest([{
+    external_id: 'max:••••7996', institution: 'max', label: 'Max ••••7996', type: 'card',
+    transactions: [{ date: '2026-06-01', processed_date: '2026-06-15', amount: -500, description: 'ד' }],
+  }], { source: 'max_xlsx' });
+  await ingest([{
+    external_id: 'max:••••8093', institution: 'max', label: 'Max ••••8093', type: 'card',
+    transactions: [{ date: '2026-06-02', processed_date: '2026-06-15', amount: -500, description: 'ה' }],
+  }], { source: 'max_xlsx' });
+  // The 8093 line comes FIRST, so a match by amount alone would give it to 7996.
+  await ingest([{
+    external_id: 'beinleumi:••••0463', institution: 'beinleumi', label: 'בינלאומי', type: 'bank',
+    transactions: [
+      { date: '2026-06-15', amount: -500, description: 'מקס הבינלאומי - 8093', bank_ref: '41' },
+      { date: '2026-06-15', amount: -500, description: 'מקס הבינלאומי - 7996', bank_ref: '42' },
+    ],
+  }]);
+  const { BankAccount } = require('../src/models');
+  const c7996 = await BankAccount.findOne({ external_id: 'max:••••7996' }).lean();
+  const c8093 = await BankAccount.findOne({ external_id: 'max:••••8093' }).lean();
+  const l41 = await BankTransaction.findOne({ bank_ref: '41' }).lean();
+  const l42 = await BankTransaction.findOne({ bank_ref: '42' }).lean();
+  ok(String(l41.matched_card_account_id) === String(c8093._id), 'השורה של 8093 קושרה ל-8093');
+  ok(String(l42.matched_card_account_id) === String(c7996._id), 'השורה של 7996 קושרה ל-7996');
+
   await mongoose.disconnect(); await mongod.stop();
   console.log(failures ? `\n❌ ${failures} נכשלו` : '\n✅ הכל עבר');
   process.exit(failures ? 1 : 0);

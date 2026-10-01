@@ -27,6 +27,10 @@ async function detectCardSettlements() {
   if (!cards.length || !banks.length) return [];
   const bankIds = banks.map(b => b._id);
   const matches = [];
+  // The bank names the card on the debit ("מקס הבינלאומי - 7996"). Two cards
+  // billed the same day must each take their own line.
+  const last4 = (a) => String(a.account_number || a.external_id || '').replace(/\D/g, '').slice(-4);
+  const allDigits = cards.map(last4).filter(Boolean);
 
   for (const card of cards) {
     const bills = await BankTransaction.aggregate([
@@ -36,13 +40,16 @@ async function detectCardSettlements() {
     ]);
     const pattern = CARD_PATTERNS.find(p => p.institution === card.institution);
 
+    const mine = last4(card);
+    const others = allDigits.filter(d => d !== mine);
+
     for (const bill of bills) {
-      // Already paid by a linked bank line? A second card-looking debit (a
-      // re-taken bounce) must not also be marked internal.
-      const linked = await BankTransaction.exists({
-        matched_card_account_id: card._id,
-        date: { $gte: shiftDay(bill._id, -2), $lte: shiftDay(bill._id, 2) },
-      });
+      // Already paid by a linked bank line? Keyed on THIS bill's date, not a
+      // window: Max bills one card on days two apart (8093: 3, 5 and 7 May
+      // 2026), and a window would let the first bill swallow the next. It
+      // still stops a second card-looking debit (a re-taken bounce) from also
+      // being marked internal for the same bill.
+      const linked = await BankTransaction.exists({ matched_card_account_id: card._id, matched_bill_date: bill._id });
       if (linked) continue;
       const candidates = await BankTransaction.find({
         account_id: { $in: bankIds },
@@ -51,13 +58,19 @@ async function detectCardSettlements() {
         matched_card_account_id: null,
         settlement_dismissed: { $ne: true },
       }).lean();
-      const hit = candidates.find((c) => {
+      const fits = candidates.filter((c) => {
         const looksLikeCard = pattern?.re.test(c.description) || GENERIC_CARD.test(c.description);
         if (!looksLikeCard) return false;
+        // A debit that names another of our cards is that card's, never this one's.
+        if (mine && others.some(d => c.description.includes(d)) && !c.description.includes(mine)) return false;
         return Math.abs(-c.amount - bill.total) <= Math.max(1, bill.total * 0.01);
       });
+      // Prefer the line that names this card; then the closest amount.
+      fits.sort((a, b) => (Number(mine && b.description.includes(mine)) - Number(mine && a.description.includes(mine)))
+        || (Math.abs(-a.amount - bill.total) - Math.abs(-b.amount - bill.total)));
+      const hit = fits[0];
       if (!hit) continue;
-      await BankTransaction.updateOne({ _id: hit._id }, { $set: { matched_card_account_id: card._id, is_internal_transfer: true } });
+      await BankTransaction.updateOne({ _id: hit._id }, { $set: { matched_card_account_id: card._id, matched_bill_date: bill._id, is_internal_transfer: true } });
       matches.push({ transaction_id: hit._id, card_account_id: card._id, date: hit.date, amount: -hit.amount });
     }
   }
@@ -67,7 +80,7 @@ async function detectCardSettlements() {
 async function unlinkSettlement(transactionId) {
   await BankTransaction.updateOne(
     { _id: transactionId },
-    { $set: { matched_card_account_id: null, is_internal_transfer: false, settlement_dismissed: true } },
+    { $set: { matched_card_account_id: null, matched_bill_date: null, is_internal_transfer: false, settlement_dismissed: true } },
   );
 }
 
