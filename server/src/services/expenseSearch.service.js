@@ -60,6 +60,7 @@ async function search({ q, min, max, branch } = {}) {
     amount: Math.abs(d.amount_ils ?? d.amount_total ?? 0),
     currency: d.amount_ils == null ? d.currency : 'ILS',
     lane: d.lane,
+    source: d.source || '',
   }));
 
   let charges = [];

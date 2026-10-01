@@ -30,6 +30,7 @@ function ResultRow({ row, onJump }) {
         <Typography variant="body2" sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{amountText(row)}</Typography>
         <Typography variant="caption" color="text.secondary">{formatDay(row.date)}</Typography>
       </Stack>
+      {row.source === 'icount' && <Chip size="small" color="info" variant="outlined" label="מאייקאונט" sx={{ flexShrink: 0 }} />}
       <Chip size="small" variant="outlined" label={row.lane ? (LANE_LABEL[row.lane] || row.lane) : 'מחוץ למסך'} sx={{ flexShrink: 0 }} />
     </Stack>
   );

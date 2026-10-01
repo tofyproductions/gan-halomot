@@ -8,11 +8,17 @@ import { useTheme } from '@mui/material/styles';
 import api, { apiError } from '../../api/client';
 import EmptyState from '../ui/EmptyState';
 import { useConfirm } from '../shared/ConfirmProvider';
-import { FileLink, BranchChip, OrderChip } from './ExpenseCards';
+import { FileLink, BranchChip, OrderChip, IcountSourceChip } from './ExpenseCards';
+import IcountFileDialog from './IcountFileDialog';
 import { formatILS, formatDay, DOC_TYPE_LABEL, docAmountText, hasFile, matchesBranch } from './expenseFormat';
 
 const DECISION_LABEL = { closed_anyway: '✓ נסגר ידנית', paid_outside_bank: '💵 שולם מחוץ לבנק' };
-const ICOUNT_TEXT = 'לא חובר';
+const ICOUNT_STATUS = {
+  in_icount: { text: 'באייקאונט', color: 'success.dark' },
+  filed: { text: '⬆ הועלה', color: 'success.dark' },
+  not_in_icount: { text: 'לא באייקאונט', color: 'text.secondary' },
+  gone: { text: '⚠️ נמחק באייקאונט', color: 'error.main' },
+};
 
 function DocCell({ d }) {
   return (
@@ -25,6 +31,7 @@ function DocCell({ d }) {
       <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
         {d.supplier_tax_id && <Typography variant="caption" color="text.secondary">ח.פ {d.supplier_tax_id}</Typography>}
         {hasFile(d) && <FileLink docId={d._id} />}
+        <IcountSourceChip doc={d} />
       </Stack>
     </Box>
   );
@@ -87,7 +94,59 @@ function PaidCell({ d }) {
   );
 }
 
-function UnpaidRow({ d, canWrite, onDone }) {
+/**
+ * The iCount column: where the document stands there, "⬆ העלה לאייקאונט"
+ * (opens the preview) and "📤 עדכן ששולם" / its undo. Buttons only for
+ * whoever holds icount_upload; a reason in words where a button is missing.
+ */
+function IcountCell({ d, canFile, onFile, onDone }) {
+  const confirm = useConfirm();
+  const [busy, setBusy] = useState(false);
+  const ic = d.icount || { status: 'not_in_icount', docnum: '', paid_reported: false };
+  const st = ICOUNT_STATUS[ic.status] || ICOUNT_STATUS.not_in_icount;
+  const inIcount = ic.status === 'in_icount' || ic.status === 'filed';
+  const covered = d.lane === 'closed' && !d.decision && (d.payments || []).length > 0;
+
+  const run = async (fn, okText, failMsg) => {
+    setBusy(true);
+    try { const { data } = await fn(); toast.success(okText(data)); onDone(); }
+    catch (err) { toast.error(apiError(err, failMsg)); }
+    finally { setBusy(false); }
+  };
+  const reportPaid = async () => {
+    if (!(await confirm({ title: 'עדכון באייקאונט ששולם', message: 'אייקאונט יסמן את המסמך כשולם, בתאריך של חיוב הבנק האחרון ששויך אליו. אפשר לבטל אחר כך.', confirm_label: '📤 עדכן ששולם' }))) return;
+    run(() => api.post(`/expenses/documents/${d._id}/icount-paid`, {}), (r) => `עודכן באייקאונט ששולם (${formatDay(r.paid_date)})`, 'העדכון באייקאונט נכשל');
+  };
+  const undoPaid = async () => {
+    if (!(await confirm({ title: 'ביטול הדיווח ששולם', message: 'המסמך יחזור באייקאונט ל"לא שולם".', confirm_label: 'בטל דיווח' }))) return;
+    run(() => api.delete(`/expenses/documents/${d._id}/icount-paid`), () => 'הדיווח ששולם בוטל באייקאונט', 'הביטול נכשל');
+  };
+
+  return (
+    <Stack spacing={0.5} alignItems="flex-start">
+      <Typography variant="body2" sx={{ color: st.color, fontWeight: 600 }}>
+        {st.text}{ic.docnum ? ` · ${ic.docnum}` : ''}
+      </Typography>
+      {ic.status === 'gone' && (
+        <Typography variant="caption" color="text.secondary">המסמך נמחק באייקאונט אחרי שקושר — בדקו מול אורלי</Typography>
+      )}
+      {ic.paid_reported && <Typography variant="caption" sx={{ color: 'success.dark' }}>📤 דווח לאייקאונט ששולם</Typography>}
+      {canFile && ic.status === 'not_in_icount' && d.source !== 'icount' && (
+        <Button size="small" variant="outlined" disabled={busy} onClick={() => onFile(d)}>⬆ העלה לאייקאונט</Button>
+      )}
+      {canFile && inIcount && !ic.paid_reported && (covered ? (
+        <Button size="small" variant="outlined" disabled={busy} onClick={reportPaid}>📤 עדכן ששולם</Button>
+      ) : d.lane === 'closed' && (
+        <Typography variant="caption" color="text.secondary">עדכון ששולם — רק כשחיובי בנק מכסים את המסמך</Typography>
+      ))}
+      {canFile && ic.paid_reported && (
+        <Button size="small" disabled={busy} onClick={undoPaid}>בטל דיווח ששולם</Button>
+      )}
+    </Stack>
+  );
+}
+
+function UnpaidRow({ d, canWrite, canFile, onFile, onDone }) {
   const [busy, setBusy] = useState(false);
   const back = async () => {
     setBusy(true);
@@ -101,7 +160,7 @@ function UnpaidRow({ d, canWrite, onDone }) {
         <DocCell d={d} />
         <Stack spacing={0.5} alignItems={{ sm: 'flex-end' }}>
           <Typography variant="body2" sx={{ color: 'warning.dark' }}>⏳ עוד לא שולמה</Typography>
-          <Typography variant="caption" color="text.secondary">אייקאונט: {ICOUNT_TEXT}</Typography>
+          <IcountCell d={d} canFile={canFile} onFile={onFile} onDone={onDone} />
           {canWrite && <Button size="small" variant="outlined" disabled={busy} onClick={back}>החזר ל"לשייך"</Button>}
         </Stack>
       </Stack>
@@ -110,12 +169,13 @@ function UnpaidRow({ d, canWrite, onDone }) {
 }
 
 /** ✅ סגור — closed documents, and the ones marked "not paid yet". */
-export default function ClosedTab({ branch, branches, canWrite, onChanged }) {
+export default function ClosedTab({ branch, branches, canWrite, canFile = false, onChanged }) {
   const theme = useTheme();
   const phone = useMediaQuery(theme.breakpoints.down('md'));
   const [docs, setDocs] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [fileDoc, setFileDoc] = useState(null);
   const seq = useRef(0);
 
   const load = useCallback(async () => {
@@ -164,7 +224,10 @@ export default function ClosedTab({ branch, branches, canWrite, onChanged }) {
                 <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
                   <Payments d={d} canWrite={canWrite} onDone={done} />
                 </Box>
-                <Typography variant="caption" color="text.secondary">אייקאונט: {ICOUNT_TEXT}</Typography>
+                <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+                  <Typography variant="caption" color="text.secondary">אייקאונט</Typography>
+                  <IcountCell d={d} canFile={canFile} onFile={setFileDoc} onDone={done} />
+                </Box>
               </CardContent>
             </Card>
           ))}
@@ -186,7 +249,7 @@ export default function ClosedTab({ branch, branches, canWrite, onChanged }) {
                   <TableCell sx={{ minWidth: 220 }}><DocCell d={d} />{chips(d)}</TableCell>
                   <TableCell><PaidCell d={d} /></TableCell>
                   <TableCell sx={{ minWidth: 260 }}><Payments d={d} canWrite={canWrite} onDone={done} /></TableCell>
-                  <TableCell><Typography variant="body2" color="text.secondary">{ICOUNT_TEXT}</Typography></TableCell>
+                  <TableCell sx={{ minWidth: 150 }}><IcountCell d={d} canFile={canFile} onFile={setFileDoc} onDone={done} /></TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -196,8 +259,10 @@ export default function ClosedTab({ branch, branches, canWrite, onChanged }) {
 
       <Typography variant="h6" sx={{ fontSize: '1.05rem', mt: 3, mb: 1 }}>⏳ עוד לא שולמה ({unpaid.length})</Typography>
       {!unpaid.length ? <Typography variant="body2" color="text.secondary">אין.</Typography> : (
-        <Stack spacing={1}>{unpaid.map(d => <UnpaidRow key={d._id} d={d} canWrite={canWrite} onDone={done} />)}</Stack>
+        <Stack spacing={1}>{unpaid.map(d => <UnpaidRow key={d._id} d={d} canWrite={canWrite} canFile={canFile} onFile={setFileDoc} onDone={done} />)}</Stack>
       )}
+
+      <IcountFileDialog doc={fileDoc} open={!!fileDoc} onClose={() => setFileDoc(null)} onDone={done} />
     </Box>
   );
 }

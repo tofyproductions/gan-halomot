@@ -45,6 +45,7 @@ function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-va
       ...(err.existing_id ? { existing_id: String(err.existing_id) } : {}),
       ...(Array.isArray(err.blockers) ? { blockers: err.blockers } : {}),
       ...(err.icount_id ? { icount_id: String(err.icount_id) } : {}),
+      ...(err.existing && typeof err.existing === 'object' ? { existing: err.existing } : {}),
     });
   }
   console.error('[expenses] request failed:', req.method, req.originalUrl, err && err.stack || err);

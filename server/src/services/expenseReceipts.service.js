@@ -62,6 +62,7 @@ async function receiptsLane(now = new Date()) {
         linked_invoice: inv ? { id: inv._id, vendor_name: inv.vendor_name, doc_number: inv.doc_number, doc_date: inv.doc_date, amount_total: inv.amount_total } : null,
         days_waiting: Math.max(0, ymdToDay(today) - ymdToDay(d.doc_date)),
         has_file: !!d.file_id || d.mail_sorter_id != null,
+        source: d.source || '',
         payments: payments.filter(p => String(p.document_id) === String(d._id)).map((p) => {
           const t = txMap.get(String(p.transaction_id)) || {};
           return { transaction_id: p.transaction_id, amount: p.amount, date: t.date || '', description: t.description || '' };

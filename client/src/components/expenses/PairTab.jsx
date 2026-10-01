@@ -8,7 +8,7 @@ import api, { apiError } from '../../api/client';
 import EmptyState from '../ui/EmptyState';
 import { useConfirm } from '../shared/ConfirmProvider';
 import { BusyButton } from '../shared/UploadControls';
-import { DocCard, TxCard, Reasons, ReviewForm } from './ExpenseCards';
+import { DocCard, TxCard, Reasons, ReviewForm, IcountSourceChip } from './ExpenseCards';
 import { matchesBranch, reviewInit, reviewPatchOf, formatILS, DOC_TYPE_LABEL } from './expenseFormat';
 
 const BAD_AMOUNT = 'הסכום שהוקלד לא תקין';
@@ -228,6 +228,7 @@ function ChargeOption({ alt, tx, branches, canWrite, onDone }) {
       <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
         <Box sx={{ minWidth: 0 }}>
           <Typography variant="body2">{doc.vendor_name || '—'}{doc.doc_number ? ` · ${doc.doc_number}` : ''} · {DOC_TYPE_LABEL[doc.doc_type] || ''}</Typography>
+          <IcountSourceChip doc={doc} />
           <Typography variant="caption" color="text.secondary">
             {formatILS(doc.remaining)}{alt.reasons.length ? ` · ${alt.reasons.join(' · ')}` : ''}
           </Typography>

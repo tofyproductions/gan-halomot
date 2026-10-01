@@ -4,7 +4,7 @@ import { Box, Stack, Typography, Paper, Button, Alert, Collapse } from '@mui/mat
 import api, { apiError } from '../../api/client';
 import EmptyState from '../ui/EmptyState';
 import { useConfirm } from '../shared/ConfirmProvider';
-import { FileLink } from './ExpenseCards';
+import { FileLink, IcountSourceChip } from './ExpenseCards';
 import { formatILS, formatDay, DOC_TYPE_LABEL } from './expenseFormat';
 
 /** Invoices this receipt may belong to — loaded when "הצמד לחשבונית…" opens. */
@@ -95,6 +95,7 @@ function WaitingCard({ r, graceDays, canWrite, onDone }) {
         <Typography variant="body2">קבלה {r.doc_number || '—'} · {formatDay(r.doc_date)}</Typography>
         {r.supplier_tax_id && <Typography variant="caption" color="text.secondary">ח.פ {r.supplier_tax_id}</Typography>}
         {r.has_file && <FileLink docId={r.id} />}
+        <IcountSourceChip doc={r} />
       </Stack>
       {overdue && (
         <Typography variant="body2" sx={{ color: 'error.main', mt: 0.5 }}>ממתינה {r.days_waiting} ימים — לבקש מהספק את החשבונית</Typography>

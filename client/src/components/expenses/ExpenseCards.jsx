@@ -19,6 +19,12 @@ export function Tint({ verdict, children, sx }) {
   return <Box component="span" sx={{ ...tintSx(verdict), ...sx }}>{children}</Box>;
 }
 
+/** "מאייקאונט" — the document was created from the gan's iCount (Orly typed it there). Any row carrying `source`. */
+export function IcountSourceChip({ doc }) {
+  if (!doc || doc.source !== 'icount') return null;
+  return <Chip size="small" color="info" variant="outlined" label="מאייקאונט" />;
+}
+
 export function FileLink({ docId, label = '📎 המסמך' }) {
   const open = () => openApiFile(`/api/expenses/documents/${docId}/file`).catch((e) => {
     // fetch rejects with TypeError when the server never answered; otherwise the server's own words.
@@ -190,6 +196,7 @@ export function DocCard({ doc, fields, branches = [], canWrite, onChanged, chips
         </Typography>
         <Chip size="small" label={DOC_TYPE_LABEL[doc.doc_type] || 'מסמך'} />
         {doc.needs_review && <Chip size="small" color="warning" variant="outlined" label="לבדיקה" />}
+        <IcountSourceChip doc={doc} />
       </Stack>
       <Stack direction="row" spacing={1.5} alignItems="baseline" flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
         {doc.doc_number && <Typography variant="body2">מס׳ {doc.doc_number}</Typography>}

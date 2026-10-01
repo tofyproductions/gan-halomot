@@ -7,6 +7,7 @@ import api, { apiError } from '../../api/client';
 import PageHeader from '../ui/PageHeader';
 import { useAuth } from '../../hooks/useAuth';
 import { hasTabAccess } from '../../config/tabs';
+import { isViewerRole } from '../../hooks/roleFlags';
 import { GENERAL, NO_BRANCH } from './expenseFormat';
 import PairTab from './PairTab';
 import ReceiptsTab from './ReceiptsTab';
@@ -34,6 +35,8 @@ function TabLabel({ text, count, color }) {
 export default function ExpensesPage() {
   const { user } = useAuth();
   const canWrite = hasTabAccess(user, 'expenses_write');
+  // Filing to iCount / reporting paid: its own grant; the server refuses admin_viewer outright, so no buttons for it.
+  const canFile = hasTabAccess(user, 'icount_upload') && !isViewerRole(user);
   const [params, setParams] = useSearchParams();
   const view = VIEWS.includes(params.get('view')) ? params.get('view') : 'pair';
 
@@ -105,7 +108,7 @@ export default function ExpensesPage() {
       <Box key={`${view}:${tick}`}>
         {view === 'pair' && <PairTab {...tabProps} />}
         {view === 'receipts' && <ReceiptsTab {...tabProps} />}
-        {view === 'closed' && <ClosedTab {...tabProps} />}
+        {view === 'closed' && <ClosedTab {...tabProps} canFile={canFile} />}
         {view === 'search' && <SearchTab branch={branch} onJump={setView} />}
         {view === 'tools' && <ToolsTab canWrite={canWrite} onChanged={loadCounts} />}
       </Box>
