@@ -13,6 +13,7 @@ const icountExpenseSchema = new mongoose.Schema({
   doc_number: { type: String, default: '' },      // the supplier's printed number, kept verbatim
   doc_date: { type: String, required: true },     // YYYY-MM-DD
   amount_total: { type: Number, required: true }, // shekels
+  doctype: { type: String, default: '' },         // iCount's expense_doctype (invoice|invrec|receipt|refund|…)
   is_storno: { type: Boolean, default: false },   // cancelled / cancelling doc: mirrored, never a document
   matched_expense_id: { type: mongoose.Schema.Types.ObjectId, ref: 'ExpenseDocument', default: null },
   match_kind: { type: String, enum: ['same_document', 'probable', null], default: null },

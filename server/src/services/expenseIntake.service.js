@@ -14,6 +14,7 @@ const mongoose = require('mongoose');
 const { ExpenseDocument, ExpenseFile, ExpensePayment, Supplier } = require('../models');
 const core = require('./expenseCore.service');
 const mailSorter = require('./mailSorter.service');
+const icountBridge = require('./icountBridge.service');
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const DOC_TYPES = ['tax_invoice', 'invoice_receipt', 'receipt', 'credit_note', 'other'];
@@ -251,14 +252,25 @@ function mapItem(item, kind) {
   return out;
 }
 
+const isFilelessIcount = (d) => d.source === 'icount' && d.mail_sorter_id == null && !d.file_id;
+
+/** → true when the mail item became the iCount document's file. */
+async function attachMailItem(doc, data) {
+  const set = { mail_sorter_id: data.mail_sorter_id };
+  if (!doc.attachment_sha256 && data.attachment_sha256) set.attachment_sha256 = data.attachment_sha256;
+  const res = await ExpenseDocument.updateOne({ _id: doc._id, status: 'active', file_id: null, mail_sorter_id: null }, { $set: set });
+  return res.modifiedCount === 1;
+}
+
 /**
  * Copies the not-yet-acknowledged invoices and receipts. Each item is acked
  * exactly once — when it is created, when its mail_sorter_id already exists,
- * or when it is skipped (duplicate, or dated before the start date) — and
+ * when it is attached as the file of an iCount document (`attached`), or when
+ * it is skipped (duplicate, or dated before the start date) — and
  * then drops off mail-sorter's list (asked WITHOUT `all=1`).
  */
 async function pullFromMailSorter({ client = mailSorter } = {}) {
-  const result = { fetched: 0, created: 0, skipped: 0, skipped_old: 0, errors: 0 };
+  const result = { fetched: 0, created: 0, attached: 0, skipped: 0, skipped_old: 0, errors: 0 };
   const start = await core.getStartDate();
   for (const kind of ['invoice', 'receipt']) {
     let list;
@@ -290,8 +302,18 @@ async function pullFromMailSorter({ client = mailSorter } = {}) {
         }
         const supplier = await core.matchSupplier(data);
         if (supplier) data.supplier_id = supplier._id;
+        // The bookkeeper already typed it into iCount and the bridge made a
+        // document without a file: this mail item IS that file. Attach, no new document.
+        const dup = await core.findDuplicate(data);
+        const icountDoc = dup ? (isFilelessIcount(dup) ? dup : null) : await icountBridge.attachableIcountTwin(data);
+        if (icountDoc) {
+          if (await attachMailItem(icountDoc, data)) result.attached++;
+          else result.skipped++; // got a file meanwhile: an ordinary duplicate
+          await client.ack(item.id);
+          continue;
+        }
         // Already represented by another active document: acked so it drops off the list.
-        if (await core.findDuplicate(data)) {
+        if (dup) {
           result.skipped++;
           await client.ack(item.id);
           continue;

@@ -32,6 +32,7 @@ function mapExpenseRow(raw) {
     doc_date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : '1970-01-01',
     supplier_tax_id: digits(firstOf(raw, ['supplier_vat_id', 'vat_id', 'supplier_tax_id', 'tax_id'])),
     supplier_id: String(firstOf(raw, ['supplier_id'])),
+    doctype: String(firstOf(raw, ['expense_doctype', 'doctype'])).trim().toLowerCase(),
     is_storno: flag(raw.is_storno) || flag(raw.is_stornoed),
   };
 }
@@ -109,7 +110,7 @@ async function pullMirror({ client = getClient(), concurrency, gapMs, now = () =
         update: {
           $set: {
             supplier_id: s.id, supplier_name: s.name, supplier_tax_id: m.supplier_tax_id || s.tax_id,
-            doc_number: m.doc_number, doc_date: m.doc_date, amount_total: m.amount_total,
+            doc_number: m.doc_number, doc_date: m.doc_date, amount_total: m.amount_total, doctype: m.doctype,
             is_storno: m.is_storno, last_seen_at: stamp, gone_at: null, // a returning doc un-gones
           },
           $setOnInsert: { first_seen_at: stamp },
