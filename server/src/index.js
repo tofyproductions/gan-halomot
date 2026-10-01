@@ -604,6 +604,14 @@ connectDB().then(() => {
     if (!platformMode) {
       setInterval(runNotificationResend, 5 * 60 * 1000);
     }
+
+    // Finance part 1 — tell the admins once a day if the bank feed went quiet.
+    const bankWatch = require('./services/bankWatchJob');
+    const runBankWatch = () => withJobLock('bank-watch', 10 * 60 * 1000, () => bankWatch.tick())
+      .catch(e => console.error('[bank-watch] failed:', e.message));
+    if (!platformMode) {
+      setInterval(runBankWatch, 60 * 60 * 1000);
+    }
   });
 
   // A server that could not take the port must not stay alive pretending to.

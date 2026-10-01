@@ -36,6 +36,8 @@ const notificationEventSchema = new mongoose.Schema({
       // "פניות למשרד": a new request (or the employee's reply) for the routed office
       // people, and the office's answer for the employee.
       'contact_request_new', 'contact_request_reply',
+      // Finance part 1: the bank-pi agent stopped delivering the gan's account.
+      'bank_feed_stale',
     ],
     required: true,
   },
