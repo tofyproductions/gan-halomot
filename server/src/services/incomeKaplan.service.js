@@ -20,7 +20,7 @@ const {
 const incomeRules = require('./incomeRules.service');
 const { getStartDate, vendorKey, COVERAGE_TOLERANCE_ILS } = require('./expenseCore.service');
 const { nameOverlap } = require('./expensePairs.service');
-const { buildHouseholds } = require('./household.service');
+const { buildHouseholds, parentKey } = require('./household.service');
 const { buildRegistrationMonths } = require('./collection-view.service');
 const { academicYearOf, ACADEMIC_MONTHS, CAMP_MONTH } = require('./academic-year.service');
 
@@ -32,6 +32,7 @@ const ALTERNATIVES_LIMIT = 5;
 const WHY_NONE = 'לא נמצאה משפחה מתאימה';
 const WHY_TIE = 'כמה משפחות באותו ציון — בחרו ידנית';
 const WHY_NO_YEAR = 'אין משפחות קפלן בשנת הלימודים של ההעברה';
+const WHY_PAID_UP = 'המשפחה המתאימה ביותר כבר שילמה את כל החודשים';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const key = (x) => String(x._id);
@@ -173,7 +174,18 @@ async function kaplanHouseholds(academicYear) {
     parentsByHousehold.get(hk).add(n);
   };
   const regById = new Map(registrations.map(r => [String(r._id), r]));
-  for (const r of registrations) addParent(householdOf(r), r.parent_name);
+  // Every parent key that folds into the household. The root key flips when a
+  // new registration joins two parents, so a stored alias or rejection may sit
+  // under any of these — see householdMatchesKey.
+  const membersByHousehold = new Map();
+  for (const r of registrations) {
+    const hk = householdOf(r);
+    addParent(hk, r.parent_name);
+    const pk = parentKey(r);
+    if (!hk || !pk) continue;
+    if (!membersByHousehold.has(hk)) membersByHousehold.set(hk, new Set([hk]));
+    membersByHousehold.get(hk).add(pk);
+  }
   for (const c of children) {
     const r = regById.get(String(c.registration_id));
     if (r) addParent(householdOf(r), c.parent2_name);
@@ -214,6 +226,7 @@ async function kaplanHouseholds(academicYear) {
     const totals = ACADEMIC_MONTHS.map(m => round2(kids.reduce((s, k) => s + (k.months.find(x => x.month_number === m)?.expected || 0), 0)));
     out.push({
       household_key: hk,
+      member_keys: [...(membersByHousehold.get(hk) || [hk])],
       parents: [...(parentsByHousehold.get(hk) || [])],
       children: kids,
       monthly_expected: modeOf(totals),
@@ -235,6 +248,15 @@ function openMonths(household) {
   return set;
 }
 
+/**
+ * True when a stored household key (alias, rejection, allocation) names this
+ * household — its current root or any parent key folded into it.
+ */
+function householdMatchesKey(household, storedKey) {
+  if (!household || !storedKey) return false;
+  return household.household_key === storedKey || (household.member_keys || []).includes(storedKey);
+}
+
 const aliasHousehold = (aliases, pk) => {
   if (!pk || !aliases) return null;
   if (aliases instanceof Map) return aliases.get(pk) || null;
@@ -248,7 +270,7 @@ const aliasHousehold = (aliases, pk) => {
  * before → +15. A remembered payer text for this family → 100.
  */
 function scoreIncome(tx, household, aliases) {
-  if (aliasHousehold(aliases, payerKey(tx)) === household.household_key) {
+  if (householdMatchesKey(household, aliasHousehold(aliases, payerKey(tx)))) {
     return { score: 100, reasons: ['משלם מוכר'] };
   }
   let score = 0;
@@ -272,7 +294,9 @@ function scoreIncome(tx, household, aliases) {
     const open = openMonths(household);
     // The month after August is the next gan year — not this family's bill.
     const next = month === 8 ? null : (month % 12) + 1;
-    if (open.has(month) || (next && open.has(next))) { score += 15; reasons.push('בחודש הגבייה'); }
+    // The camp (13) is billed for the summer: June to August count.
+    const camp = open.has(CAMP_MONTH) && month >= 6 && month <= 8;
+    if (open.has(month) || (next && open.has(next)) || camp) { score += 15; reasons.push('בחודש הגבייה'); }
   }
 
   return { score: Math.min(100, score), reasons };
@@ -323,7 +347,9 @@ async function context() {
     IncomeRejection.find({}, 'transaction_id household_key').lean(),
   ]);
   const aliases = new Map(aliasRows.map(a => [a.payer_key, a.household_key]));
-  const rejected = new Set(rejRows.map(r => rejKey(r.transaction_id, r.household_key)));
+  const rejectedKeys = new Set(rejRows.map(r => rejKey(r.transaction_id, r.household_key)));
+  const rejected = (tx, h) => [h.household_key, ...(h.member_keys || [])]
+    .some(k => rejectedKeys.has(rejKey(key(tx), k)));
   const byYear = new Map();
   const householdsFor = async (year) => {
     if (!year) return [];
@@ -337,7 +363,7 @@ async function context() {
  * One proposal per transfer, households taking as many as their open months
  * allow. Greedy global: best score first; a tie at a transfer's top score
  * between two families is not proposed (the amount alone cannot tell them
- * apart). Splits are then laid out per family in date order, so a family's
+ * apart), nor is a transfer whose best family has no open month left. Splits are then laid out per family in date order, so a family's
  * second transfer pays the month after the first one.
  */
 async function incomeQueue() {
@@ -348,7 +374,7 @@ async function incomeQueue() {
     const households = await householdsFor(academicYearOfDate(tx.date));
     if (!households.length) { why.set(key(tx), WHY_NO_YEAR); continue; }
     const scored = households
-      .filter(h => !rejected.has(rejKey(key(tx), h.household_key)))
+      .filter(h => !rejected(tx, h))
       .map(h => ({ tx, household: h, ...scoreIncome(tx, h, aliases) }))
       .filter(c => c.score >= SUGGEST_THRESHOLD)
       .sort((a, b) => b.score - a.score);
@@ -361,13 +387,17 @@ async function incomeQueue() {
     || a.household.household_key.localeCompare(b.household.household_key));
 
   const usedTx = new Set();
+  const decided = new Set();   // a transfer's top candidate was reached — won or refused
   const capacity = new Map();
   const won = [];
   for (const c of cands) {
-    if (usedTx.has(key(c.tx))) continue;
+    if (decided.has(key(c.tx))) continue;
+    decided.add(key(c.tx));
     const hk = `${academicYearOfDate(c.tx.date)}|${c.household.household_key}`;
     if (!capacity.has(hk)) capacity.set(hk, capacityOf(c.household));
-    if (capacity.get(hk) <= 0) continue;
+    // The best family has nothing left to pay: say so, never fall back to a
+    // weaker family (it would be a confident-looking wrong answer).
+    if (capacity.get(hk) <= 0) { why.set(key(c.tx), WHY_PAID_UP); continue; }
     capacity.set(hk, round2(capacity.get(hk) - remainingOf(c.tx)));
     usedTx.add(key(c.tx));
     won.push(c);
@@ -403,7 +433,7 @@ async function alternativesForTx(txId, limit = ALTERNATIVES_LIMIT) {
   const tx = pool.open.find(t => key(t) === String(txId));
   if (!tx) return null;
   const households = (await householdsFor(academicYearOfDate(tx.date)))
-    .filter(h => !rejected.has(rejKey(key(tx), h.household_key)));
+    .filter(h => !rejected(tx, h));
   const paid = remainingOf(tx);
   const distance = (h) => Math.abs((Number(h.monthly_expected) || 0) - paid);
   return households
@@ -423,6 +453,7 @@ module.exports = {
   SUGGEST_THRESHOLD,
   academicYearOfDate,
   payerKey,
+  householdMatchesKey,
   incomePool,
   kaplanHouseholds,
   scoreIncome,

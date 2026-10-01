@@ -1,6 +1,6 @@
 /**
  * "Not parent income" rules — a bank credit whose description contains the
- * pattern (the Emunah transfer, interest, refunds, credits) never enters the
+ * pattern (the Emunah transfer, interest, refunds) never enters the
  * Kaplan allocation pool. Same shape as noInvoiceRules.service.
  *
  * Nothing disappears: a matched credit leaves the pool but is still shown
@@ -10,11 +10,12 @@ const { IncomeRule } = require('../models');
 
 const EMUNA_LABEL = 'העברה מאמונה — בלשונית אמונה';
 
+// No "זיכוי" rule: the bank writes "זיכוי מ…" on ordinary parent transfers
+// (e.g. "זיכוי מדיסקונט מ…"), so it would exempt the very income we match.
 const BUILT_IN = [
   { pattern: 'אמונה', label: EMUNA_LABEL, note: 'התחשבנות מול אמונה נעשית בלשונית אמונה' },
   { pattern: 'ריבית', label: 'ריבית', note: 'לא הכנסת הורים' },
   { pattern: 'החזר', label: 'החזר', note: 'לא הכנסת הורים' },
-  { pattern: 'זיכוי', label: 'זיכוי', note: 'לא הכנסת הורים' },
 ];
 
 /**

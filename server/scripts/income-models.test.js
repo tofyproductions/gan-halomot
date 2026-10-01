@@ -48,21 +48,23 @@ const dupKey = async (fn) => { try { await fn(); return false; } catch (e) { ret
   {
     await svc.seed();
     const rows = await IncomeRule.find({ built_in: true }).lean();
-    eq(rows.length, 4, 'ארבעה חוקים מובנים');
-    ok(['אמונה', 'ריבית', 'החזר', 'זיכוי'].every(p => rows.some(r => r.pattern === p)), 'התבניות הנכונות');
+    eq(rows.length, 3, 'שלושה חוקים מובנים');
+    ok(['אמונה', 'ריבית', 'החזר'].every(p => rows.some(r => r.pattern === p)), 'התבניות הנכונות');
+    ok(!rows.some(r => r.pattern === 'זיכוי'), 'אין חוק "זיכוי" — כך הבנק כותב העברות הורים');
     eq(rows.find(r => r.pattern === 'אמונה').label, 'העברה מאמונה — בלשונית אמונה', 'תווית אמונה');
     await svc.seed();
-    eq(await IncomeRule.countDocuments({ built_in: true }), 4, 'זריעה חוזרת לא מכפילה');
+    eq(await IncomeRule.countDocuments({ built_in: true }), 3, 'זריעה חוזרת לא מכפילה');
     await IncomeRule.updateOne({ pattern: 'ריבית' }, { is_active: false });
     await svc.seed();
     eq((await IncomeRule.findOne({ pattern: 'ריבית' })).is_active, false, 'חוק שכובה נשאר כבוי');
     await Promise.all([svc.seed(), svc.seed()]);
-    eq(await IncomeRule.countDocuments({ built_in: true }), 4, 'שתי זריעות במקביל — עדיין ארבעה');
+    eq(await IncomeRule.countDocuments({ built_in: true }), 3, 'שתי זריעות במקביל — עדיין שלושה');
 
     const rules = await svc.activeRules();
-    eq(rules.length, 3, 'activeRules בלי הכבוי');
+    eq(rules.length, 2, 'activeRules בלי הכבוי');
     eq(svc.match('העברה מ-אמונה', rules)?.pattern, 'אמונה', 'הכלה גם עם מקף');
-    eq(svc.match('זיכוי מבנק', rules)?.pattern, 'זיכוי', 'התאמה לפי הכלה');
+    eq(svc.match('החזר הוצאות', rules)?.pattern, 'החזר', 'התאמה לפי הכלה');
+    eq(svc.match('זיכוי מדיסקונט מהורה', rules), null, 'העברת הורה "זיכוי מ…" — לא נתפסת');
     eq(svc.match('ריבית זכות', rules), null, 'חוק כבוי לא תופס');
     eq(svc.match('AMUNA', [{ pattern: 'amuna' }])?.pattern, 'amuna', 'לא רגיש לאותיות');
     eq(svc.match('', rules), null, 'תיאור ריק — כלום');

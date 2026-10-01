@@ -83,6 +83,18 @@ const eq = (a, b, l) => ok(a === b, l, `קיבלנו ${JSON.stringify(a)}, צי�
     ok(a.reasons.includes('משלם מוכר'), 'עם הסיבה');
     eq(scoreIncome(T({ amount: 77, remaining: 77, description: 'BIT 123' }), H({ household_key: 'h2' }), alias).score, 15,
       'כינוי של משפחה אחרת — לא נספר (רק תאריך)');
+    const campOnly = H({ children: [{ registration_id: 'r1', child_name: 'נועה לוי', months: [
+      { month_number: 9, expected: 3000, allocated: 3000, receipt: null },
+      { month_number: 13, expected: 900, allocated: 0, receipt: null },
+    ] }] });
+    eq(scoreIncome(T({ amount: 77, remaining: 77, date: '2026-07-10' }), campOnly, new Map()).score, 15, 'קייטנה פתוחה — העברה ביולי מקבלת ניקוד תאריך');
+    eq(scoreIncome(T({ amount: 77, remaining: 77, date: '2026-05-10' }), campOnly, new Map()).score, 0, 'קייטנה — במאי לא');
+    const flipped = new Map([[payerKey(T({ description: 'BIT 123' })), 'mom-key']]);
+    eq(scoreIncome(T({ amount: 77, remaining: 77, description: 'BIT 123' }), H({ member_keys: ['h1', 'mom-key'] }), flipped).score, 100,
+      'כינוי שנשמר תחת מפתח של חבר אחר במשפחה — עדיין 100');
+    ok(K.householdMatchesKey(H({ member_keys: ['h1', 'mom-key'] }), 'mom-key'), 'householdMatchesKey — מפתח חבר');
+    ok(K.householdMatchesKey(H(), 'h1'), 'householdMatchesKey — המפתח הראשי');
+    ok(!K.householdMatchesKey(H({ member_keys: ['h1'] }), 'zzz'), 'householdMatchesKey — זר');
     eq(scoreIncome(T({ amount: 2950, remaining: 2950 }), H({ month_totals: [3000, 2950] }), new Map()).score, 60,
       'סכום של חודש אחר של המשפחה (חודש חלקי) — סכום זהה');
   }
@@ -270,6 +282,55 @@ const eq = (a, b, l) => ok(a === b, l, `קיבלנו ${JSON.stringify(a)}, צי�
     }
     eq(await K.alternativesForTx(String(new mongoose.Types.ObjectId())), null, 'תנועה שלא במאגר — null');
     eq(await K.alternativesForTx('zzz'), null, 'מזהה לא תקין — null');
+  }
+
+  console.log('\nמפתח משפחה שמתחלף');
+  {
+    // Mother registers this year; the alias and a rejection are stored under her key.
+    const mom = await reg({ child_name: 'רון שמש', parent_name: 'ליאת שמש', parent_id_number: '000000067',
+      child_birth_date: new Date(2023, 0, 1), monthly_fee: 4100 });
+    let hs = await K.kaplanHouseholds('2025-2026');
+    const before = hs.find(h => h.children.some(c => String(c.registration_id) === id(mom)));
+    eq(before && before.household_key, '000000067', 'לפני — המפתח של האם');
+    const aliasTx = await tx({ amount: 55, date: '2025-12-01', description: 'PAYBOX 4455' });
+    await IncomePayerAlias.create({ payer_key: payerKey(aliasTx), household_key: '000000067' });
+    const rejTx = await tx({ amount: 4100, date: '2025-09-04', description: 'ליאת שמש' });
+    await IncomeRejection.create({ transaction_id: rejTx._id, household_key: '000000067' });
+    // Father's registration of the same child (last year) joins the household.
+    await reg({ child_name: 'רון שמש', parent_name: 'גיא שמש', parent_id_number: '000000075',
+      child_birth_date: new Date(2023, 0, 1), monthly_fee: 4000, academic_year: '2024-2025',
+      start_date: new Date(2024, 8, 1), end_date: new Date(2025, 7, 31) });
+    hs = await K.kaplanHouseholds('2025-2026');
+    const after = hs.find(h => h.children.some(c => String(c.registration_id) === id(mom)));
+    ok(after && after.household_key !== '000000067', `אחרי — המפתח הראשי התחלף (${after && after.household_key})`);
+    ok(after && after.member_keys.includes('000000067') && after.member_keys.includes('000000075'), 'member_keys כולל את שני ההורים');
+    ok(after && after.member_keys.includes(after.household_key), 'וגם את המפתח הראשי');
+    ok(after && after.parents.includes('גיא שמש'), 'האב בין ההורים');
+    const q = await K.incomeQueue();
+    const p = q.pairs.find(x => id(x.tx) === id(aliasTx));
+    eq(p && p.score, 100, 'כינוי שנשמר תחת המפתח הישן — עדיין 100');
+    ok(!q.pairs.some(x => id(x.tx) === id(rejTx)), 'דחייה שנשמרה תחת המפתח הישן — עדיין לא מוצע');
+    const alts = await K.alternativesForTx(id(rejTx));
+    ok(!alts.some(a => a.household.children.some(c => String(c.registration_id) === id(mom))), 'וגם לא בחלופות');
+    await BankTransaction.deleteMany({});
+    await IncomePayerAlias.deleteMany({});
+    await IncomeRejection.deleteMany({});
+  }
+
+  console.log('\nמשפחה ששילמה הכול');
+  {
+    const paidUp = await reg({ child_name: 'שקד ברק', parent_name: 'הדס ברק', parent_id_number: '000000083', monthly_fee: 1700 });
+    await reg({ child_name: 'אור ים', parent_name: 'נגה ים', parent_id_number: '000000091', monthly_fee: 1700 });
+    await IncomeAllocation.insertMany([9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8].map(m => ({
+      transaction_id: new mongoose.Types.ObjectId(), registration_id: paidUp._id, academic_year: '2025-2026', month_number: m, amount: 1700,
+    })));
+    const t = await tx({ amount: 1700, date: '2025-10-04', description: 'הדס ברק' });
+    const q = await K.incomeQueue();
+    ok(!q.pairs.some(x => id(x.tx) === id(t)), 'המשפחה המתאימה שילמה הכול — לא מציעים משפחה חלשה יותר');
+    const u = q.unmatched_tx.find(x => id(x) === id(t));
+    eq(u && u.why, 'המשפחה המתאימה ביותר כבר שילמה את כל החודשים', 'עם הסיבה');
+    await BankTransaction.deleteMany({});
+    await IncomeAllocation.deleteMany({});
   }
 
   console.log('\nקריאה בלבד');
