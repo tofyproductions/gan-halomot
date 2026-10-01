@@ -361,6 +361,9 @@ async function suite() {
     calls.length = 0;
     await intake.pullFromMailSorter({ client: mk([]) });
     ok(calls.every(c => c.all === false), 'אחרי 3 ניסיונות — אין all=true אוטומטי');
+    eq(await mark(), '2024-06-01', 'משיכה רגילה לא מורידה את הסימן');
+    await intake.pullFromMailSorter({ client: mk([], { fail: true }), full: true });
+    eq((await Setting.findOne({ key: 'expense_mail_backfill_attempts' }).lean()).value, 3, 'משיכה ידנית שנכשלה לא מגדילה את המונה');
     calls.length = 0;
     await intake.pullFromMailSorter({ client: mk([]), full: true });
     ok(calls.every(c => c.all === true), 'הכפתור עדיין עובד');

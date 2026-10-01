@@ -382,10 +382,13 @@ async function pullFromMailSorter({ client = mailSorter, full = false } = {}) {
     }
   }
   // Per-item errors do not block the marker; only incomplete paging does.
-  if (!pagingIncomplete) {
+  // A normal run may raise the marker but never lowers it: only a full run
+  // has looked at everything back to the start date.
+  if (!pagingIncomplete && (fullRun || start >= pulledFrom)) {
     await Setting.findOneAndUpdate({ key: PULLED_FROM_KEY }, { $set: { value: start } }, { upsert: true });
-    if (attempts) await Setting.deleteOne({ key: ATTEMPTS_KEY });
-  } else if (start < pulledFrom) {
+    if (fullRun && attempts) await Setting.deleteOne({ key: ATTEMPTS_KEY });
+  } else if (pagingIncomplete && backfill && !full) {
+    // Only the automatic back-fill counts; a failed manual run does not.
     await Setting.findOneAndUpdate({ key: ATTEMPTS_KEY }, { $set: { value: attempts + 1 } }, { upsert: true });
   }
   if (result.capped) {
