@@ -174,7 +174,8 @@
     "test:expense-models": "node scripts/expense-models.test.js",
     "test:expense-core": "node scripts/expense-core.test.js",
     "test:expense-pairs": "node scripts/expense-pairs.test.js",
-    "test:expense-writes": "node scripts/expense-writes.test.js"
+    "test:expense-writes": "node scripts/expense-writes.test.js",
+    "test:expense-receipts": "node scripts/expense-receipts.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

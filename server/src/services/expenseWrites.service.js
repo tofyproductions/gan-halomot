@@ -299,4 +299,6 @@ async function voidDocument(document_id, by) {
 
 module.exports = {
   acceptPair, rejectPair, unpairCharge, markUnpaid, unmarkUnpaid, decide, undecide, confirmDocument, voidDocument,
+  // shared with the receipts service so payment moves serialise against accepts
+  withLocks, atomically,
 };
