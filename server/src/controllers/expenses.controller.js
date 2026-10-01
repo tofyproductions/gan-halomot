@@ -136,9 +136,25 @@ async function getDocument(req, res) {
 }
 
 const INLINE = /^(application\/pdf|image\/(png|jpe?g|gif|webp))$/i;
+const GENERIC_MIME = /^(|application\/octet-stream|binary\/octet-stream)$/i;
+
+/** The real type from the first bytes, or null when they are not a known document. */
+function sniffMime(buf) {
+  if (!buf || buf.length < 12) return null;
+  if (buf.slice(0, 4).toString('latin1') === '%PDF') return 'application/pdf';
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return 'image/jpeg';
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return 'image/png';
+  if (buf.slice(0, 4).toString('latin1') === 'RIFF' && buf.slice(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
+  if (/^ftyp(heic|heix|mif1)$/.test(buf.slice(4, 12).toString('latin1'))) return 'image/heic';
+  return null;
+}
+
 async function getFile(req, res) {
   const f = await intake.getFile(req.params.id);
-  const mime = String(f.mime || 'application/octet-stream').toLowerCase();
+  // mail-sorter always labels its bytes octet-stream, which makes browsers download.
+  const declared = String(f.mime || '').split(';')[0].trim().toLowerCase();
+  const sniffed = sniffMime(f.buffer);
+  const mime = sniffed && (GENERIC_MIME.test(declared) || sniffed !== declared) ? sniffed : (declared || 'application/octet-stream');
   const inline = INLINE.test(mime);
   const name = encodeURIComponent(f.name || 'document').replace(/['()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
   res.set({
@@ -357,7 +373,7 @@ async function deleteRule(req, res) {
 // Same lock as the 6-hour job (same name, same lease), so a click never overlaps a run.
 const intakePull = async (req, res) => {
   if (!mailSorter.isConfigured()) throw fail(409, 'מיון המיילים לא מוגדר בשרת');
-  const { ran, result } = await withJobLock('expense-mail-pull', 15 * 60 * 1000, () => intake.pullFromMailSorter());
+  const { ran, result } = await withJobLock('expense-mail-pull', 15 * 60 * 1000, () => intake.pullFromMailSorter({ full: req.query.full === '1' }));
   if (!ran) throw fail(409, 'משיכה כבר רצה');
   res.json(result);
 };

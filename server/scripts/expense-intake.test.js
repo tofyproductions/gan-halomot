@@ -249,6 +249,9 @@ async function suite() {
   console.log('\nמשיכה — רק מה שלא אושר, ותאריך התחלה');
   await reset();
   {
+    const { Setting } = require('../src/models');
+    await Setting.deleteMany({});
+    await require('../src/services/expenseCore.service').setStartDate('2026-09-01');
     const opts = [];
     const c = fake({ invoice: [item(60, { doc_date: '2026-08-31' }), item(61, { doc_date: '' }), item(62)] });
     c.listDocuments = async (k, o) => { opts.push(o); return k === 'invoice' ? [item(60, { doc_date: '2026-08-31' }), item(61, { doc_date: '' }), item(62)] : []; };
@@ -273,6 +276,52 @@ async function suite() {
     } finally { env.MAIL_SORTER_URL = saved.url; env.MAIL_SORTER_TOKEN = saved.token; global.fetch = saved.fetch; }
     ok(!/all=1/.test(urls[0]) && /system=gan/.test(urls[0]) && /doc_type=invoice/.test(urls[0]), 'הוצאות: בלי all=1');
     ok(/all=1/.test(urls[1]), 'טופס 101: עדיין all=1');
+  }
+
+  console.log('\nמשיכה מלאה — הורדת תאריך ההתחלה ושחזור היסטוריה');
+  await reset();
+  {
+    const { Setting } = require('../src/models');
+    const core = require('../src/services/expenseCore.service');
+    await Setting.deleteMany({});
+    await core.setStartDate('2026-09-01');
+    const calls = [];
+    const mk = (items) => ({ ...fake({}), listDocuments: async (k, o) => { calls.push({ k, ...o }); return k === 'invoice' ? items : []; } });
+    const old = item(70, { doc_date: '2025-03-01' });
+
+    await intake.pullFromMailSorter({ client: mk([]) });
+    ok(calls.every(c => c.all === false), 'בלי הורדת תאריך — משיכה רגילה (all=false)');
+    eq((await Setting.findOne({ key: 'expense_mail_pulled_from' }).lean()).value, '2026-09-01', 'סימן המים הנמוך נרשם');
+
+    await core.setStartDate('2024-10-01');
+    calls.length = 0;
+    const r1 = await intake.pullFromMailSorter({ client: mk([old]) });
+    ok(calls.length === 2 && calls.every(c => c.all === true), 'הורדת תאריך — המשיכה הבאה all=true');
+    eq(r1.created, 1, 'הפריט הישן נכנס');
+    eq((await Setting.findOne({ key: 'expense_mail_pulled_from' }).lean()).value, '2024-10-01', 'סימן המים הנמוך ירד');
+
+    calls.length = 0;
+    await intake.pullFromMailSorter({ client: mk([]) });
+    ok(calls.every(c => c.all === false), 'המשיכה שאחריה — רגילה שוב (בדיוק פעם אחת)');
+
+    // a full pull never duplicates what is already filed
+    calls.length = 0;
+    const r2 = await intake.pullFromMailSorter({ client: mk([old]), full: true });
+    ok(calls.every(c => c.all === true), 'משיכה מלאה ידנית — all=true');
+    eq(r2.created, 0, 'מזהה שכבר קיים — לא נוצר שוב');
+    eq(r2.skipped, 1, 'נספר כדולג');
+    eq(await ExpenseDocument.countDocuments({ mail_sorter_id: 70 }), 1, 'מסמך אחד בלבד');
+
+    // paging: a server that honours offset is walked to the end; one that ignores it is flagged
+    const page = (from, n) => Array.from({ length: n }, (_, i) => item(1000 + from + i, { doc_date: '2025-01-01' }));
+    const offs = [];
+    const paged = { ...fake({}), listDocuments: async (k, o) => { offs.push(o.offset); return k === 'invoice' ? (o.offset === 0 ? page(0, 200) : o.offset === 200 ? page(200, 30) : []) : []; } };
+    const r3 = await intake.pullFromMailSorter({ client: paged, full: true });
+    eq(r3.created, 230, 'דפדוף: כל 230 הפריטים נמשכו');
+    ok(offs.includes(200) && !r3.capped, 'הדפדוף ביקש offset=200 ולא סומן כחתוך');
+    const stuck = { ...fake({}), listDocuments: async (k) => (k === 'invoice' ? page(5000, 200) : []) };
+    const r4 = await intake.pullFromMailSorter({ client: stuck, full: true });
+    ok(r4.capped && /200/.test(r4.note), 'שרת שמתעלם מ-offset — מסומן capped עם הסבר');
   }
 
   console.log('\nעריכת מסמך עם תשלומים');

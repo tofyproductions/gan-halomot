@@ -200,6 +200,34 @@ async function main() {
   eq(bigRes.status, 201, 'קובץ של 6MB עובר את שער ה-2MB למשתמש מחובר');
   const tooBig = Buffer.alloc(10 * 1024 * 1024 + 10, 7).toString('base64');
   eq((await request({ method: 'POST', path: `${A}/documents`, token: accountant, body: { fields: { ...fields, doc_number: 'E-HUGE' }, file: { name: 'h.pdf', mime: 'application/pdf', data: tooBig } } })).status, 400, 'מעל 10MB — 400');
+  // mail-sorter labels every file octet-stream: the bytes decide, so a PDF opens in the tab.
+  {
+    const ms = require('../src/services/mailSorter.service');
+    const real = ms.fetchFile;
+    const serve = async (bytes, mime) => {
+      ms.fetchFile = async () => ({ buffer: bytes, filename: 'x.bin', mime });
+      const d = await ExpenseDocument.create({ source: 'mail_sorter', mail_sorter_id: 91000 + Math.floor(Math.random() * 1e6), vendor_name: 'סניף', doc_date: '2026-09-02', amount_total: 1 });
+      return request({ path: `${A}/documents/${d._id}/file`, token: admin, raw: true });
+    };
+    try {
+      const pad = Buffer.alloc(20, 0);
+      const pdf = await serve(Buffer.concat([Buffer.from('%PDF-1.7\n'), pad]), 'application/octet-stream');
+      eq(pdf.headers['content-type'], 'application/pdf', 'octet-stream עם %PDF — מוגש כ-PDF');
+      ok(/^inline/.test(pdf.headers['content-disposition'] || ''), 'ומוצג inline');
+      eq(pdf.headers['x-content-type-options'], 'nosniff', 'עם nosniff');
+      const jpg = await serve(Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]), pad]), '');
+      eq(jpg.headers['content-type'], 'image/jpeg', 'JPEG בלי סוג — image/jpeg');
+      const png = await serve(Buffer.concat([Buffer.from([0x89, 0x50, 0x4E, 0x47]), pad]), 'image/jpeg');
+      eq(png.headers['content-type'], 'image/png', 'סוג שלא מתאים לבתים — הבתים קובעים');
+      const webp = await serve(Buffer.concat([Buffer.from('RIFF'), Buffer.from([1, 2, 3, 4]), Buffer.from('WEBP'), pad]), 'application/octet-stream');
+      eq(webp.headers['content-type'], 'image/webp', 'WEBP');
+      const heic = await serve(Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypheic'), pad]), 'application/octet-stream');
+      eq(heic.headers['content-type'], 'image/heic', 'HEIC מזוהה');
+      ok(/^attachment/.test(heic.headers['content-disposition'] || ''), 'HEIC — attachment (הדפדפן לא מציג)');
+      const bin = await serve(Buffer.from('just some text bytes here'), 'application/octet-stream');
+      ok(/^attachment/.test(bin.headers['content-disposition'] || ''), 'בתים לא מוכרים — attachment');
+    } finally { ms.fetchFile = real; }
+  }
   const pdfFile = await request({ path: `${A}/documents/${bigRes.body?.document?._id}/file`, token: admin, raw: true });
   ok(/^inline/.test(pdfFile.headers['content-disposition'] || ''), 'PDF מוצג inline');
 
@@ -321,7 +349,7 @@ async function main() {
 
   head('תאריך התחלה, זיכויים, נעילת משיכה');
   const sd = await request({ path: `${A}/settings/start-date`, token: viewer });
-  eq(sd.body?.start_date, '2026-09-01', 'ברירת המחדל של תאריך ההתחלה');
+  eq(sd.body?.start_date, '2024-10-01', 'ברירת המחדל של תאריך ההתחלה');
   eq((await request({ method: 'PUT', path: `${A}/settings/start-date`, token: accountant, body: { start_date: 'אתמול' } })).status, 400, 'תאריך לא תקין — 400');
   const put = await request({ method: 'PUT', path: `${A}/settings/start-date`, token: accountant, body: { start_date: '2026-08-15' } });
   eq(put.status, 200, 'חשבת משנה תאריך התחלה'); eq(put.body?.start_date, '2026-08-15', 'הערך החדש חוזר');

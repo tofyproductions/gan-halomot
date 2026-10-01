@@ -210,7 +210,8 @@ const eq = (a, b, l) => ok(a === b, l, `קיבלנו ${JSON.stringify(a)}, צי�
   {
     const { Setting } = require('../src/models');
     await BankTransaction.deleteMany({}); await ExpenseDocument.deleteMany({}); await ExpensePayment.deleteMany({});
-    eq(await core.getStartDate(), '2026-09-01', 'בלי הגדרה — ברירת מחדל 2026-09-01');
+    eq(await core.getStartDate(), '2024-10-01', 'בלי הגדרה — ברירת מחדל 2024-10-01');
+    await core.setStartDate('2026-09-01');
     const oldTx = await tx({ date: '2026-08-31', description: 'ספק ישן' });
     const newTx = await tx({ date: '2026-09-01', description: 'ספק חדש' });
     const oldDoc = await doc({ doc_date: '2026-08-31' });
@@ -233,7 +234,7 @@ const eq = (a, b, l) => ok(a === b, l, `קיבלנו ${JSON.stringify(a)}, צי�
     try { await core.setStartDate('1.9.2026'); } catch (e) { bad = e; }
     eq(bad && bad.status, 400, 'תאריך לא תקין — 400');
     await Setting.updateOne({ key: 'expenses_start_date' }, { $set: { value: 'junk' } });
-    eq(await core.getStartDate(), '2026-09-01', 'ערך שמור פגום — ברירת המחדל');
+    eq(await core.getStartDate(), '2024-10-01', 'ערך שמור פגום — ברירת המחדל');
     await Setting.deleteMany({ key: 'expenses_start_date' });
     await BankTransaction.deleteMany({}); await ExpenseDocument.deleteMany({});
   }

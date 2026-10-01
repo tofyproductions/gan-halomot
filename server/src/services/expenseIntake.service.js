@@ -11,7 +11,7 @@
  */
 const crypto = require('crypto');
 const mongoose = require('mongoose');
-const { ExpenseDocument, ExpenseFile, ExpensePayment, Supplier } = require('../models');
+const { ExpenseDocument, ExpenseFile, ExpensePayment, Supplier, Setting } = require('../models');
 const core = require('./expenseCore.service');
 const mailSorter = require('./mailSorter.service');
 const icountBridge = require('./icountBridge.service');
@@ -269,14 +269,47 @@ async function attachMailItem(doc, data) {
  * it is skipped (duplicate, or dated before the start date) — and
  * then drops off mail-sorter's list (asked WITHOUT `all=1`).
  */
-async function pullFromMailSorter({ client = mailSorter } = {}) {
+const PULLED_FROM_KEY = 'expense_mail_pulled_from';
+// The first pull ever ran with this start date (and acked everything older).
+const FIRST_PULL_START = '2026-09-01';
+const PAGE_SIZE = 200;   // mail-sorter's per-call cap
+const MAX_PAGES = 25;
+
+const asList = (raw) => (Array.isArray(raw) ? raw : (raw && raw.items) || []);
+
+/** One kind's list; with `full`, pages through while the server keeps offering new ids. */
+async function listKind(client, kind, full) {
+  if (!full) return asList(await client.listDocuments(kind, { all: false }));
+  const out = [];
+  const seen = new Set();
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const items = asList(await client.listDocuments(kind, { all: true, offset: out.length }));
+    const fresh = items.filter(i => i && !seen.has(i.id));
+    fresh.forEach(i => seen.add(i.id));
+    out.push(...fresh);
+    // Short page = done. No new ids = a server that ignores `offset`.
+    if (items.length < PAGE_SIZE || !fresh.length) {
+      return Object.assign(out, { capped: items.length >= PAGE_SIZE && !fresh.length });
+    }
+  }
+  return Object.assign(out, { capped: true });
+}
+
+async function pullFromMailSorter({ client = mailSorter, full = false } = {}) {
   const result = { fetched: 0, created: 0, attached: 0, skipped: 0, skipped_old: 0, errors: 0 };
   const start = await core.getStartDate();
+  // A start date lowered below anything a pull ever used: those older items were
+  // acked and will not be listed again, so this one pull asks for everything.
+  const marker = await Setting.findOne({ key: PULLED_FROM_KEY }).lean();
+  const pulledFrom = marker && core.isYmd(marker.value) ? marker.value : FIRST_PULL_START;
+  const backfill = start < pulledFrom;
+  const fullRun = full || backfill;
+  result.full = fullRun;
   for (const kind of ['invoice', 'receipt']) {
     let list;
     try {
-      const raw = await client.listDocuments(kind, { all: false });
-      list = Array.isArray(raw) ? raw : (raw && raw.items) || [];
+      list = await listKind(client, kind, fullRun);
+      if (list.capped) result.capped = true;
     } catch (e) {
       console.error(`[expense-pull] list ${kind} failed:`, e.message);
       result.errors++;
@@ -328,6 +361,14 @@ async function pullFromMailSorter({ client = mailSorter } = {}) {
         result.errors++;
       }
     }
+  }
+  if (!result.errors && !result.capped && start < pulledFrom) {
+    await Setting.findOneAndUpdate({ key: PULLED_FROM_KEY }, { $set: { value: start } }, { upsert: true });
+  } else if (!marker && !result.errors && start >= pulledFrom) {
+    await Setting.findOneAndUpdate({ key: PULLED_FROM_KEY }, { $set: { value: pulledFrom } }, { upsert: true });
+  }
+  if (result.capped) {
+    result.note = 'mail-sorter מחזיר עד 200 פריטים לקריאה והשרת לא תמך בדפדוף — ייתכן שחלק מההיסטוריה עוד לא נמשך; הריצו שוב או עדכנו את mail-sorter לתמוך ב-offset.';
   }
   return result;
 }

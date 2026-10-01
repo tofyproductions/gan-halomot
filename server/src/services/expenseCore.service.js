@@ -35,7 +35,7 @@ const digits = (v) => String(v || '').replace(/\D/g, '');
 // Charges and documents dated before it are not shown and not pulled. A
 // document with no readable date is always shown — hiding it would lose it.
 const START_DATE_KEY = 'expenses_start_date';
-const DEFAULT_START_DATE = '2026-09-01';
+const DEFAULT_START_DATE = '2024-10-01';
 const isYmd = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) && !Number.isNaN(Date.parse(v));
 
 async function getStartDate() {
@@ -265,6 +265,7 @@ async function matchSupplier({ supplier_tax_id, vendor_name } = {}) {
 module.exports = {
   COVERAGE_TOLERANCE_ILS,
   START_DATE_KEY,
+  isYmd,
   DEFAULT_START_DATE,
   getStartDate,
   setStartDate,

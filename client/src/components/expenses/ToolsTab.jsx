@@ -44,15 +44,19 @@ function Block({ title, state, reload, children }) {
 function Intake({ canWrite, onChanged }) {
   const [state, reload] = useLoad('/expenses/intake/status', d => d);
   const [busy, setBusy] = useState(false);
-  const pull = async () => {
-    setBusy(true);
+  const [busyFull, setBusyFull] = useState(false);
+  const run = (full) => async () => {
+    (full ? setBusyFull : setBusy)(true);
     try {
-      const { data: r } = await api.post('/expenses/intake/pull');
+      const { data: r } = await api.post(`/expenses/intake/pull${full ? '?full=1' : ''}`);
+      if (r.note) toast.info(r.note, { autoClose: 15000 });
       toast[r.errors ? 'warning' : 'success'](`נמשכו ${r.fetched} · נוספו ${r.created} · דולגו ${r.skipped}${r.skipped_old ? ` · ${r.skipped_old} לפני תאריך ההתחלה` : ''}${r.errors ? ` · ${r.errors} שגיאות` : ''}`);
       reload(); onChanged();
     } catch (err) { toast.error(apiError(err, 'המשיכה נכשלה')); }
-    finally { setBusy(false); }
+    finally { (full ? setBusyFull : setBusy)(false); }
   };
+  const pull = run(false);
+  const pullFull = run(true);
   const s = state.data;
   return (
     <Block title="📨 משיכה ממיון המיילים" state={state} reload={reload}>
@@ -65,7 +69,10 @@ function Intake({ canWrite, onChanged }) {
           <Typography variant="body2">ממתינים לבדיקת קריאה: {s.needs_review}</Typography>
           <Typography variant="caption" color="text.secondary">המשיכה רצה לבד כל 6 שעות.</Typography>
           {canWrite && s.mail_sorter_configured && (
-            <Box><BusyButton variant="outlined" loading={busy} loadingText="מושך…" onClick={pull}>משוך עכשיו</BusyButton></Box>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <BusyButton variant="outlined" loading={busy} loadingText="מושך…" onClick={pull}>משוך עכשיו</BusyButton>
+              <BusyButton variant="text" loading={busyFull} loadingText="מושך הכול…" onClick={pullFull}>משיכה מלאה מחדש (כולל מה שכבר נמשך)</BusyButton>
+            </Stack>
           )}
         </Stack>
       )}
