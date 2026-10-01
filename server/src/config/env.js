@@ -81,6 +81,10 @@ const env = {
   MAIL_SORTER_URL: process.env.MAIL_SORTER_URL,
   MAIL_SORTER_TOKEN: process.env.MAIL_SORTER_TOKEN,
 
+  // Shared secret with the bank-pi agent (tofy-friends/agent). Unset = the
+  // ingest door is closed (503). Must be ≥32 chars.
+  FINANCE_INGEST_KEY: process.env.FINANCE_INGEST_KEY,
+
   /**
    * The import bot's key — the one door a robot may post a report file through
    * (routes/importBot.routes.js).

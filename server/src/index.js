@@ -99,6 +99,8 @@ app.use(cors({
 const PUBLIC_BIG_JSON = [
   /^\/api\/public\/register\/[^/]+\/contract-pdf$/,
   /^\/api\/public\/register\/[^/]+\/sign$/,
+  // The bank feed: 12 months of statements, signed (financeAuth) not bearer-authed.
+  /^\/api\/finance\/agent\/ingest$/,
 ];
 app.use((req, res, next) => {
   const len = Number(req.headers['content-length'] || 0);
@@ -110,7 +112,12 @@ app.use((req, res, next) => {
   if (PUBLIC_BIG_JSON.some(re => re.test(req.path))) return next();
   return res.status(413).json({ error: 'בקשה גדולה מדי' });
 });
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({
+  limit: '50mb',
+  // The bank agent signs the exact bytes it sent; re-serialising the parsed
+  // body would not reproduce them. Kept only for that route.
+  verify: (req, _res, buf) => { if (req.originalUrl.startsWith('/api/finance/agent/')) req.rawBody = buf; },
+}));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Logging

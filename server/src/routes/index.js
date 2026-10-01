@@ -35,6 +35,9 @@ router.get('/app-version', require('../controllers/appVersion.controller').publi
 // NOT with the normal JWT flow used by the web client.
 router.use('/agent', require('./agent.routes'));
 
+// Bank feed from the bank-pi agent — HMAC-signed, not a user session.
+router.use('/finance/agent', require('./financeAgent.routes'));
+
 // Task-board sync — same idea as the agent above: its own shared-key + HMAC
 // scheme rather than the JWT flow, so it sits with the routes that authenticate
 // themselves. Read-only, and closed entirely when TASKS_SYNC_KEY is unset.
