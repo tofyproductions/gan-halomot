@@ -24,7 +24,7 @@ const core = require('./expenseCore.service');
 const { withLocks } = require('./expenseWrites.service');
 const { compareToIcount, linkToRow } = require('./icountBridge.service');
 const { mapExpenseRow } = require('./icountMirror.service');
-const { METHODS, fetchPaged, listSuppliers, resolveIn } = require('./icountSuppliers.service');
+const { METHODS, fetchPaged, listSuppliers, resolveIn, trustedTaxId } = require('./icountSuppliers.service');
 const { getClient } = require('./ganIcount.client');
 
 const EXPENSE_TYPE_KEY = 'icount_expense_type_id';
@@ -200,7 +200,10 @@ async function searchExisting(doc, icountSupplier, suppliers, client) {
     if (m.is_storno || !m.icount_id) continue;
     if (m.supplier_id && m.supplier_id !== icountSupplier.id) continue;
     const card = cards.get(m.supplier_id || icountSupplier.id) || icountSupplier;
-    const theirs = { ...m, supplier_tax_id: m.supplier_tax_id || card.tax_id || '', supplier_name: card.name || '' };
+    // The card's ח.פ is the trusted one. The row's own counts only when the row
+    // names no supplier and the number passes the check digit (a misread is ignored).
+    const ownTax = !m.supplier_id && trustedTaxId(m.supplier_tax_id) ? m.supplier_tax_id : '';
+    const theirs = { ...m, supplier_tax_id: ownTax || card.tax_id || '', supplier_name: card.name || '' };
     const v = compareToIcount(doc, theirs);
     if (v === 'same_document') return { verdict: v, row: m };
     if (v === 'probable' && !probable) probable = m;

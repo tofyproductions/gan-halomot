@@ -107,6 +107,19 @@ async function loadContext() {
 const rememberMatch = (row, docId, kind, why) => IcountExpense.updateOne({ _id: row._id },
   { $set: { matched_expense_id: docId, match_kind: kind, match_why: why } });
 
+/**
+ * Filing created this very row but its local save failed (icount_pending_id):
+ * now that the document holds it, it is ours, filed — by the first filer, then.
+ */
+const claimPending = (docId, icountId) => ExpenseDocument.updateOne(
+  { _id: docId, icount_id: icountId, icount_pending_id: icountId },
+  [{ $set: {
+    icount_filed_at: { $ifNull: ['$icount_filed_at', { $ifNull: ['$icount_pending_at', '$$NOW'] }] },
+    icount_filed_by: { $ifNull: ['$icount_filed_by', '$icount_pending_by'] },
+    icount_pending_id: null, icount_pending_by: null, icount_pending_at: null,
+  } }],
+);
+
 /** Our document takes the row's icount_id when nothing else holds it. → true when linked. */
 async function linkPlain(row, docId, why) {
   try {
@@ -117,6 +130,7 @@ async function linkPlain(row, docId, why) {
     if (e.code === 11000) return false; // another document took this icount_id meanwhile
     throw e;
   }
+  await claimPending(docId, row.icount_id);
   await rememberMatch(row, docId, 'same_document', why);
   return true;
 }
@@ -187,6 +201,7 @@ async function mergeIntoTwin(row, docId, twinId, by, why) {
     }));
     return { moved, combined, voided_twin: String(twinId) };
   }, { document_id: docId }));
+  await claimPending(docId, row.icount_id);
   await rememberMatch(row, docId, 'same_document', why);
   return res;
 }

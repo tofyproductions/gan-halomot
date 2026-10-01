@@ -385,6 +385,11 @@ const TAX_B = '510000094';
     const byName = await closedDoc({ doc_number: 'G-1', currency: 'USD', amount_original: 10, fx_confirmed: true, supplier_tax_id: '', vendor_name: 'Google Ireland' });
     const fg = hit([{ expense_id: 'X10', expense_docnum: 'G-1', expense_date: '2026-09-10', nis_sum: 100, supplier_id: 22 }]);
     deepEq(await filing.fileToIcount(String(byName._id), { by, client: fg.client }), { adopted: true, icount_id: 'X10' }, 'ספק לפי שם (בלי ח.פ) — אומץ לפי זהות אמיתית');
+    // our supplier_id on the row + a misread ח.פ + our name differs from the card's → the card's ח.פ decides
+    const misread = await closedDoc({ doc_number: 'MR-1', vendor_name: 'חברת החשמל לישראל' });
+    const fm = hit([{ expense_id: 'X11', expense_docnum: 'MR-1', expense_date: '2026-09-10', nis_sum: 100, supplier_id: 11, supplier_vat_id: '510000555' }]);
+    deepEq(await filing.fileToIcount(String(misread._id), { by, client: fm.client }), { adopted: true, icount_id: 'X11' }, 'ח.פ שגוי בשורה של הספק שלנו — ח.פ הכרטיס קובע, אומץ');
+    eq(fm.creates(), 0, 'create לא נקרא');
 
     const s = await closedDoc({ doc_number: 'S-1' });
     const fs = hit([

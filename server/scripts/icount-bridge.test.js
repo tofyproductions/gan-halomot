@@ -357,6 +357,33 @@ const TAX_BAD = '510000555'; // fails the check digit — ignored
     eq(again.attached + again.created, 0, 'הרצה חוזרת — הפריט כבר מוכר');
   }
 
+  console.log('הגשר מקשר מסמך שהעלינו ושמירתו נכשלה (icount_pending_id) → מסומן "הועלה"');
+  await reset();
+  {
+    const filer = new mongoose.Types.ObjectId();
+    const at = new Date('2026-09-15T10:00:00Z');
+    const row = await mirrorRow({ doc_number: 'PD-1' });
+    const mine = await ours({ doc_number: 'PD-1', icount_pending_id: row.icount_id, icount_pending_by: filer, icount_pending_at: at });
+    const other = await mirrorRow({ doc_number: 'PD-2' });
+    const plain = await ours({ doc_number: 'PD-2', icount_pending_id: 'NOT-THIS-ONE' });
+    await bridge.syncBridge();
+    const m = await ExpenseDocument.findById(mine._id).lean();
+    eq(m.icount_id, row.icount_id, 'קושר');
+    eq(m.icount_filed_at && m.icount_filed_at.toISOString(), at.toISOString(), 'icount_filed_at = מתי שהעלינו');
+    eq(String(m.icount_filed_by), String(filer), 'icount_filed_by = מי שהעלה');
+    ok(m.icount_pending_id === null && m.icount_pending_by === null && m.icount_pending_at === null, 'השדות הממתינים נוקו');
+    const p = await ExpenseDocument.findById(plain._id).lean();
+    ok(p.icount_id === other.icount_id && p.icount_filed_at === null && p.icount_pending_id === 'NOT-THIS-ONE', 'מזהה ממתין אחר — קישור רגיל, בלי "הועלה"');
+
+    // the same through a merge with an iCount-sourced twin
+    const row3 = await mirrorRow({ doc_number: 'PD-3' });
+    await bridge.syncBridge(); // creates the twin
+    const late = await ours({ doc_number: 'PD-3', icount_pending_id: row3.icount_id, icount_pending_by: filer, icount_pending_at: at });
+    await bridge.syncBridge(); // merges ours into the twin
+    const l = await ExpenseDocument.findById(late._id).lean();
+    ok(l.icount_id === row3.icount_id && String(l.icount_filed_by) === String(filer) && l.icount_pending_id === null, 'גם במיזוג עם תאום — מסומן "הועלה", ממתין נוקה');
+  }
+
   console.log('ביטול של אדם במסמך שלנו המקושר → השורה מקבלת מסמך משלה');
   await reset();
   {
