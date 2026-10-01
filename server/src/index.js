@@ -285,6 +285,14 @@ app.use(errorHandler);
 
 // Connect to MongoDB then start server
 connectDB().then(() => {
+  // Built-in "no invoice needed" rules (salaries, bank fees, taxes...).
+  // Idempotent upsert — only a missing row is created; a failure is logged and
+  // the server still starts. Single gan only, like the other boot-time seeds.
+  if (!require('./platform/connection').isEnabled()) {
+    require('./services/noInvoiceRules.service').seed()
+      .catch((e) => console.error('⚠️  זריעת חוקי "לא צריך חשבונית" נכשלה:', e.message));
+  }
+
   const server = app.listen(env.PORT, () => {
     console.log(`🌟 Gan HaHalomot API running on port ${env.PORT} (${env.NODE_ENV})`);
 
