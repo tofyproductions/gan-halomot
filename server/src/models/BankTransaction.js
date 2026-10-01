@@ -24,6 +24,9 @@ const bankTransactionSchema = new mongoose.Schema({
   counterparty: { type: String, default: null },
   transfer_note: { type: String, default: null },
   is_internal_transfer: { type: Boolean, default: false },
+  // Bumped inside the expense-payment transaction so two server instances paying
+  // the same charge write-conflict instead of both passing the remaining check.
+  pay_seq: { type: Number, default: 0 },
   is_one_time: { type: Boolean, default: false },
   matched_card_account_id: { type: mongoose.Schema.Types.ObjectId, ref: 'BankAccount', default: null },
   // The card bill (the card's processed_date) this bank line paid.

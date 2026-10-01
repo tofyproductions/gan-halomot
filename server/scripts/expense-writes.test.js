@@ -145,6 +145,10 @@ async function suite(label) {
     eq(c.amount_total, 12, 'confirm: תיקון הוחל');
     eq((await paysOf(r._id)).length, 0, 'confirm: בלי שיוך');
 
+    const fx = await doc({ needs_review: true, currency: 'USD', amount_total: 50, fx_confirmed: false });
+    await w.confirmDocument(fx._id, { amount_total: 180 }, null);
+    eq((await ExpenseDocument.findById(fx._id).lean()).fx_confirmed, true, 'confirm: מטבע חוץ עם סכום שקלי מאושר');
+
     const v = await doc({ amount_total: 100 });
     const vt = await tx({ amount: -100 });
     await w.acceptPair({ document_id: v._id, transaction_id: vt._id });
@@ -162,6 +166,35 @@ async function suite(label) {
       ['confirm', () => w.confirmDocument(v._id, {}, null)],
       ['void', () => w.voidDocument(v._id)],
     ]) await refuses(fn, 409, `מסמך מבוטל: ${name}`);
+  }
+
+  console.log('\nמרוץ הקצאה');
+  {
+    const t = await tx({ amount: -100 });
+    const a = await doc({ amount_total: 100 });
+    const b = await doc({ amount_total: 100 });
+    const res = await Promise.allSettled([
+      w.acceptPair({ document_id: a._id, transaction_id: t._id }),
+      w.acceptPair({ document_id: b._id, transaction_id: t._id }),
+    ]);
+    eq(res.filter(r => r.status === 'fulfilled').length, 1, 'שני מסמכים על חיוב אחד — רק אחד מצליח');
+    const tot = (await ExpensePayment.find({ transaction_id: t._id }).lean()).reduce((s, p) => s + p.amount, 0);
+    ok(tot <= 100, `סך התשלומים ${tot} ≤ החיוב`);
+
+    const d = await doc({ amount_total: 100 });
+    const t1 = await tx({ amount: -100 });
+    const t2 = await tx({ amount: -100 });
+    const res2 = await Promise.allSettled([
+      w.acceptPair({ document_id: d._id, transaction_id: t1._id }),
+      w.acceptPair({ document_id: d._id, transaction_id: t2._id }),
+    ]);
+    eq(res2.filter(r => r.status === 'fulfilled').length, 1, 'שני חיובים על מסמך אחד — רק אחד מצליח');
+    const tot2 = (await paysOf(d._id)).reduce((s, p) => s + p.amount, 0);
+    ok(tot2 <= 100, `סך התשלומים במסמך ${tot2} ≤ 100`);
+
+    const small = await tx({ amount: -1.5 });
+    const dd = await doc({ amount_total: 100 });
+    await refuses(() => w.acceptPair({ document_id: dd._id, transaction_id: small._id }), 409, 'חיוב עם יתרה ≤ 2 ₪');
   }
 
   console.log('\nכשל באמצע — גלגול לאחור');
@@ -187,6 +220,23 @@ async function suite(label) {
     finally { ExpenseDocument.updateOne = origUpd; }
     eq((await paysOf(v._id)).length, 1, 'ביטול שנכשל לא מחק את התשלום');
     eq((await ExpenseDocument.findById(v._id).lean()).status, 'active', 'והמסמך נשאר פעיל');
+
+    // a failing undo is logged and flagged (standalone path only — a transaction has no undos)
+    const logged = [];
+    const origErr = console.error; console.error = (...a) => logged.push(a);
+    const u = await doc({ needs_review: true, vendor_name: 'מקורי', amount_total: 100 });
+    const ut = await tx({ amount: -100 });
+    const o1 = ExpensePayment.create, o2 = ExpenseDocument.updateOne;
+    ExpensePayment.create = async () => { throw new Error('boom3'); };
+    ExpenseDocument.updateOne = async () => { throw new Error('undo-fail'); };
+    let err;
+    try { await w.acceptPair({ document_id: u._id, transaction_id: ut._id, review: { vendor_name: 'חדש' } }); } catch (e) { err = e; }
+    ExpensePayment.create = o1; ExpenseDocument.updateOne = o2; console.error = origErr;
+    eq(err && err.message, 'boom3', 'השגיאה המקורית נשמרת');
+    if (label.startsWith('שרת')) {
+      eq(err.rollbackFailed, true, 'rollbackFailed נקבע');
+      ok(logged.length === 1 && String(logged[0][1].document_id) === String(u._id) && String(logged[0][1].transaction_id) === String(ut._id), 'נרשם ללוג עם מזהים');
+    } else eq(!!err.rollbackFailed, false, 'בטרנזקציה אין גלגול ידני');
   }
 }
 

@@ -41,7 +41,7 @@ async function supportsTransactions() {
  * work({ session, undo }) — pass `session` to every query (undefined on a
  * standalone server); call `undo(fn)` after each write that has an inverse.
  */
-async function atomically(work) {
+async function atomically(work, meta = {}) {
   if (await supportsTransactions()) {
     // The driver may re-run the callback on a transient error, so `work` must
     // start from scratch each time (it does: it only reads and writes).
@@ -53,9 +53,36 @@ async function atomically(work) {
   try {
     return await work({ session: undefined, undo: (fn) => undos.push(fn) });
   } catch (e) {
-    for (const fn of undos.reverse()) { try { await fn(); } catch (_) { /* best effort */ } }
+    for (const fn of undos.reverse()) {
+      try { await fn(); } catch (ue) {
+        e.rollbackFailed = true;
+        console.error('[expenseWrites] rollback step failed', { document_id: meta.document_id, transaction_id: meta.transaction_id, error: ue && ue.message });
+      }
+    }
     throw e;
   }
+}
+
+// ── in-process keyed mutex ─────────────────────────────────────────────────
+// Production runs a single Render instance, so serialising per charge and per
+// document in-process closes the check-then-insert race (two accepts both
+// seeing room on one charge). Keys are taken in sorted order: no deadlock.
+const locks = new Map(); // key -> tail promise
+async function withLocks(keys, fn) {
+  const sorted = [...new Set(keys)].sort();
+  const releases = [];
+  try {
+    for (const k of sorted) {
+      const prev = locks.get(k) || Promise.resolve();
+      let release;
+      const mine = new Promise((r) => { release = r; });
+      const tail = prev.then(() => mine);
+      locks.set(k, tail);
+      await prev;
+      releases.push(() => { release(); if (locks.get(k) === tail) locks.delete(k); });
+    }
+    return await fn();
+  } finally { releases.forEach(r => r()); }
 }
 
 // ── loaders ────────────────────────────────────────────────────────────────
@@ -128,14 +155,16 @@ async function receiptGuard(docLike) {
  */
 async function acceptPair({ document_id, transaction_id, amount, review, by } = {}) {
   oid(document_id, 'מזהה מסמך'); oid(transaction_id, 'מזהה תנועה');
-  const patch = pickReview(review);
+  pickReview(review); // validate up front; `patch` itself is rebuilt inside the work
   if (amount !== undefined && amount !== null) {
     const n = Number(amount);
     if (!Number.isFinite(n) || n <= 0) throw fail(400, 'סכום השיוך חייב להיות גדול מאפס');
   }
 
-  return atomically(async (ctx) => {
+  return withLocks([`tx:${transaction_id}`, `doc:${document_id}`], () => atomically(async (ctx) => {
     const { session, undo } = ctx;
+    const patch = pickReview(review); // fresh each (re)try of a transaction
+    if (session) await BankTransaction.updateOne({ _id: transaction_id }, { $inc: { pay_seq: 1 } }, { session });
     let doc = await activeDoc(document_id, session);
     const tx = await loadTx(transaction_id, session);
     await receiptGuard({ ...doc.toObject(), ...patch });
@@ -146,7 +175,7 @@ async function acceptPair({ document_id, transaction_id, amount, review, by } = 
       throw fail(409, 'התנועה כבר משויכת למסמך הזה');
     }
     const chargeRemaining = round2(charge - await paidOn({ transaction_id }, session));
-    if (chargeRemaining <= 0) throw fail(409, 'החיוב כבר מכוסה במלואו');
+    if (chargeRemaining <= core.COVERAGE_TOLERANCE_ILS) throw fail(409, 'החיוב כבר מכוסה במלואו');
 
     // A foreign document takes its shekel figure from the charge (what the
     // bank charged — never a conversion rate); that also confirms the figure.
@@ -176,7 +205,7 @@ async function acceptPair({ document_id, transaction_id, amount, review, by } = 
     }
     undo(() => ExpensePayment.deleteOne({ _id: payment._id }));
     return { payment: payment.toObject(), document: updated };
-  });
+  }, { document_id, transaction_id }));
 }
 
 // ── reject / unpair ────────────────────────────────────────────────────────
@@ -207,7 +236,7 @@ async function unpairCharge({ document_id, transaction_id, by } = {}) {
     await upsertRejection(document_id, transaction_id, by, session);
     if (!had) undo(() => ExpensePairRejection.deleteOne({ document_id, transaction_id }));
     return { ok: true };
-  });
+  }, { document_id, transaction_id });
 }
 
 // ── unpaid marks / decisions ───────────────────────────────────────────────
@@ -244,6 +273,7 @@ async function undecide(document_id) {
 async function confirmDocument(document_id, fields, by) {
   const patch = pickReview(fields);
   const doc = await activeDoc(document_id);
+  if ((doc.currency || 'ILS') !== 'ILS' && patch.amount_total !== undefined) patch.fx_confirmed = true;
   patch.needs_review = false;
   patch.confirmed_by = by || null;
   patch.confirmed_at = new Date();
@@ -264,7 +294,7 @@ async function voidDocument(document_id, by) {
     await ExpenseDocument.updateOne({ _id: doc._id }, { $set: { status: 'void' } }, { session });
     undo(() => ExpenseDocument.updateOne({ _id: doc._id }, { $set: { status: 'active' } }));
     return { ok: true, removed_payments: pays.length };
-  });
+  }, { document_id });
 }
 
 module.exports = {
