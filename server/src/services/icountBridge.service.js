@@ -28,6 +28,7 @@ const { trustedTaxId } = require('./icountSuppliers.service');
 const { pullMirror } = require('./icountMirror.service');
 const { getClient } = require('./ganIcount.client');
 
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const oid = (v, what) => { if (!mongoose.isValidObjectId(v)) throw fail(400, `${what} לא תקין`); return String(v); };
 
@@ -66,12 +67,11 @@ function compareToIcount(ours, theirs) {
   return closeAmount && a !== null && b !== null && Math.abs(a - b) <= 3 ? 'probable' : 'different';
 }
 
-// Reverse of the filing map (Global Constraints). An empty doctype is iCount's default: an invoice.
-const DOC_TYPE_BY_ICOUNT = { invoice: 'tax_invoice', invrec: 'invoice_receipt', receipt: 'receipt', refund: 'credit_note' };
+// Reverse of the filing map (Global Constraints). Empty or unknown → an invoice, the common case
+// (ruling: `expense_doctype` is unverified on the real account — check on the first real pull).
+const DOC_TYPE_BY_ICOUNT = { invoice: 'tax_invoice', invrec: 'invoice_receipt', receipt: 'receipt', refund: 'credit_note', other: 'other' };
 const docTypeFor = (t) => {
-  const k = String(t || '').trim().toLowerCase();
-  if (!k) return 'tax_invoice';
-  return DOC_TYPE_BY_ICOUNT[k] || 'other';
+  return DOC_TYPE_BY_ICOUNT[String(t || '').trim().toLowerCase()] || 'tax_invoice';
 };
 
 // ── shared context ─────────────────────────────────────────────────────────
@@ -123,9 +123,11 @@ async function linkPlain(row, docId, why) {
 
 /**
  * Our document becomes the row's document; the iCount-sourced twin created
- * earlier is voided and its payments move over (a payment whose charge is
- * already on our document is not duplicated — it goes with the twin, as a
- * void document holds no money). Receipts linked to the twin follow too.
+ * earlier is voided and its payments move over. A charge already paying our
+ * document too is not duplicated: our payment grows by the twin's amount
+ * (both coexisted on that charge, so the sum fits within it) and the twin's
+ * row goes — a void document holds no money. Receipts linked to the twin
+ * follow, and so does the twin's file when ours has none.
  */
 async function mergeIntoTwin(row, docId, twinId, by, why) {
   const twinPays = await ExpensePayment.find({ document_id: twinId }, 'transaction_id').lean();
@@ -138,12 +140,18 @@ async function mergeIntoTwin(row, docId, twinId, by, why) {
     if (doc.icount_id) throw fail(409, 'המסמך כבר מקושר למסמך אחר באייקאונט');
     if (!twin || twin.icount_id !== row.icount_id || twin.source !== 'icount') throw fail(409, 'מסמך האייקאונט השתנה — רעננו ונסו שוב');
 
-    let moved = 0; let skipped = 0;
+    let moved = 0; let combined = 0;
     const pays = await ExpensePayment.find({ document_id: twinId }).session(s).lean();
     for (const p of pays) {
       await ExpensePayment.deleteOne({ _id: p._id }, { session });
       undo(() => ExpensePayment.create(p));
-      if (await ExpensePayment.exists({ document_id: docId, transaction_id: p.transaction_id }).session(s)) { skipped++; continue; }
+      const mine = await ExpensePayment.findOne({ document_id: docId, transaction_id: p.transaction_id }).session(s).lean();
+      if (mine) {
+        await ExpensePayment.updateOne({ _id: mine._id }, { $set: { amount: round2(mine.amount + p.amount) } }, { session });
+        undo(() => ExpensePayment.updateOne({ _id: mine._id }, { $set: { amount: mine.amount } }));
+        combined++;
+        continue;
+      }
       const [created] = await ExpensePayment.create([{
         document_id: docId, transaction_id: p.transaction_id, amount: p.amount, created_by: p.created_by || by || null,
       }], { session });
@@ -158,12 +166,26 @@ async function mergeIntoTwin(row, docId, twinId, by, why) {
       undo(() => ExpenseDocument.updateMany({ _id: { $in: ids } }, { $set: { linked_invoice_id: twinId } }));
     }
 
-    // Free the unique icount_id first, then hand it to our document.
-    await ExpenseDocument.updateOne({ _id: twinId }, { $set: { status: 'void', icount_id: null } }, { session });
-    undo(() => ExpenseDocument.updateOne({ _id: twinId }, { $set: { status: twin.status, icount_id: twin.icount_id } }));
-    await ExpenseDocument.updateOne({ _id: docId }, { $set: { icount_id: row.icount_id, icount_gone_at: null } }, { session });
-    undo(() => ExpenseDocument.updateOne({ _id: docId }, { $set: { icount_id: null, icount_gone_at: doc.icount_gone_at ?? null } }));
-    return { moved, skipped, voided_twin: String(twinId) };
+    // The twin's file (a mail item attached to it) moves to ours when ours has none.
+    const takeFile = doc.mail_sorter_id == null && !doc.file_id && (twin.mail_sorter_id != null || twin.file_id);
+    const fileSet = takeFile ? { mail_sorter_id: twin.mail_sorter_id ?? undefined, file_id: twin.file_id || null } : {};
+    if (takeFile && !doc.attachment_sha256 && twin.attachment_sha256) fileSet.attachment_sha256 = twin.attachment_sha256;
+    if (fileSet.mail_sorter_id === undefined) delete fileSet.mail_sorter_id;
+
+    // Free the unique icount_id (and mail_sorter_id) first, then hand them to our document.
+    const twinOff = { $set: { status: 'void', icount_id: null, ...(takeFile ? { file_id: null } : {}) } };
+    if (takeFile && twin.mail_sorter_id != null) twinOff.$unset = { mail_sorter_id: 1 };
+    await ExpenseDocument.updateOne({ _id: twinId }, twinOff, { session });
+    undo(() => ExpenseDocument.updateOne({ _id: twinId }, { $set: {
+      status: twin.status, icount_id: twin.icount_id, file_id: twin.file_id || null,
+      ...(twin.mail_sorter_id != null ? { mail_sorter_id: twin.mail_sorter_id } : {}),
+    } }));
+    await ExpenseDocument.updateOne({ _id: docId }, { $set: { icount_id: row.icount_id, icount_gone_at: null, ...fileSet } }, { session });
+    undo(() => ExpenseDocument.updateOne({ _id: docId }, {
+      $set: { icount_id: null, icount_gone_at: doc.icount_gone_at ?? null, file_id: doc.file_id || null, attachment_sha256: doc.attachment_sha256 || '' },
+      ...(takeFile && twin.mail_sorter_id != null ? { $unset: { mail_sorter_id: 1 } } : {}),
+    }));
+    return { moved, combined, voided_twin: String(twinId) };
   }, { document_id: docId }));
   await rememberMatch(row, docId, 'same_document', why);
   return res;
@@ -172,15 +194,19 @@ async function mergeIntoTwin(row, docId, twinId, by, why) {
 /** Links our document to the row, whatever currently holds the row's icount_id. */
 async function linkToRow(row, docId, by, why) {
   const holder = await ExpenseDocument.findOne({ icount_id: row.icount_id }, 'source status').lean();
-  if (holder && String(holder._id) === String(docId)) return { moved: 0, skipped: 0 };
+  if (holder && String(holder._id) === String(docId)) return { moved: 0, combined: 0 };
   if (holder && holder.source !== 'icount') throw fail(409, 'מסמך האייקאונט כבר מקושר למסמך אחר שלנו');
   if (holder) return mergeIntoTwin(row, docId, holder._id, by, why);
   if (!(await linkPlain(row, docId, why))) throw fail(409, 'המסמך כבר מקושר למסמך אחר באייקאונט');
-  return { moved: 0, skipped: 0 };
+  return { moved: 0, combined: 0 };
 }
 
 async function createFromRow(row) {
   const supplier = await core.matchSupplier({ supplier_tax_id: row.supplier_tax_id, vendor_name: row.supplier_name });
+  const docType = docTypeFor(row.doctype);
+  // Ruling: Orly books a receipt in iCount only when it IS the document (exempt
+  // supplier) — it pairs like one instead of waiting for an invoice.
+  const receiptIsDocument = docType === 'receipt' ? { receipt_disposition: 'is_document', receipt_disposition_at: new Date() } : {};
   try {
     await ExpenseDocument.create({
       source: 'icount',
@@ -188,7 +214,8 @@ async function createFromRow(row) {
       vendor_name: row.supplier_name || '',
       supplier_tax_id: row.supplier_tax_id || '',
       supplier_id: supplier ? supplier._id : null,
-      doc_type: docTypeFor(row.doctype),
+      doc_type: docType,
+      ...receiptIsDocument,
       doc_number: row.doc_number || '',
       doc_date: row.doc_date,
       amount_total: Number(row.amount_total) || 0, // iCount's nis_sum: already shekels
@@ -196,6 +223,7 @@ async function createFromRow(row) {
       fx_confirmed: true,
       needs_review: false,
     });
+    if (row.matched_expense_id || row.match_kind) await rememberMatch(row, null, null, ''); // a stale probable twin
     return true;
   } catch (e) {
     if (e.code === 11000) return false;
@@ -206,8 +234,9 @@ async function createFromRow(row) {
 /** A row that left iCount (gone or cancelled) whose document is still active. → 'voided' | 'flagged' | null */
 async function retireDocument(row, doc) {
   const at = row.gone_at || row.last_seen_at || new Date();
-  if (doc.source !== 'icount') {
-    // Our own document (it has a file / was typed here) stays; it only loses its iCount standing.
+  const holdsFile = doc.mail_sorter_id != null || !!doc.file_id;
+  if (doc.source !== 'icount' || holdsFile) {
+    // Our own document, or an iCount one that got the mailed file, stays; it only loses its iCount standing.
     if (doc.icount_gone_at) return null;
     await ExpenseDocument.updateOne({ _id: doc._id }, { $set: { icount_gone_at: at } });
     return 'flagged';
@@ -221,21 +250,21 @@ async function retireDocument(row, doc) {
       return 'flagged';
     }
     await voidDocument(doc._id);
-    await ExpenseDocument.updateOne({ _id: doc._id }, { $set: { icount_gone_at: at } });
+    await ExpenseDocument.updateOne({ _id: doc._id }, { $set: { icount_gone_at: at, icount_voided_by_bridge: true } });
     return 'voided';
   });
 }
 
-/** The row is back in iCount: undo what `retireDocument` did. A person's own void is left alone. */
+/** The row is back in iCount: undo what `retireDocument` did. Only the bridge's own void comes back, never a person's. */
 async function restoreDocument(doc) {
-  if (!doc.icount_gone_at) return false;
   if (doc.status === 'active') {
-    await ExpenseDocument.updateOne({ _id: doc._id }, { $set: { icount_gone_at: null } });
+    if (doc.icount_gone_at) await ExpenseDocument.updateOne({ _id: doc._id }, { $set: { icount_gone_at: null } });
     return false;
   }
-  if (doc.source !== 'icount') return false;
-  await ExpenseDocument.updateOne({ _id: doc._id, status: 'void' }, { $set: { status: 'active', icount_gone_at: null } });
-  return true;
+  if (!doc.icount_voided_by_bridge) return false;
+  const res = await ExpenseDocument.updateOne({ _id: doc._id, status: 'void', icount_voided_by_bridge: true },
+    { $set: { status: 'active', icount_gone_at: null, icount_voided_by_bridge: false } });
+  return res.modifiedCount === 1;
 }
 
 // ── the sync ───────────────────────────────────────────────────────────────
@@ -342,6 +371,7 @@ async function decideIdentity(documentId, icountExpenseId, same, by = null) {
   if (doc.status === 'void') throw fail(409, 'המסמך מבוטל — אי אפשר לשנות אותו');
   if (doc.source === 'icount') throw fail(400, 'זה מסמך שנוצר מאייקאונט — בחרו את המסמך שלנו');
   if (same) {
+    if (compareToIcount(doc, row) === 'different') throw fail(400, 'ספק אחר או סכום/תאריך רחוקים — אלה לא אותו מסמך');
     if (doc.icount_id && doc.icount_id !== row.icount_id) throw fail(409, 'המסמך כבר מקושר למסמך אחר באייקאונט');
     const holder = await ExpenseDocument.findOne({ icount_id: row.icount_id }, 'source').lean();
     if (holder && holder.source !== 'icount' && String(holder._id) !== String(doc._id)) {
@@ -362,15 +392,32 @@ async function decideIdentity(documentId, icountExpenseId, same, by = null) {
     return { verdict };
   }
   const res = await linkToRow(row, doc._id, by, WHY_PERSON);
-  return { verdict, moved: res.moved, skipped: res.skipped };
+  return { verdict, moved: res.moved, combined: res.combined };
 }
 
-/** An active iCount-sourced document still without a file that `data` (a mail item) is certainly the same as. */
+// A mail receipt never becomes an iCount invoice's file (nor the reverse).
+const kindOf = (t) => (t === 'receipt' || t === 'credit_note' ? t : 'invoice');
+const kindsAgree = (a, b) => kindOf(a) === kindOf(b);
+
+/**
+ * An active iCount-sourced document still without a file that `data` (a mail
+ * item) is certainly the same as, of the same kind. Looks among the same
+ * supplier (supplier_id / ח.פ) first; the full scan covers a side without either.
+ */
 async function attachableIcountTwin(data) {
   if (!docKey(data.doc_number)) return null;
-  const docs = await ExpenseDocument.find({ status: 'active', source: 'icount', file_id: null, mail_sorter_id: null })
-    .sort({ _id: 1 }).lean();
-  return docs.find(d => compareToIcount(data, d) === 'same_document') || null;
+  const base = { status: 'active', source: 'icount', file_id: null, mail_sorter_id: null };
+  const fits = (d) => kindsAgree(data.doc_type, d.doc_type) && compareToIcount(data, d) === 'same_document';
+  const tax = trustedTaxId(data.supplier_tax_id);
+  const near = [
+    ...(data.supplier_id ? [{ supplier_id: data.supplier_id }] : []),
+    ...(tax ? [{ supplier_tax_id: { $in: [tax, tax.replace(/^0+/, '')] } }] : []),
+  ];
+  if (near.length) {
+    const hit = (await ExpenseDocument.find({ ...base, $or: near }).sort({ _id: 1 }).lean()).find(fits);
+    if (hit) return hit;
+  }
+  return (await ExpenseDocument.find(base).sort({ _id: 1 }).lean()).find(fits) || null;
 }
 
 /** The daily job and the button: pull the mirror, then bridge it. */
@@ -382,5 +429,5 @@ async function pullAndSync({ client, ...opts } = {}) {
 }
 
 module.exports = {
-  compareToIcount, docTypeFor, syncBridge, pendingIdentityQuestions, decideIdentity, attachableIcountTwin, pullAndSync,
+  compareToIcount, docTypeFor, kindsAgree, syncBridge, pendingIdentityQuestions, decideIdentity, attachableIcountTwin, pullAndSync,
 };

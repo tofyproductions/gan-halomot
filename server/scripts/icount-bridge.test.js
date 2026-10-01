@@ -84,13 +84,13 @@ const TAX_BAD = '510000555'; // fails the check digit — ignored
     const ourProb = await ours({ doc_number: 'X-9', amount_total: 700, doc_date: '2026-09-17' });
     await mirrorRow({ doc_number: 'S-1', is_storno: true });
     await mirrorRow({ doc_number: 'OLD', doc_date: '2026-08-20' });
-    const types = {};
-    for (const [t, want] of [['invrec', 'invoice_receipt'], ['receipt', 'receipt'], ['refund', 'credit_note'], ['weird', 'other'], ['', 'tax_invoice']]) {
-      types[want] = await mirrorRow({ doctype: t, doc_number: `T-${t || 'empty'}`, amount_total: 1000 + seq, doc_date: '2026-09-25' });
+    const types = [];
+    for (const [t, want] of [['invrec', 'invoice_receipt'], ['receipt', 'receipt'], ['refund', 'credit_note'], ['other', 'other'], ['weird', 'tax_invoice'], ['', 'tax_invoice']]) {
+      types.push({ want, row: await mirrorRow({ doctype: t, doc_number: `T-${t || 'empty'}`, amount_total: 1000 + seq, doc_date: '2026-09-25' }) });
     }
 
     const r = await bridge.syncBridge();
-    eq(r.created, 6, 'נוצרו מסמכים למסמכי אייקאונט בלי מקבילה (1 + 5 סוגים)');
+    eq(r.created, 7, 'נוצרו מסמכים למסמכי אייקאונט בלי מקבילה (1 + 6 סוגים)');
     eq(r.linked, 1, 'קישור אחד (אותו ספק + מספר)');
     eq(r.probable, 1, 'שאלת זהות אחת');
     eq(r.voided, 0, 'בלי ביטולים');
@@ -106,15 +106,23 @@ const TAX_BAD = '510000555'; // fails the check digit — ignored
     eq(made && made.doc_date, '2026-09-11', 'תאריך');
     eq(made && made.doc_number, 'A-1', 'מספר מסמך');
     eq(made && made.currency, 'ILS', 'ש"ח');
-    for (const [want, row] of Object.entries(types)) {
+    for (const { want, row } of types) {
       eq((await ExpenseDocument.findOne({ icount_id: row.icount_id }).lean())?.doc_type, want, `סוג ${row.doctype || 'ריק'} → ${want}`);
     }
+    const receiptRow = types.find(x => x.want === 'receipt').row;
+    const rec = await ExpenseDocument.findOne({ icount_id: receiptRow.icount_id }).lean();
+    eq(rec.receipt_disposition, 'is_document', 'קבלה מאייקאונט — "הקבלה היא המסמך"');
+    ok(!!rec.receipt_disposition_at, 'receipt_disposition_at');
 
     const charge = await tx({ amount: -480, date: '2026-09-12', description: 'חשמל ישראל' });
     const q = await pairQueue();
     const p = q.pairs.find(x => id(x.doc) === id(made));
     ok(!!p, 'מסמך אייקאונט מופיע ב-pairQueue');
     eq(p && id(p.tx), id(charge), 'עם החיוב המתאים');
+    const inQueue = [...q.pairs.map(x => x.doc), ...q.unmatchedDocs].find(d => id(d) === id(rec));
+    ok(!!inQueue, 'קבלה מאייקאונט נכנסת ל-pairQueue');
+    const lanes = await require('../src/services/expenseCore.service').documentsWithState();
+    eq(lanes.find(d => id(d) === id(rec))?.lane, 'open', 'ולא לנתיב הקבלות');
 
     eq((await ExpenseDocument.findById(ourLinked._id).lean()).icount_id, linkedRow.icount_id, 'המסמך שלנו קיבל icount_id');
     eq(await ExpenseDocument.countDocuments({ doc_number: { $in: ['0052 /1', '52/1'] } }), 1, 'לא נוצר כפול');
@@ -140,6 +148,10 @@ const TAX_BAD = '510000555'; // fails the check digit — ignored
     console.log('decideIdentity — "לא אותו מסמך"');
     await refuses(() => bridge.decideIdentity('zz', id(probRow), false), 400, 'מזהה לא תקין');
     await refuses(() => bridge.decideIdentity(id(ourProb), id(new mongoose.Types.ObjectId()), false), 404, 'שורה לא קיימת');
+    const far = await ours({ supplier_tax_id: TAX_B, vendor_name: 'חברה אחרת', doc_number: 'P-1', amount_total: 700, doc_date: '2026-09-15' });
+    await refuses(() => bridge.decideIdentity(id(far), id(probRow), true), 400, '"אותו" על זוג שההשוואה אומרת "שונה"');
+    eq(await ExpenseIdentityDecision.countDocuments(), 0, 'לא נשמרה החלטה');
+    await ExpenseDocument.updateOne({ _id: far._id }, { status: 'void' });
     const by = new mongoose.Types.ObjectId();
     const d = await bridge.decideIdentity(id(ourProb), id(probRow), false, by);
     eq(d.verdict, 'different', 'נשמר "שונה"');
@@ -162,12 +174,12 @@ const TAX_BAD = '510000555'; // fails the check digit — ignored
     const twin = await ExpenseDocument.findOne({ icount_id: row.icount_id }).lean();
     eq(twin && twin.source, 'icount', 'נוצר תאום אייקאונט');
     const t1 = await tx({ amount: -600 });
-    const t2 = await tx({ amount: -300 });
+    const t2 = await tx({ amount: -400 });
     await ExpensePayment.create({ document_id: twin._id, transaction_id: t1._id, amount: 600 });
     await ExpensePayment.create({ document_id: twin._id, transaction_id: t2._id, amount: 300 });
     // the mail copy arrives later with a differently printed number → only probable
     const mine = await ours({ doc_number: 'Q-1-COPY', amount_total: 900, doc_date: '2026-09-11' });
-    await ExpensePayment.create({ document_id: mine._id, transaction_id: t2._id, amount: 300 });
+    await ExpensePayment.create({ document_id: mine._id, transaction_id: t2._id, amount: 100 });
 
     const qs = await bridge.pendingIdentityQuestions();
     eq(qs.length, 1, 'שאלה גם כשכבר יש תאום אייקאונט');
@@ -177,7 +189,7 @@ const TAX_BAD = '510000555'; // fails the check digit — ignored
     const r = await bridge.decideIdentity(id(mine), id(row), true);
     eq(r.verdict, 'same', 'נשמר "אותו"');
     eq(r.moved, 1, 'תשלום אחד הועבר');
-    eq(r.skipped, 1, 'תשלום שכבר על המסמך שלנו — לא שוכפל');
+    eq(r.combined, 1, 'חיוב שכבר משלם גם את המסמך שלנו — אוחד');
     const m = await ExpenseDocument.findById(mine._id).lean();
     eq(m.icount_id, row.icount_id, 'המסמך שלנו קושר');
     const tw = await ExpenseDocument.findById(twin._id).lean();
@@ -186,6 +198,8 @@ const TAX_BAD = '510000555'; // fails the check digit — ignored
     eq(await ExpensePayment.countDocuments({ document_id: twin._id }), 0, 'לתאום לא נשארו תשלומים');
     eq(await ExpensePayment.countDocuments({ document_id: mine._id }), 2, 'למסמך שלנו שני תשלומים');
     eq(await ExpensePayment.countDocuments({ document_id: mine._id, transaction_id: t2._id }), 1, 'חיוב t2 פעם אחת בלבד');
+    eq((await ExpensePayment.findOne({ document_id: mine._id, transaction_id: t2._id }).lean()).amount, 400, 'הסכום אוחד: 300 + 100 = 400 (הכיסוי לא אבד)');
+    eq((await ExpensePayment.findOne({ document_id: mine._id, transaction_id: t1._id }).lean()).amount, 600, 't1 עבר בסכומו');
     eq((await IcountExpense.findById(row._id).lean()).match_kind, 'same_document', 'המראה מעודכן');
     eq((await bridge.pendingIdentityQuestions()).length, 0, 'השאלה נסגרה');
     const s = await bridge.syncBridge();
@@ -211,6 +225,7 @@ const TAX_BAD = '510000555'; // fails the check digit — ignored
   {
     const row = await mirrorRow({ doc_number: '0031', amount_total: 250 });
     await bridge.syncBridge();
+    await ExpenseDocument.updateOne({ icount_id: row.icount_id }, { $set: { mail_sorter_id: 777, attachment_sha256: 'sha777' } });
     const twin = await ExpenseDocument.findOne({ icount_id: row.icount_id }).lean();
     const t = await tx({ amount: -250 });
     await ExpensePayment.create({ document_id: twin._id, transaction_id: t._id, amount: 250 });
@@ -222,6 +237,21 @@ const TAX_BAD = '510000555'; // fails the check digit — ignored
     eq((await ExpenseDocument.findById(typed._id).lean()).icount_id, row.icount_id, 'המסמך שלנו קיבל icount_id');
     eq((await ExpenseDocument.findById(twin._id).lean()).status, 'void', 'התאום בוטל');
     eq(await ExpensePayment.countDocuments({ document_id: typed._id }), 1, 'התשלום עבר');
+    const typedNow = await ExpenseDocument.findById(typed._id).lean();
+    eq(typedNow.mail_sorter_id, 777, 'הקובץ (mail_sorter_id) עבר למסמך שלנו');
+    eq(typedNow.attachment_sha256, 'sha777', 'וה-sha');
+    eq((await ExpenseDocument.findById(twin._id).lean()).mail_sorter_id, undefined, 'התאום שחרר את mail_sorter_id');
+
+    console.log('syncBridge — תאום סביר שנעלם → השורה מקבלת מסמך, סימון ישן נמחק');
+    const pRow = await mirrorRow({ doc_number: 'PP-1', amount_total: 640, doc_date: '2026-09-22' });
+    const pDoc = await ours({ doc_number: 'PP-x', amount_total: 640, doc_date: '2026-09-22' });
+    eq((await bridge.syncBridge()).created, 0, 'סביר — ממתין');
+    eq((await IcountExpense.findById(pRow._id).lean()).match_kind, 'probable', 'השורה מסומנת סבירה');
+    await ExpenseDocument.updateOne({ _id: pDoc._id }, { status: 'void' });
+    eq((await bridge.syncBridge()).created, 1, 'התאום בוטל — נוצר מסמך אייקאונט');
+    const pAfter = await IcountExpense.findById(pRow._id).lean();
+    eq(pAfter.match_kind, null, 'match_kind נוקה');
+    eq(pAfter.matched_expense_id, null, 'matched_expense_id נוקה');
   }
 
   console.log('שורות שנעלמו / בוטלו באייקאונט');
@@ -231,20 +261,30 @@ const TAX_BAD = '510000555'; // fails the check digit — ignored
     const g2 = await mirrorRow({ doc_number: 'G-2' });
     const g3 = await mirrorRow({ doc_number: 'G-3' });
     const g4 = await mirrorRow({ doc_number: 'G-4' });
+    const g6 = await mirrorRow({ doc_number: 'G-6' });
+    const g7 = await mirrorRow({ doc_number: 'G-7' });
     const mineLinked = await ours({ doc_number: 'G-3' });
     await bridge.syncBridge();
     const d1 = await ExpenseDocument.findOne({ icount_id: g1.icount_id });
     const d2 = await ExpenseDocument.findOne({ icount_id: g2.icount_id });
     const d4 = await ExpenseDocument.findOne({ icount_id: g4.icount_id });
+    const d6 = await ExpenseDocument.findOne({ icount_id: g6.icount_id });
+    const d7 = await ExpenseDocument.findOne({ icount_id: g7.icount_id });
+    await ExpenseDocument.updateOne({ _id: d6._id }, { $set: { mail_sorter_id: 606 } }); // the mailed file was attached
     const t = await tx({ amount: -100 });
     await ExpensePayment.create({ document_id: d2._id, transaction_id: t._id, amount: 100 });
+    const t7 = await tx({ amount: -100 });
+    await ExpensePayment.create({ document_id: d7._id, transaction_id: t7._id, amount: 100 });
     const goneAt = new Date('2026-09-28T10:00:00Z');
-    await IcountExpense.updateMany({ _id: { $in: [g1._id, g2._id, g3._id] } }, { $set: { gone_at: goneAt } });
+    await IcountExpense.updateMany({ _id: { $in: [g1._id, g2._id, g3._id, g6._id, g7._id] } }, { $set: { gone_at: goneAt } });
     await IcountExpense.updateOne({ _id: g4._id }, { $set: { is_storno: true } });
 
     const r = await bridge.syncBridge();
     eq(r.voided, 2, 'שני מסמכי אייקאונט בלי תשלומים בוטלו (נעלם + סטורנו)');
-    eq(r.kept_gone, 2, 'עם תשלומים / מסמך שלנו — נשארו עם סימון');
+    eq(r.kept_gone, 4, 'עם תשלומים / עם קובץ / מסמך שלנו — נשארו עם סימון');
+    const v6 = await ExpenseDocument.findById(d6._id).lean();
+    eq(v6.status, 'active', 'נעלם אבל מחזיק את הקובץ מהמייל → נשאר');
+    ok(!!v6.icount_gone_at, 'ומסומן icount_gone_at');
     const v1 = await ExpenseDocument.findById(d1._id).lean();
     eq(v1.status, 'void', 'נעלם בלי תשלומים → void');
     ok(!!v1.icount_gone_at, 'ועם icount_gone_at');
@@ -260,14 +300,17 @@ const TAX_BAD = '510000555'; // fails the check digit — ignored
     const again = await bridge.syncBridge();
     eq(again.voided, 0, 'הרצה חוזרת — לא מבטל שוב');
 
-    // the row comes back (a later complete pull un-gones it)
-    await IcountExpense.updateMany({ _id: { $in: [g1._id, g2._id, g3._id] } }, { $set: { gone_at: null } });
+    // a person voids a flagged document; then the row comes back (a later complete pull un-gones it)
+    await ExpenseDocument.updateOne({ _id: d7._id }, { status: 'void' });
+    await IcountExpense.updateMany({ _id: { $in: [g1._id, g2._id, g3._id, g7._id] } }, { $set: { gone_at: null } });
     const back = await bridge.syncBridge();
     eq(back.created, 0, 'חזרה — לא נוצר מסמך חדש');
     eq((await ExpenseDocument.findById(d1._id).lean()).status, 'active', 'מסמך שבוטל בגלל היעלמות חוזר לפעיל');
     eq((await ExpenseDocument.findById(d1._id).lean()).icount_gone_at, null, 'הסימון נוקה');
     eq((await ExpenseDocument.findById(d2._id).lean()).icount_gone_at, null, 'סימון נוקה גם במסמך עם תשלומים');
     eq((await ExpenseDocument.findById(mineLinked._id).lean()).icount_gone_at, null, 'ובמסמך שלנו');
+    eq((await ExpenseDocument.findById(d7._id).lean()).status, 'void', 'ביטול של אדם לא מתבטל כשהשורה חוזרת');
+    eq(back.restored, 1, 'רק המסמך שהגשר ביטל חזר');
 
     // a person voided an iCount document: the bridge leaves it alone
     const g5 = await mirrorRow({ doc_number: 'G-5' });
@@ -291,15 +334,17 @@ const TAX_BAD = '510000555'; // fails the check digit — ignored
     const rowSame = await mirrorRow({ doc_number: 'K-1' });
     const rowPunct = await mirrorRow({ doc_number: '0077 /2' });
     const rowHasFile = await mirrorRow({ doc_number: 'K-3' });
+    const rowKind = await mirrorRow({ doc_number: 'KR/5' });
     await bridge.syncBridge();
     await ExpenseDocument.updateOne({ icount_id: rowHasFile.icount_id }, { $set: { mail_sorter_id: 500 } });
 
-    const c = fake([item(901, { doc_number: 'K-1' }), item(902, { doc_number: '77/2' }), item(903, { doc_number: 'K-3' })]);
+    const c = fake([item(901, { doc_number: 'K-1' }), item(902, { doc_number: '77/2' }), item(903, { doc_number: 'K-3' }), item(904, { doc_number: 'KR5', doc_type: 'receipt' })]);
     const r = await intake.pullFromMailSorter({ client: c });
-    eq(r.created, 0, 'לא נוצר מסמך חדש');
+    eq(r.created, 1, 'רק הקבלה (סוג שונה) נוצרה כמסמך חדש');
     eq(r.attached, 2, 'שני קבצים הוצמדו');
     eq(r.skipped, 1, 'מסמך אייקאונט שכבר יש לו קובץ — דילוג רגיל');
-    eq(c.acks.slice().sort().join(','), '901,902,903', 'כל הפריטים אושרו');
+    eq(c.acks.slice().sort().join(','), '901,902,903,904', 'כל הפריטים אושרו');
+    eq((await ExpenseDocument.findOne({ icount_id: rowKind.icount_id }).lean()).mail_sorter_id, undefined, 'קבלה במייל לא הפכה לקובץ של חשבונית אייקאונט');
     const a1 = await ExpenseDocument.findOne({ icount_id: rowSame.icount_id }).lean();
     eq(a1.mail_sorter_id, 901, 'mail_sorter_id הוצמד (אותו מספר)');
     eq(a1.attachment_sha256, 'sha901', 'sha הוצמד');
@@ -307,7 +352,7 @@ const TAX_BAD = '510000555'; // fails the check digit — ignored
     eq(a1.needs_review, false, 'לא חוזר לבדיקה');
     eq((await ExpenseDocument.findOne({ icount_id: rowPunct.icount_id }).lean()).mail_sorter_id, 902, 'הוצמד גם כשהמספר מודפס אחרת');
     eq((await ExpenseDocument.findOne({ icount_id: rowHasFile.icount_id }).lean()).mail_sorter_id, 500, 'מסמך עם קובץ לא שונה');
-    eq(await ExpenseDocument.countDocuments(), 3, 'שלושה מסמכים בלבד');
+    eq(await ExpenseDocument.countDocuments(), 5, 'ארבעה מסמכי אייקאונט + הקבלה');
     const again = await intake.pullFromMailSorter({ client: fake([item(901, { doc_number: 'K-1' })]) });
     eq(again.attached + again.created, 0, 'הרצה חוזרת — הפריט כבר מוכר');
   }

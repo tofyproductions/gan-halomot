@@ -305,7 +305,9 @@ async function pullFromMailSorter({ client = mailSorter } = {}) {
         // The bookkeeper already typed it into iCount and the bridge made a
         // document without a file: this mail item IS that file. Attach, no new document.
         const dup = await core.findDuplicate(data);
-        const icountDoc = dup ? (isFilelessIcount(dup) ? dup : null) : await icountBridge.attachableIcountTwin(data);
+        const icountDoc = dup
+          ? (isFilelessIcount(dup) && icountBridge.kindsAgree(data.doc_type, dup.doc_type) ? dup : null)
+          : await icountBridge.attachableIcountTwin(data);
         if (icountDoc) {
           if (await attachMailItem(icountDoc, data)) result.attached++;
           else result.skipped++; // got a file meanwhile: an ordinary duplicate
