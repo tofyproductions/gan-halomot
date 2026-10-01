@@ -15,7 +15,8 @@ export default function MaxImportDialog({ open, onClose, onDone }) {
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
 
-  const close = () => { setFile(null); setError(''); setResult(null); setBusy(false); onClose(); };
+  const close = () => {
+    if (busy) return; setFile(null); setError(''); setResult(null); setBusy(false); onClose(); };
 
   const upload = async () => {
     if (!file) return;
@@ -73,7 +74,7 @@ export default function MaxImportDialog({ open, onClose, onDone }) {
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={close}>{result ? 'סגירה' : 'ביטול'}</Button>
+        <Button onClick={close} disabled={busy}>{result ? 'סגירה' : 'ביטול'}</Button>
         {!result && <BusyButton variant="contained" loading={busy} disabled={!file} onClick={upload}>ייבוא</BusyButton>}
       </DialogActions>
     </Dialog>

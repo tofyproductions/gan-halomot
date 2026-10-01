@@ -59,6 +59,8 @@ export const TAB_GROUPS = [
       // Finance part 1 (docs/superpowers/specs/2026-10-01-bank-feed-design.md):
       // the gan's bank account from the bank-pi agent + the two Max cards.
       { id: 'bank', label: 'תנועות בנק', path: '/bank', defaultRoles: ['system_admin', 'admin_viewer', 'accountant'] },
+      // Not a screen — the right to act on תנועות בנק (flags, Max upload, sync).
+      { id: 'bank_write', label: 'תנועות בנק — פעולות', path: null, defaultRoles: ['system_admin', 'accountant'], writeGrantFor: 'bank' },
       // אישור שהות ואישור קייטנה — the papers a family asks the office for,
       // filled from the system instead of typed from memory.
       { id: 'parent_letters', label: 'מסמכים להורים', path: '/parent-letters', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },

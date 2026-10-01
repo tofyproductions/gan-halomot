@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { toast } from 'react-toastify';
 import {
   Box, Stack, Typography, Paper, Table, TableHead, TableBody, TableRow, TableCell, TableContainer,
   Chip, IconButton, TextField, MenuItem, Alert, Button, Tooltip, useMediaQuery, Card, CardContent,
@@ -41,25 +42,38 @@ export default function BankPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
 
+  const metaSeq = useRef(0);
+  const loadSeq = useRef(0);
+
+  // Accounts/status are context, not the list: if they fail the table stays.
   const loadMeta = useCallback(async () => {
-    const [a, s] = await Promise.all([api.get('/finance/accounts'), api.get('/finance/status')]);
-    setAccounts(a.data.accounts || []);
-    setStatus(s.data);
+    const seq = ++metaSeq.current;
+    try {
+      const [a, s] = await Promise.all([api.get('/finance/accounts'), api.get('/finance/status')]);
+      if (seq !== metaSeq.current) return;
+      setAccounts(a.data.accounts || []);
+      setStatus(s.data);
+    } catch (err) {
+      if (seq === metaSeq.current) toast.error(apiError(err, 'לא הצלחנו לטעון את פרטי החשבונות'));
+    }
   }, []);
 
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setLoading(true); setLoadError('');
+    loadMeta();
     try {
       const params = { month };
       if (accountId) params.account_id = accountId;
       if (direction) params.direction = direction;
       if (q.trim()) params.q = q.trim();
-      const [{ data: tx }] = await Promise.all([api.get('/finance/transactions', { params }), loadMeta()]);
+      const { data: tx } = await api.get('/finance/transactions', { params });
+      if (seq !== loadSeq.current) return;
       setData({ transactions: tx.transactions || [], totals: tx.totals || EMPTY.totals });
     } catch (err) {
-      setLoadError(apiError(err, 'לא הצלחנו לטעון את התנועות'));
+      if (seq === loadSeq.current) setLoadError(apiError(err, 'לא הצלחנו לטעון את התנועות'));
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, [month, accountId, direction, q, loadMeta]);
 
@@ -74,14 +88,14 @@ export default function BankPage() {
       await api.patch(`/finance/transactions/${t._id}`, { [field]: !t[field] });
       load(); // totals change when a transfer is flagged, so reload rather than patch one row
     } catch (err) {
-      setLoadError(apiError(err, 'השמירה נכשלה'));
+      toast.error(apiError(err, 'השמירה נכשלה'));
     }
   };
 
   const syncNow = async () => {
     setSyncBusy(true);
-    try { await api.post('/finance/sync/request'); await loadMeta(); }
-    catch (err) { setLoadError(apiError(err, 'הבקשה נכשלה')); }
+    try { await api.post('/finance/sync/request'); toast.success('הבקשה נשלחה למחשב הבנק'); await loadMeta(); }
+    catch (err) { toast.error(apiError(err, 'הבקשה נכשלה')); }
     finally { setSyncBusy(false); }
   };
 
@@ -126,7 +140,7 @@ export default function BankPage() {
             <Typography variant="caption" color="text.secondary">תנועה אחרונה: {formatDay(a.last_tx_date)}</Typography>
           </Paper>
         ))}
-        {canWrite && hasBank && (
+        {canWrite && (
           <Stack justifyContent="center">
             <Tooltip title={status?.last_request ? `בקשה אחרונה: ${status.last_request.status}${status.last_request.result ? ` · ${status.last_request.result}` : ''}` : ''}>
               <span>
@@ -165,7 +179,7 @@ export default function BankPage() {
         <EmptyState
           state={accounts.length && (accountId || direction || q) ? 'filtered' : 'empty'}
           title={accounts.length ? `אין תנועות ב${monthLabel(month)}` : 'עוד אין חשבונות'}
-          hint={accounts.length ? 'נסו חודש אחר או נקו את הסינון.' : 'ייבאו קובץ חיובים מ-Max, או המתינו לחיבור חשבון הבנק.'}
+          hint={accounts.length ? 'נסו חודש אחר או נקו את הסינון.' : "ייבאו קובץ חיובים מ-Max, או לחצו 'סנכרן עכשיו' אחרי חיבור מחשב הבנק."}
         />
       ) : phone ? (
         <Stack spacing={1}>
