@@ -37,6 +37,12 @@ async function loadTransaction(txId) {
   if (!(tx.amount > 0) || tx.is_internal_transfer || !account || account.type !== 'bank') {
     throw fail(400, 'התנועה אינה העברה נכנסת לחשבון הבנק');
   }
+  // Only what the pool offers can be allocated: from the start date, completed,
+  // and not one an active income rule has claimed (Emunah, interest, refunds).
+  const pool = await K.incomePool();
+  if (!pool.open.some(t => String(t._id) === String(tx._id))) {
+    throw fail(409, 'ההעברה אינה פתוחה לשיוך (לפני תאריך ההתחלה, לא הושלמה, מכוסה בכלל הכנסה, או כבר שויכה במלואה)');
+  }
   return tx;
 }
 
@@ -222,47 +228,59 @@ async function kaplanMonthReport(academicYear) {
  * child+month slice, who matched it and when. Read only.
  */
 async function matchedTransfers(academicYear) {
-  const allocs = await IncomeAllocation.find({ academic_year: academicYear }).sort({ created_at: -1, _id: -1 }).lean();
-  if (!allocs.length) return [];
-  const txIds = [...new Set(allocs.map(a => String(a.transaction_id)))];
-  const regIds = [...new Set(allocs.map(a => String(a.registration_id)))];
-  const userIds = [...new Set(allocs.map(a => a.created_by && String(a.created_by)).filter(Boolean))];
-  const [txs, regs, users, households] = await Promise.all([
+  const inYear = await IncomeAllocation.find({ academic_year: academicYear }).sort({ created_at: -1, _id: -1 }).lean();
+  if (!inYear.length) return [];
+  const txIds = [...new Set(inYear.map(a => String(a.transaction_id)))];
+  // "בטל שיוך" removes every slice of the transfer, in every year and family,
+  // so every slice is returned — never only the ones of the requested year.
+  const everySlice = await IncomeAllocation.find({ transaction_id: { $in: txIds } }).sort({ created_at: -1, _id: -1 }).lean();
+  const bySlices = new Map();
+  for (const a of everySlice) {
+    const k = String(a.transaction_id);
+    if (!bySlices.has(k)) bySlices.set(k, []);
+    bySlices.get(k).push(a);
+  }
+  const regIds = [...new Set(everySlice.map(a => String(a.registration_id)))];
+  const userIds = [...new Set(everySlice.map(a => a.created_by && String(a.created_by)).filter(Boolean))];
+  const years = [...new Set(everySlice.map(a => a.academic_year))];
+  const [txs, regs, users, householdLists] = await Promise.all([
     BankTransaction.find({ _id: { $in: txIds } }, 'date amount description counterparty').lean(),
     Registration.find({ _id: { $in: regIds } }, 'child_name').lean(),
     userIds.length ? User.find({ _id: { $in: userIds } }, 'full_name').lean() : [],
-    K.kaplanHouseholds(academicYear),
+    Promise.all(years.map(y => K.kaplanHouseholds(y))),
   ]);
   const txById = new Map(txs.map(t => [String(t._id), t]));
   const childName = new Map(regs.map(r => [String(r._id), r.child_name]));
   const userName = new Map(users.map(u => [String(u._id), u.full_name]));
+  const householdsByYear = new Map(years.map((y, i) => [y, householdLists[i]]));
+  const parentsOf = (a) => {
+    const h = (householdsByYear.get(a.academic_year) || []).find(x => K.householdMatchesKey(x, a.household_key));
+    return h ? h.parents : [];
+  };
 
-  const groups = new Map();
-  for (const a of allocs) {
-    const k = String(a.transaction_id);
-    if (!groups.has(k)) {
-      const t = txById.get(k) || {};
-      const h = households.find(x => K.householdMatchesKey(x, a.household_key));
-      groups.set(k, {
-        transaction_id: a.transaction_id,
-        tx: { date: t.date || null, amount: t.amount ?? null, description: t.description || '', counterparty: t.counterparty || '' },
-        household_key: a.household_key,
-        parents: h ? h.parents : [],
-        allocations: [],
-        total: 0,
-        created_by: a.created_by || null,
-        created_by_name: a.created_by ? userName.get(String(a.created_by)) || null : null,
-        created_at: a.created_at,
-      });
-    }
-    const g = groups.get(k);
-    g.allocations.push({
-      registration_id: a.registration_id, child_name: childName.get(String(a.registration_id)) || '',
-      month_number: a.month_number, amount: a.amount,
+  // Ordered by the newest slice in the requested year, as before.
+  const out = [];
+  for (const k of txIds) {
+    const slices = bySlices.get(k);
+    const first = slices[0];
+    const t = txById.get(k) || {};
+    out.push({
+      transaction_id: first.transaction_id,
+      tx: { date: t.date || null, amount: t.amount ?? null, description: t.description || '', counterparty: t.counterparty || '' },
+      household_key: first.household_key,
+      parents: parentsOf(first),
+      allocations: slices.map(a => ({
+        registration_id: a.registration_id, child_name: childName.get(String(a.registration_id)) || '',
+        academic_year: a.academic_year, household_key: a.household_key, parents: parentsOf(a),
+        month_number: a.month_number, amount: a.amount,
+      })),
+      total: round2(slices.reduce((n, a) => n + a.amount, 0)),
+      created_by: first.created_by || null,
+      created_by_name: first.created_by ? userName.get(String(first.created_by)) || null : null,
+      created_at: first.created_at,
     });
-    g.total = round2(g.total + a.amount);
   }
-  return [...groups.values()];
+  return out;
 }
 
 module.exports = { acceptIncome, rejectIncome, unallocate, kaplanMonthReport, matchedTransfers };

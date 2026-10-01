@@ -358,7 +358,7 @@ function MatchedRow({ m, canWrite, onDone }) {
   const undo = async () => {
     const ok = await confirm({
       title: 'ביטול שיוך',
-      message: `לבטל את שיוך ההעברה מ-${formatDay(m.tx.date)} (${formatILS(m.tx.amount)}) למשפחת ${family}? כל החלוקה שלה תימחק וההעברה תחזור להצעות. שם משלם שנזכר בשיוך הזה יימחק גם הוא.`,
+      message: `לבטל את שיוך ההעברה מ-${formatDay(m.tx.date)} (${formatILS(m.tx.amount)}) למשפחת ${family}? יבוטלו כל החלוקות של ההעברה (${m.allocations.length} שורות). ההעברה תחזור להצעות. שם משלם שנזכר בשיוך הזה יימחק גם הוא.`,
       confirm_label: 'בטל שיוך',
       danger: true,
     });
@@ -381,7 +381,7 @@ function MatchedRow({ m, canWrite, onDone }) {
           {m.tx.counterparty && m.tx.description && <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{m.tx.description}</Typography>}
           <Typography variant="body2" sx={{ mt: 0.5 }}>👪 {family}</Typography>
           <Typography variant="body2" color="text.secondary">
-            {m.allocations.map(a => `${a.child_name || 'ילד/ה'} · ${monthName(a.month_number)} ${formatILS(a.amount)}`).join(' | ')}
+            {m.allocations.map(a => `${(a.parents || []).join(' / ') || 'משפחה'} · ${a.child_name || 'ילד/ה'} · ${formatAcademicYear(a.academic_year)} · ${monthName(a.month_number)} ${formatILS(a.amount)}`).join(' | ')}
           </Typography>
           <Typography variant="caption" color="text.secondary">
             שויך {formatILS(m.total)}{m.created_at ? ` · ${new Date(m.created_at).toLocaleString('he-IL')}` : ''}{m.created_by_name ? ` · ${m.created_by_name}` : ''}

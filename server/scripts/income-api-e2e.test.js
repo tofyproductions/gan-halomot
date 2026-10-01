@@ -338,6 +338,23 @@ async function main() {
     eq((await request({ path: `${A}/kaplan/matched?year=nope`, token: viewer })).status, 400, 'שויכו — שנה לא תקינה 400');
   }
 
+  {
+    // A second-year slice of the same transfer: the list must show it, and undo removes both.
+    const sl = await IncomeAllocation.create({ transaction_id: t0._id, registration_id: levi._id, household_key: lv.household_key,
+      academic_year: '2026-2027', month_number: 9, amount: 0.5 });
+    const m = await request({ path: `${A}/kaplan/matched?year=2025-2026`, token: viewer });
+    const row = (m.body?.matched || []).find(r => String(r.transaction_id) === String(t0._id));
+    eq(row?.allocations?.length, 2, 'שויכו — שתי פרוסות, גם של שנה אחרת');
+    ok(row && row.allocations.some(a => a.academic_year === '2026-2027') && row.allocations.some(a => a.academic_year === '2025-2026'), 'שויכו — כל פרוסה עם שנה');
+    eq((await request({ path: `${A}/kaplan/matched?year=2026-2027`, token: viewer })).body?.matched?.length, 1, 'שויכו — מופיעה גם בשנה האחרת');
+    await IncomeAllocation.deleteOne({ _id: sl._id });
+    const emuna = await tx({ amount: 3000, description: 'העברה מאמונה', date: '2025-09-07' });
+    const refused = await request({ method: 'POST', path: A + '/kaplan/accept', token: accountant,
+      body: { transaction_id: String(emuna._id), household_key: lv.household_key } });
+    eq(refused.status, 409, 'העברה שכלל הכנסה תופס — 409');
+    eq(await IncomeAllocation.countDocuments({ transaction_id: emuna._id }), 0, 'לא נוצרה הקצאה');
+  }
+
   head('GET /collections — רק bank_allocated נוסף');
   {
     const after = (await request({ path: '/api/collections?year=2025-2026', token: admin })).body;

@@ -240,6 +240,43 @@ const rejects = async (fn, status, l) => {
     eq(r.allocations[0].academic_year, '2025-2026', 'שנה מפורשת נשמרת');
   }
 
+  console.log('loadTransaction — רק מה שבבריכה הפתוחה');
+  {
+    const emuna = await tx({ amount: 3000, description: 'העברה מאמונה' });
+    await rejects(() => W.acceptIncome({ transaction_id: emuna._id, household_key: lv.household_key }), 409, 'העברה שכלל הכנסה תופס — 409');
+    await rejects(() => W.rejectIncome({ transaction_id: emuna._id, household_key: lv.household_key }), 409, 'דחייה של העברה מכלל הכנסה — 409');
+    const early = await tx({ amount: 3000, date: '1999-01-01', description: 'ישנה' });
+    await rejects(() => W.acceptIncome({ transaction_id: early._id, household_key: lv.household_key }), 409, 'לפני תאריך ההתחלה — 409');
+    const pending = await tx({ amount: 3000, status: 'pending', description: 'ממתינה' });
+    await rejects(() => W.acceptIncome({ transaction_id: pending._id, household_key: lv.household_key }), 409, 'לא הושלמה — 409');
+    const internal = await tx({ amount: 3000, is_internal_transfer: true });
+    await rejects(() => W.acceptIncome({ transaction_id: internal._id, household_key: lv.household_key }), 400, 'העברה פנימית — 400');
+    const card = await BankAccount.create({ external_id: 'c:1', institution: 'max', label: 'כרטיס', type: 'card' });
+    const cardTx = await BankTransaction.create({ account_id: card._id, date: '2025-09-05', amount: 100, description: 'זיכוי', hash: `h${++seq}` });
+    await rejects(() => W.acceptIncome({ transaction_id: cardTx._id, household_key: lv.household_key }), 400, 'לא חשבון בנק — 400');
+    eq(await IncomeAllocation.countDocuments({ transaction_id: { $in: [emuna._id, early._id, pending._id] } }), 0, 'כישלון לא הקצה דבר');
+  }
+
+  console.log('matchedTransfers — כל הפרוסות');
+  {
+    await IncomeAllocation.deleteMany({});
+    const t = await tx({ amount: 6000, date: '2025-09-06', description: 'שתי שנים' });
+    await W.acceptIncome({ transaction_id: t._id, household_key: lv.household_key,
+      split: [{ registration_id: levi._id, month_number: 9, amount: 3000 }] });
+    await IncomeAllocation.create({ transaction_id: t._id, registration_id: cohenA._id, household_key: co.household_key,
+      academic_year: '2026-2027', month_number: 9, amount: 3000 });
+    const inCurrent = await W.matchedTransfers('2025-2026');
+    eq(inCurrent.length, 1, 'ההעברה מופיעה בשנה המבוקשת');
+    eq(inCurrent[0].allocations.length, 2, 'שתי הפרוסות, גם של שנה אחרת');
+    eq(inCurrent[0].total, 6000, 'הסכום כולל את כל הפרוסות');
+    const years = inCurrent[0].allocations.map(a => a.academic_year).sort().join(',');
+    eq(years, '2025-2026,2026-2027', 'כל פרוסה נושאת שנה');
+    ok(inCurrent[0].allocations.some(a => a.parents.includes('דנה לוי')), 'משפחה לפרוסה הראשונה');
+    eq((await W.matchedTransfers('2026-2027')).length, 1, 'מופיעה גם בשנה האחרת');
+    eq((await W.matchedTransfers('2024-2025')).length, 0, 'שנה בלי פרוסות — ריק');
+    eq((await W.unallocate(t._id)).removed, 2, 'ביטול מסיר את כל הפרוסות שהוצגו');
+  }
+
   console.log('\nkaplanMonthReport');
   {
     await IncomeAllocation.deleteMany({});
@@ -287,8 +324,8 @@ const rejects = async (fn, status, l) => {
     await Collection.create({ registration_id: cohenA._id, academic_year: '2025-2026', months: [{ month_number: 9, receipt_number: '555' }] });
     const snap1 = await snapshot();
     const t = await tx({ amount: 3000, date: '2025-09-09', description: 'בדיקה' });
-    await W.acceptIncome({ transaction_id: t._id, household_key: co.household_key });
     await W.rejectIncome({ transaction_id: t._id, household_key: lv.household_key });
+    await W.acceptIncome({ transaction_id: t._id, household_key: co.household_key });
     await W.unallocate(t._id);
     await W.kaplanMonthReport('2025-2026');
     eq(await snapshot(), snap1, 'מסמכי Collection זהים בתים-לבית אחרי קבלה, דחייה, ביטול ודוח');
