@@ -99,6 +99,10 @@ const EnrollmentImport = require('./EnrollmentImport');
 const ImportBotRun = require('./ImportBotRun');
 const ScannedAttachment = require('./ScannedAttachment');
 const ProductMatch = require('./ProductMatch');
+const BankAccount = require('./BankAccount');
+const BankTransaction = require('./BankTransaction');
+const FinanceSyncLog = require('./FinanceSyncLog');
+const FinanceSyncRequest = require('./FinanceSyncRequest');
 const ProductScanMark = require('./ProductScanMark');
 const ParentAccount = require('./ParentAccount');
 const ParentPortalChange = require('./ParentPortalChange');
@@ -210,6 +214,10 @@ const real = {
   ImportBotRun,
   ScannedAttachment,
   ProductMatch,
+  BankAccount,
+  BankTransaction,
+  FinanceSyncLog,
+  FinanceSyncRequest,
   ProductScanMark,
   ParentAccount,
   ParentPortalChange,
