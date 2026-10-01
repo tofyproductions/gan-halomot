@@ -46,7 +46,8 @@ const book = (rows, header = HEADER) => {
   eq(CT.identifyHeader(hdrObj).type, 'debt', 'identifyHeader מקבל');
   const { 'ת.ז. או דרכון': _x, ...noId } = hdrObj;
   const bad = CT.identifyHeader(noId);
-  ok(bad.type === undefined || bad.type === 'debt' ? bad.code === 'MISSING_COLUMNS' && /ת\.ז/.test(bad.error) : true, 'חסרה עמודת זהות — MISSING_COLUMNS');
+  eq(bad.code, 'MISSING_COLUMNS', 'חסרה עמודת זהות — MISSING_COLUMNS');
+  ok(/ת\.ז/.test(bad.error || ''), 'ההודעה נוקבת בעמודה');
   eq(CT.detectExportType({ 'שם פרטי של הנרשם': '', 'שם פרטי': '' }), 'registrations', 'ייצוא נרשמים לא השתנה');
   eq(CT.detectExportType({ 'ת.ז. או דרכון': '', 'מעון': '', 'דרגה': '', 'שם פרטי': '' }), 'contracts', 'ייצוא חוזים לא השתנה');
 
@@ -146,6 +147,30 @@ const book = (rows, header = HEADER) => {
   eq(dup.rows, 1, 'אותו ילד פעמיים בקובץ — שורה אחת');
   const dg = (await D.debtSummary({ branch_id: herz._id, month: '2026-10' }))[0];
   eq(dg.target, 150, 'כפילות סוכמה');
+
+  // קפלן refused; Kaplan-institution rows never land in משה דיין
+  const kaplanBranch = await Branch.create({ name: 'כפר סבא - קפלן' });
+  const before = await ClickTacMonthRow.countDocuments({});
+  await rejects(() => D.importDebt({ buffer: book([row({ id: '18' })]), branch_id: kaplanBranch._id, by }), 400, 'סניף קפלן נדחה');
+  eq(await ClickTacMonthRow.countDocuments({}), before, 'קפלן: אפס שורות נכתבו');
+  const kmix = await D.importDebt({ buffer: book([row({ id: '18' }), row({ id: '000000042', inst: 'כפר סבא - קפלן' })]), branch_id: dayan._id, by });
+  eq(kmix.rows, 1, 'שורת מוסד קפלן לא נקלטת במשה דיין');
+  eq(await ClickTacMonthRow.countDocuments({ child_id_number: '000000042' }), 0, 'שורת קפלן לא נשמרה');
+
+  // atomic replace: a failing insert leaves the old rows alone
+  const oldRows = await ClickTacMonthRow.countDocuments({ branch_id: dayan._id, month: '2026-10' });
+  const realInsert = ClickTacMonthRow.insertMany;
+  ClickTacMonthRow.insertMany = async () => { throw new Error('boom'); };
+  try { await D.importDebt({ buffer: book([row({ id: '000000077' }), row({ id: '000000078' })]), branch_id: dayan._id, by }); ok(false, 'כשל הכנסה נזרק'); }
+  catch (e) { eq(e.message, 'boom', 'כשל הכנסה מוחזר'); }
+  ClickTacMonthRow.insertMany = realInsert;
+  eq(await ClickTacMonthRow.countDocuments({ branch_id: dayan._id, month: '2026-10' }), oldRows, 'כשל הכנסה — השורות הישנות שלמות');
+  eq(await ClickTacMonthRow.countDocuments({ child_id_number: '000000077' }), 0, 'כשל הכנסה — אין שורות חדשות');
+  eq(await ClickTacMonthRow.countDocuments({ month: /~/ }), 0, 'אין שורות ביניים');
+
+  // number parsing
+  eq(D.parseDebtExport(book([row({ target: '(1,234)', paid: '-' })])).rows[0].target, -1234, '"(1,234)" שלילי');
+  eq(D.parseDebtExport(book([row({ target: '(1,234)', paid: '-' })])).rows[0].paid, 0, '"-" בודד אינו מספר');
 
   // never writes the collections side
   const { Collection, ExternalEnrollment } = require('../src/models');

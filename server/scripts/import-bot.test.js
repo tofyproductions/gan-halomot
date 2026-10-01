@@ -519,6 +519,18 @@ function months() {
       ok(!r.text.includes(CHILD_FIRST), 'וגם היא לא מחזירה שמות');
     }
     {
+      const aoa = [['מוסד', 'חודש', 'שם פרטי', 'שם משפחה', 'ת.ז. או דרכון', 'יעד החודש לאחר מגבלה', 'תשלומי החודש', 'סטטוס גביה'],
+        ['כפר סבא', 46296, 'א', 'ב', '000000018', 100, 0, 'לא שולם']];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Worksheet 1');
+      const r = await post(B, '/api/import-bot/clicktac/validate', {
+        file: { name: 'debt.xlsx', buffer: XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) },
+        fields: { branch_id: branchId.toString() },
+      });
+      eq(r.status, 400, 'בדיקה של דוח גבייה חודשי נדחית כמו הייבוא האמיתי');
+      eq(r.json?.error?.code, 'WRONG_EXPORT_TYPE', 'עם קוד WRONG_EXPORT_TYPE');
+    }
+    {
       const r = await post(B, '/api/import-bot/clicktac/validate', {
         file: wrongExportFile(), fields: { branch_id: branchId.toString() },
       });

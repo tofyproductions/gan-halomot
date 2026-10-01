@@ -502,6 +502,15 @@ async function clicktacValidate(req, res, next) {
       });
     }
 
+    // Same refusal as the real import: the monthly collection report is the
+    // income module's file, not a registrations/contracts one.
+    if (verdict.type === 'debt') {
+      return res.status(400).json({
+        error: { code: 'WRONG_EXPORT_TYPE', message: 'זה דוח הגבייה החודשי של קליקטאק (debt_contract_export) — הוא נקלט במסך ההכנסות, לא כאן.' },
+        dry_run: true,
+      });
+    }
+
     // The branch is optional here — a caller may be asking only "what file is
     // this". When it IS given, the city is checked, because that is the answer
     // worth having before the real upload.

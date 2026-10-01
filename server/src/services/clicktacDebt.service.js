@@ -12,6 +12,7 @@
  * and never Collection / Registration / ExternalEnrollment.
  */
 const XLSX = require('xlsx');
+const mongoose = require('mongoose');
 const { Branch, Child, ClickTacImport, ClickTacMonthRow } = require('../models');
 const {
   DEBT_COLUMNS: C, identifyHeader, institutionMatchesBranch, parseDate,
@@ -19,11 +20,17 @@ const {
 
 const httpError = (status, message) => Object.assign(new Error(message), { status });
 const str = (v) => (v == null ? '' : String(v).trim());
+// "(1,234)" is an accounting negative; a lone "-" or an empty cell is no number.
 const num = (v) => {
-  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
-  const n = Number(str(v).replace(/[^\d.-]/g, ''));
-  return Number.isFinite(n) ? n : 0;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  const s = str(v);
+  const neg = /^\(.*\)$/.test(s);
+  const t = s.replace(/[^\d.-]/g, '');
+  if (t === '' || t === '-' || t === '.') return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? (neg ? -Math.abs(n) : n) : null;
 };
+const money = (v) => num(v) ?? 0;
 const EXCEL_EPOCH_OFFSET = 25569;
 
 /** 9-digit ת"ז; a passport (any Latin letter) is kept as is, upper-cased. */
@@ -74,10 +81,10 @@ function parseDebtExport(buffer) {
       child_id_number: id,
       child_name: `${str(r[C.child_first])} ${str(r[C.child_last])}`.trim(),
       status: str(r[C.status]),
-      charges: num(r[C.charges]),
-      target: num(r[C.target]),
-      paid: num(r[C.paid]),
-      adjustments: num(r[C.adjustments]),
+      charges: money(r[C.charges]),
+      target: money(r[C.target]),
+      paid: money(r[C.paid]),
+      adjustments: money(r[C.adjustments]),
       collection_status: str(r[C.collection_status]),
       payment_method: str(r[C.payment_method]),
     };
@@ -98,23 +105,41 @@ function parseDebtExport(buffer) {
 async function importDebt({ buffer, branch_id, by = null, file_name = '' }) {
   const branch = await Branch.findById(branch_id).select('name').lean().catch(() => null);
   if (!branch) throw httpError(404, 'הסניף לא נמצא');
+  // קפלן is not collected through ClickTac at all (its money comes by bank transfer).
+  if (/קפלן/.test(branch.name)) throw httpError(400, 'קפלן לא גובה דרך קליקטאק — בחרו משה דיין / הרצליה / תל אביב');
   const parsed = parseDebtExport(buffer);
   // The vendor's file covers the whole organisation (three cities in one sheet):
   // keep this branch's rows, skip the others, and refuse only a file with none.
-  const mine = parsed.rows.filter(r => institutionMatchesBranch(r.institution, branch.name));
+  const mine = parsed.rows.filter(r => !/קפלן/.test(r.institution)
+    && institutionMatchesBranch(r.institution, branch.name));
   if (!mine.length) {
     throw httpError(400, `בקובץ אין שורות של "${branch.name}" (מוסדות בקובץ: ${parsed.institutions.join(', ')}) — כנראה בחרת סניף אחר`);
   }
   parsed.skipped = parsed.rows.length - mine.length;
   parsed.rows = mine;
-  const imp = await ClickTacImport.create({
-    branch_id, month: parsed.month, file_name, rows: parsed.rows.length, created_by: by,
-  });
-  const del = await ClickTacMonthRow.deleteMany({ branch_id, month: parsed.month });
-  await ClickTacMonthRow.insertMany(parsed.rows.map(({ institution, ...r }) => ({
-    ...r, branch_id, month: parsed.month, import_id: imp._id,
-  })));
-  return { month: parsed.month, rows: parsed.rows.length, replaced: del.deletedCount || 0, skipped: parsed.skipped };
+  // Replace without a window where the month is empty or half-written: the new
+  // rows are staged under a marker month (the unique index forbids two copies of
+  // a child in one real month), and only once they are all in do the old rows go
+  // and the staged ones take the real month. A failed insert deletes nothing.
+  const importId = new mongoose.Types.ObjectId();
+  const staged = `${parsed.month}~${importId}`;
+  let replaced = 0;
+  try {
+    await ClickTacMonthRow.insertMany(parsed.rows.map(({ institution, ...r }) => ({
+      ...r, branch_id, month: staged, import_id: importId,
+    })));
+    await ClickTacImport.create({
+      _id: importId, branch_id, month: parsed.month, file_name, rows: parsed.rows.length, created_by: by,
+    });
+    const del = await ClickTacMonthRow.deleteMany({ branch_id, month: parsed.month, import_id: { $ne: importId } });
+    replaced = del.deletedCount || 0;
+    await ClickTacMonthRow.updateMany({ branch_id, month: staged }, { $set: { month: parsed.month } });
+  } catch (e) {
+    await ClickTacMonthRow.deleteMany({ branch_id, month: staged }).catch(() => {});
+    await ClickTacImport.deleteOne({ _id: importId, rows: parsed.rows.length }).catch(() => {});
+    throw e;
+  }
+  return { month: parsed.month, rows: parsed.rows.length, replaced, skipped: parsed.skipped };
 }
 
 /**
