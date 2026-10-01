@@ -1252,6 +1252,23 @@ function GroupRows({ classroom, rows, columns, onCellClick, onRegFeeClick, onExi
                       }} />
                     </Tooltip>
                   )}
+                  {/* Income spec §1: a bank transfer was attributed to this
+                      month (IncomeAllocation). Display only — the cell's
+                      receipt and click behaviour are unchanged. */}
+                  {m.bank_allocated > 0 && (
+                    <Box
+                      component="span"
+                      role="img"
+                      aria-label="נמצא בבנק"
+                      title="נמצא בבנק"
+                      sx={{
+                        position: 'absolute', bottom: 1, insetInlineEnd: 3,
+                        fontSize: '0.6rem', lineHeight: 1, opacity: 0.8,
+                      }}
+                    >
+                      🏦
+                    </Box>
+                  )}
                   {isDupOverride && (
                     <Box
                       component="span"
