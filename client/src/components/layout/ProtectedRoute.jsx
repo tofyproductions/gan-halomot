@@ -1,4 +1,4 @@
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { Box, CircularProgress } from '@mui/material';
 import { hasTabAccess } from '../../config/tabs';
@@ -14,6 +14,7 @@ import { hasTabAccess } from '../../config/tabs';
  */
 export default function ProtectedRoute({ children, roles, tab }) {
   const { user, loading, isAuthenticated } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -24,7 +25,9 @@ export default function ProtectedRoute({ children, roles, tab }) {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    // Remember where she was going, so signing in continues there (a tapped
+    // notification, a link) instead of always starting from the dashboard.
+    return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}` }} />;
   }
 
   /**

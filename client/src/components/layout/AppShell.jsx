@@ -142,6 +142,16 @@ function FreshEntryGate() {
   useEffect(() => {
     if (sessionStorage.getItem('app_entered')) return;
     sessionStorage.setItem('app_entered', '1');
+    // Opened by tapping a notification (public/sw.js adds the marker): the
+    // link IS the point — "ממתין לאישורך" must open the approvals, not the
+    // dashboard. Keep the address, drop only the marker.
+    const params = new URLSearchParams(location.search);
+    if (params.get('from') === 'push') {
+      params.delete('from');
+      const rest = params.toString();
+      navigate(`${location.pathname}${rest ? `?${rest}` : ''}`, { replace: true });
+      return;
+    }
     if (location.pathname !== '/') navigate('/', { replace: true });
     // Fresh-tab check only — deliberately not reacting to later navigation.
     // eslint-disable-next-line react-hooks/exhaustive-deps

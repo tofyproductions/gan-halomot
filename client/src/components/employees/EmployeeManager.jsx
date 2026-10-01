@@ -461,6 +461,17 @@ export default function EmployeeManager() {
   };
 
   const closeDialog = () => setDialog({ open: false, mode: 'add', data: { ...EMPTY_FORM }, original: null });
+  // The user's way out (click outside, Esc, X, ביטול) asks first when there
+  // is typing to lose — the same guard the roster arrows already had. A new
+  // hire's bank and salary details were one stray click from gone.
+  const requestClose = async () => {
+    if (dialog.dirty && !(await askConfirm({
+      title: 'סגירת הכרטיס',
+      message: 'יש שינויים שלא נשמרו בכרטיס הזה. לסגור בלי לשמור אותם?',
+      confirm_label: 'סגור בלי לשמור',
+    }))) return;
+    closeDialog();
+  };
 
   /**
    * A save button that is live during the save is a save button somebody
@@ -1156,7 +1167,7 @@ export default function EmployeeManager() {
       <Drawer
         anchor="left"
         open={dialog.open}
-        onClose={closeDialog}
+        onClose={requestClose}
         dir="rtl"
         PaperProps={{
           sx: {
@@ -1198,7 +1209,7 @@ export default function EmployeeManager() {
             </>
           )}
 
-          <IconButton size="small" onClick={closeDialog} disabled={saving} aria-label="סגירה">
+          <IconButton size="small" onClick={requestClose} disabled={saving} aria-label="סגירה">
             <CloseIcon fontSize="small" />
           </IconButton>
         </Box>
@@ -1700,7 +1711,7 @@ export default function EmployeeManager() {
           borderTop: '1px solid', borderColor: 'divider',
           bgcolor: 'background.paper',
         }}>
-          <Button onClick={closeDialog} disabled={saving}>ביטול</Button>
+          <Button onClick={requestClose} disabled={saving}>ביטול</Button>
           <Button variant="contained" onClick={handleSave} disabled={saving}>
             {saving ? 'שומר…' : 'שמור'}
           </Button>

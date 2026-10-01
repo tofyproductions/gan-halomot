@@ -47,6 +47,9 @@ export default function ParentLettersPage() {
   const [ctxLoading, setCtxLoading] = useState(false);
   const [history, setHistory] = useState([]);
   const [form, setForm] = useState(null); // {type, purpose, include_amounts, monthly_fee, total_paid, camp_paid, extra, previewHtml}
+  // Any edit voids the preview, so "הפקה" can only freeze numbers the
+  // manager actually saw.
+  const setField = (key, value) => setForm(v => ({ ...v, [key]: value, previewHtml: '' }));
   const [busy, setBusy] = useState(false);
 
   const loadHistory = useCallback(async () => {
@@ -247,11 +250,11 @@ export default function ParentLettersPage() {
               label="מטרת האישור (יופיע במסמך, לא חובה)"
               placeholder="למשל: הצגה למס הכנסה / למקום העבודה"
               value={form?.purpose || ''} fullWidth
-              onChange={e => setForm(v => ({ ...v, purpose: e.target.value }))}
+              onChange={e => setField('purpose', e.target.value)}
             />
             <FormControlLabel
               control={<Checkbox checked={!!form?.include_amounts}
-                onChange={e => setForm(v => ({ ...v, include_amounts: e.target.checked }))} />}
+                onChange={e => setField('include_amounts', e.target.checked)} />}
               label="לכלול סכומים במסמך"
             />
             {form?.include_amounts && (
@@ -259,27 +262,27 @@ export default function ParentLettersPage() {
                 {form.type === 'attendance_confirmation' ? (
                   <>
                     <TextField type="number" label="שכר לימוד חודשי (₪)" value={form?.monthly_fee ?? ''}
-                      onChange={e => setForm(v => ({ ...v, monthly_fee: e.target.value }))} fullWidth />
+                      onChange={e => setField('monthly_fee', e.target.value)} fullWidth />
                     <TextField type="number" label='סה"כ שולם השנה (₪)' value={form?.total_paid ?? ''}
-                      onChange={e => setForm(v => ({ ...v, total_paid: e.target.value }))} fullWidth />
+                      onChange={e => setField('total_paid', e.target.value)} fullWidth />
                   </>
                 ) : (
                   <TextField type="number" label="עלות הקייטנה ששולמה (₪)" value={form?.camp_paid ?? ''}
-                    onChange={e => setForm(v => ({ ...v, camp_paid: e.target.value }))} fullWidth />
+                    onChange={e => setField('camp_paid', e.target.value)} fullWidth />
                 )}
               </Stack>
             )}
             <TextField
               label="תוספת חופשית (לא חובה)" multiline minRows={2}
               value={form?.extra || ''} fullWidth
-              onChange={e => setForm(v => ({ ...v, extra: e.target.value }))}
+              onChange={e => setField('extra', e.target.value)}
             />
             {form?.previewHtml ? (
               <Box component="iframe" srcDoc={form.previewHtml} title="preview"
                 sx={{ width: '100%', height: 480, border: '1px solid #e5e7eb', borderRadius: 1 }} />
             ) : (
               <Alert severity="info" sx={{ py: 0.5 }}>
-                לחצו "תצוגה מקדימה" כדי לראות את המסמך לפני ההפקה.
+                לחצו "תצוגה מקדימה" כדי לראות את המסמך לפני ההפקה. כל שינוי בשדות מחייב תצוגה מקדימה חדשה.
               </Alert>
             )}
           </Stack>

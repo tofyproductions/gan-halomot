@@ -28,7 +28,12 @@ self.addEventListener('notificationclick', (event) => {
       for (const client of clients) {
         if ('focus' in client) { client.focus(); if ('navigate' in client) client.navigate(url); return; }
       }
-      if (self.clients.openWindow) return self.clients.openWindow(url);
+      // A brand-new window is sent home by the app's fresh-tab gate (a closed
+      // tab reopened on a deep link). A notification the person just tapped
+      // on their own device is not that case — mark it so the gate lets the
+      // link through. The gate strips the marker again.
+      const marked = url + (url.includes('?') ? '&' : '?') + 'from=push';
+      if (self.clients.openWindow) return self.clients.openWindow(marked);
     })
   );
 });

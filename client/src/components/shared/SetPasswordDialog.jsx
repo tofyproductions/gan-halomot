@@ -41,7 +41,8 @@ export default function SetPasswordDialog({ open, onClose, allowSkip = false, fo
 
   const submit = async (e) => {
     if (e?.preventDefault) e.preventDefault();
-    if (pw.length < 4) return toast.error('סיסמה חייבת להיות לפחות 4 תווים');
+    // The server refuses anything shorter than 8 (auth.controller setPassword).
+    if (pw.length < 8) return toast.error('סיסמה חייבת להיות לפחות 8 תווים');
     if (pw !== pw2) return toast.error('הסיסמאות אינן תואמות');
     setSaving(true);
     try {
@@ -137,6 +138,8 @@ export default function SetPasswordDialog({ open, onClose, allowSkip = false, fo
                 readOnly hidden aria-hidden="true" tabIndex={-1} />
               <TextField label="סיסמה חדשה" type="password" value={pw} autoFocus
                 onChange={e => setPw(e.target.value)} fullWidth
+                error={pw.length > 0 && pw.length < 8}
+                helperText={pw.length > 0 && pw.length < 8 ? `לפחות 8 תווים — חסרים עוד ${8 - pw.length}` : 'לפחות 8 תווים'}
                 inputProps={{ dir: 'ltr', autoComplete: 'new-password' }} />
               <TextField label="אימות סיסמה" type="password" value={pw2}
                 onChange={e => setPw2(e.target.value)} fullWidth

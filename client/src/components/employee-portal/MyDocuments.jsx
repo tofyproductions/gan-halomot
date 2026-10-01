@@ -9,7 +9,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { toast } from 'react-toastify';
-import api from '../../api/client';
+import api, { openApiFile } from '../../api/client';
 import { BusyButton, FilePickButton, UploadingBar } from '../shared/UploadControls';
 
 const DOC_TYPES = {
@@ -40,14 +40,18 @@ const fmtDate = (d) => { try { return new Date(d).toLocaleDateString('he-IL'); }
 function Form101Card() {
   const [state, setState] = useState({ forms: [], has_current: false, tax_year: null });
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [file, setFile] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const load = () => {
     setLoading(true);
+    setLoadFailed(false);
     api.get('/payroll/my-form-101')
       .then(res => setState(res.data))
-      .catch(() => setState({ forms: [], has_current: false, tax_year: null }))
+      // A failed load is not a missing form — saying "you must file a 101"
+      // to someone who already filed one sends her to file it twice.
+      .catch(() => setLoadFailed(true))
       .finally(() => setLoading(false));
   };
 
@@ -99,6 +103,10 @@ function Form101Card() {
 
         {loading ? (
           <Typography color="text.secondary">טוען...</Typography>
+        ) : loadFailed ? (
+          <Alert severity="error" action={<BusyButton size="small" onClick={load}>נסו שוב</BusyButton>}>
+            לא הצלחנו לבדוק את מצב טופס 101 כרגע.
+          </Alert>
         ) : (
           <Stack spacing={2}>
             {!state.has_current && (
@@ -175,13 +183,17 @@ function Form101Card() {
 export default function MyDocuments() {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
 
-  useEffect(() => {
+  const loadDocs = () => {
+    setLoading(true);
+    setLoadFailed(false);
     api.get('/contracts?employee_id=me')
       .then(res => setDocuments(res.data.contracts || []))
-      .catch(() => setDocuments([]))
+      .catch(() => setLoadFailed(true))
       .finally(() => setLoading(false));
-  }, []);
+  };
+  useEffect(loadDocs, []);
 
   return (
     <Box dir="rtl" sx={{ p: 3, maxWidth: 900, mx: 'auto' }}>
@@ -195,6 +207,10 @@ export default function MyDocuments() {
       <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>מסמכים מההנהלה</Typography>
       {loading ? (
         <Typography color="text.secondary">טוען...</Typography>
+      ) : loadFailed ? (
+        <Alert severity="error" action={<BusyButton size="small" onClick={loadDocs}>נסו שוב</BusyButton>}>
+          לא הצלחנו לטעון את המסמכים כרגע.
+        </Alert>
       ) : documents.length > 0 ? (
         <Grid container spacing={2}>
           {documents.map((doc) => {
@@ -214,13 +230,18 @@ export default function MyDocuments() {
                       <Stack direction="row" spacing={1}>
                         {doc.file_url && (
                           <>
+                            {/* The file route needs the login token, which a plain
+                                href does not send — it opened as a 401. */}
                             <Tooltip title="צפה">
-                              <IconButton size="small" href={doc.file_url} target="_blank">
+                              <IconButton size="small" aria-label="צפה במסמך"
+                                onClick={() => openApiFile(doc.file_url).catch((e) => toast.error(e.message))}>
                                 <VisibilityIcon />
                               </IconButton>
                             </Tooltip>
                             <Tooltip title="הורד">
-                              <IconButton size="small" href={doc.file_url} download>
+                              <IconButton size="small" aria-label="הורד מסמך"
+                                onClick={() => openApiFile(doc.file_url, { filename: doc.file_name || `${(DOC_TYPES[doc.doc_type] || DOC_TYPES.other).label}.pdf` })
+                                  .catch((e) => toast.error(e.message))}>
                                 <DownloadIcon />
                               </IconButton>
                             </Tooltip>

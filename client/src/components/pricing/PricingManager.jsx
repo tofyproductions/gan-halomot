@@ -13,6 +13,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import CalculateIcon from '@mui/icons-material/Calculate';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import { useConfirm } from '../shared/ConfirmProvider';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
@@ -255,6 +256,24 @@ export default function PricingManager() {
   useEffect(() => { if (branchId) load(branchId, year); }, [branchId, year, load]);
 
   const patch = (changes) => { setPricing(p => ({ ...p, ...changes })); setDirty(true); };
+
+  // Switching branch or year reloads the table and drops unsaved prices, so
+  // ask first. Closing the tab with unsaved prices gets the browser's prompt.
+  const askConfirm = useConfirm();
+  const switchTo = async (apply) => {
+    if (dirty && !(await askConfirm({
+      title: 'מחירים שלא נשמרו',
+      message: 'יש מחירים שהוקלדו ולא נשמרו. לעבור בלי לשמור אותם?',
+      confirm_label: 'עבור בלי לשמור',
+    }))) return;
+    apply();
+  };
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const warn = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
 
   const save = () => {
     setSaving(true);
@@ -588,15 +607,15 @@ export default function PricingManager() {
               color="warning"
               variant="outlined"
               label={`שאר המערכת מציגה ${railKey}`}
-              onClick={() => setYear(railKey)}
+              onClick={() => switchTo(() => setYear(railKey))}
             />
           )}
-          <Select size="small" value={year} onChange={e => setYear(e.target.value)} sx={{ minWidth: 150 }}>
+          <Select size="small" value={year} onChange={e => { const v = e.target.value; switchTo(() => setYear(v)); }} sx={{ minWidth: 150 }}>
             {ACADEMIC_YEARS.map(y => (
               <MenuItem key={y.value} value={y.value}>{yearLabel(y)}</MenuItem>
             ))}
           </Select>
-          <Select size="small" value={branchId} onChange={e => setBranchId(e.target.value)} sx={{ minWidth: 220 }}>
+          <Select size="small" value={branchId} onChange={e => { const v = e.target.value; switchTo(() => setBranchId(v)); }} sx={{ minWidth: 220 }}>
             {branches.map(b => (
               <MenuItem key={b._id || b.id} value={b._id || b.id}>{b.name}</MenuItem>
             ))}

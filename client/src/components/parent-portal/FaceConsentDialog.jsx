@@ -22,7 +22,9 @@ import parentApi from '../../api/parentClient';
 export default function FaceConsentDialog() {
   const [state, setState] = useState(null);
   const [policy, setPolicy] = useState(false);
-  const [faces, setFaces] = useState(true);
+  // Starts unticked: consent to biometric matching of a child must be an act
+  // of choice, not a box the parent failed to untick.
+  const [faces, setFaces] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 

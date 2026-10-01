@@ -7,6 +7,9 @@ import {
 } from '@mui/material';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import EditNoteIcon from '@mui/icons-material/EditNote';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import IconButton from '@mui/material/IconButton';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { todayIL } from '../../utils/ilDates';
@@ -102,6 +105,16 @@ function ReportMissingPunchDialog({ open, prefill, branches, homeBranchId, onClo
   );
 }
 
+const ym = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+const shiftMonth = (month, delta) => {
+  const [y, m] = month.split('-').map(Number);
+  return ym(new Date(y, m - 1 + delta, 1));
+};
+const monthLabel = (month) => {
+  const [y, m] = month.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString('he-IL', { month: 'long', year: 'numeric' });
+};
+
 export default function MyAttendance() {
   const [punches, setPunches] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -109,20 +122,25 @@ export default function MyAttendance() {
   const [loading, setLoading] = useState(true);
   const [reportOpen, setReportOpen] = useState(false);
   const [prefill, setPrefill] = useState(null);
-  const [month] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  });
+  // The month is pickable: payroll closes in the first days of the next
+  // month, which is exactly when a forgotten punch from last month surfaces.
+  // In those first days the previous month is the one she came to fix.
+  const currentMonth = ym(new Date());
+  const [month, setMonth] = useState(() => (
+    new Date().getDate() <= 5 ? shiftMonth(currentMonth, -1) : currentMonth
+  ));
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
+    setLoadFailed(false);
     api.get(`/payroll/my-punches?month=${month}`)
       .then(res => {
         setPunches(res.data.punches || []);
         setBranches(res.data.branches || []);
         setHomeBranchId(res.data.home_branch_id || '');
       })
-      .catch(() => { setPunches([]); setBranches([]); })
+      .catch(() => { setPunches([]); setLoadFailed(true); })
       .finally(() => setLoading(false));
   }, [month]);
 
@@ -157,9 +175,22 @@ export default function MyAttendance() {
         </Button>
       </Stack>
 
-      <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 600 }}>
-        חודש נוכחי: {month}
-      </Typography>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+        {/* RTL: the right-hand arrow goes back in time. */}
+        <IconButton aria-label="החודש הקודם" onClick={() => setMonth(m => shiftMonth(m, -1))}>
+          <ChevronRightIcon />
+        </IconButton>
+        <Typography variant="subtitle1" sx={{ fontWeight: 700, minWidth: 130, textAlign: 'center' }}>
+          {monthLabel(month)}
+        </Typography>
+        <IconButton aria-label="החודש הבא" disabled={month >= currentMonth}
+          onClick={() => setMonth(m => shiftMonth(m, 1))}>
+          <ChevronLeftIcon />
+        </IconButton>
+        {month !== currentMonth && (
+          <Button size="small" onClick={() => setMonth(currentMonth)}>לחודש הנוכחי</Button>
+        )}
+      </Stack>
 
       {incomplete.length > 0 && (
         <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>
@@ -182,6 +213,11 @@ export default function MyAttendance() {
 
       {loading ? (
         <Typography color="text.secondary">טוען...</Typography>
+      ) : loadFailed ? (
+        <Alert severity="error" sx={{ borderRadius: 2 }}
+          action={<Button color="inherit" size="small" onClick={load}>נסו שוב</Button>}>
+          לא הצלחנו לטעון את ההחתמות כרגע.
+        </Alert>
       ) : punches.length > 0 ? (
         <TableContainer component={Paper} sx={{ borderRadius: 3 }}>
           <Table>
@@ -223,7 +259,7 @@ export default function MyAttendance() {
         </TableContainer>
       ) : (
         <Typography color="text.secondary">
-          אין החתמות לחודש הנוכחי. אם אתה חושב שזו טעות, לחץ על "דווח החתמה שנשכחה" למעלה.
+          אין החתמות ב{monthLabel(month)}. אם זו טעות, אפשר ללחוץ על "דווח החתמה שנשכחה" למעלה.
         </Typography>
       )}
 

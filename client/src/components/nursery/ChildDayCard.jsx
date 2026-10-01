@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import {
   Card, CardContent, Box, Stack, Typography, IconButton, Chip, TextField, Divider,
-  Alert, Button, Tooltip,
+  Alert, Button, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions,
+  RadioGroup, Radio, FormControlLabel,
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
@@ -116,20 +117,23 @@ export default function ChildDayCard({
   const patch = (path, value) => onPatch(child.id, { [path]: value });
 
   /**
-   * "העבר לכיתת הפעוטות" — two questions, in this order, on purpose.
+   * "העבר לכיתת הפעוטות" — one dialog, asked NOW.
    *
-   * The first is the brake: a move changes what the family pays, and the
-   * button sits an inch from the attendance toggle. The second is the one
-   * only this person can answer — does the family still want the bottle log
-   * — and it is asked NOW, while she is thinking about this child, because
-   * the manager who approves later has no way of knowing.
+   * It is a brake (the button sits an inch from the attendance toggle) and it
+   * asks the one thing only this person can answer — does the family still
+   * want the bottle log — while she is thinking about this child, because the
+   * manager who approves later has no way of knowing. A mid-year room move
+   * does not change the fee; the manager approves because she owns the roster.
+   *
+   * This used to be two window.confirm boxes, and on the second one "ביטול"
+   * meant "remove from the board" — people press Cancel to back out. Here
+   * backing out is its own button and the board question is an explicit choice.
    */
-  const askMove = () => {
-    // eslint-disable-next-line no-alert
-    if (!window.confirm(`להעביר את ${child.name} לכיתת הפעוטות?\n\nהבקשה תישלח למנהלת הסניף לאישור — בלעדיו המעבר לא מתבצע. התשלום לא משתנה.`)) return;
-    // eslint-disable-next-line no-alert
-    const keep = window.confirm(`להשאיר את ${child.name} בלוח העדכונים של התינוקייה ל-3 החודשים הקרובים?\n\nכן — ההורים ימשיכו לקבל עדכונים מכאן.\nביטול — הילד/ה יוסר/תוסר מהלוח עם המעבר.`);
-    onRequestMove?.(child.id, keep);
+  const [moveAsk, setMoveAsk] = useState(null); // null | { keep: 'yes' | 'no' }
+  const askMove = () => setMoveAsk({ keep: 'yes' });
+  const sendMove = () => {
+    onRequestMove?.(child.id, moveAsk.keep === 'yes');
+    setMoveAsk(null);
   };
 
   const present = log.attendance === 'הגיע';
@@ -466,6 +470,25 @@ export default function ChildDayCard({
           onPick={(v) => patch(picker.path, v)}
         />
       )}
+
+      <Dialog open={!!moveAsk} onClose={() => setMoveAsk(null)} maxWidth="xs" fullWidth dir="rtl">
+        <DialogTitle>להעביר את {child.name} לכיתת הפעוטות?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            הבקשה תישלח למנהלת הסניף לאישור — בלעדיו המעבר לא מתבצע. התשלום לא משתנה.
+          </Typography>
+          <Typography variant="subtitle2" sx={{ mb: 0.5 }}>אחרי המעבר, בלוח העדכונים של התינוקייה:</Typography>
+          <RadioGroup value={moveAsk?.keep || 'yes'} onChange={(e) => setMoveAsk({ keep: e.target.value })}>
+            <FormControlLabel value="yes" control={<Radio />}
+              label="להשאיר בלוח ל-3 החודשים הקרובים — ההורים ימשיכו לקבל עדכונים מכאן" />
+            <FormControlLabel value="no" control={<Radio />} label="להסיר מהלוח עם המעבר" />
+          </RadioGroup>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setMoveAsk(null)}>ביטול — לא להעביר</Button>
+          <Button variant="contained" onClick={sendMove}>שליחת בקשה למנהלת</Button>
+        </DialogActions>
+      </Dialog>
     </Card>
   );
 }

@@ -143,16 +143,20 @@ export default function PendingPunchApprovals({ onChanged }) {
   };
   // Accounting/admin approving a stage-1 row directly — the branch manager
   // never got to look at it. See services/decisions.js for how she's told.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [bypassConfirm, setBypassConfirm] = useState({ open: false, punch: null, busy: false });
 
   const load = useCallback(() => {
     setLoading(true);
+    setLoadFailed(false);
     api.get('/payroll/punches/pending')
       .then((res) => {
         setPunches([...(res.data.pending_manager || []), ...(res.data.pending_accountant || [])]);
         setCommitments(res.data.commitments || {});
       })
-      .catch(() => {})
+      // A failed load must not look like "nothing to approve": the box would
+      // simply vanish and the hours would miss payroll unnoticed.
+      .catch(() => setLoadFailed(true))
       .finally(() => setLoading(false));
   }, []);
 
@@ -232,6 +236,14 @@ export default function PendingPunchApprovals({ onChanged }) {
       .filter(s => s.groups.length > 0);
   }, [punches]);
 
+  if (loadFailed && punches.length === 0) {
+    return (
+      <Alert severity="error" sx={{ borderRadius: 3, mb: 2 }}
+        action={<Button color="inherit" size="small" onClick={load} disabled={loading}>נסו שוב</Button>}>
+        לא הצלחנו לבדוק אם יש דיווחי שעות שממתינים לאישור.
+      </Alert>
+    );
+  }
   if (loading && punches.length === 0) return null;
   if (punches.length === 0) return null;
 

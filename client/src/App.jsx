@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Box } from '@mui/material';
 const AppShell = lazy(() => import('./components/layout/AppShell'));
 import ScreenSkeleton from './components/ui/ScreenSkeleton';
@@ -417,8 +417,11 @@ function AppRoutes() {
  */
 function HomeRoute() {
   const { user } = useAuth();
+  const location = useLocation();
   if (user && !hasTabAccess(user, 'dashboard')) {
-    return <Navigate to="/my-salary" replace />;
+    // Keep the query: a push to `/?punch_fix=1` must still open the fix popup
+    // for staff who land on their own area instead of the dashboard.
+    return <Navigate to={`/my-salary${location.search}`} replace />;
   }
   return <Dashboard />;
 }

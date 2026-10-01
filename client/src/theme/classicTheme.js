@@ -24,13 +24,20 @@ const theme = createTheme({
     subtitle2: { fontWeight: 700, fontSize: '0.85rem' },
     caption: { fontSize: '0.78rem', lineHeight: 1.4 },
   },
+  /*
+   * Contrast (01.10.2026). White text on #f59e0b measured ~2:1 — every
+   * primary button in the default look failed. The amber stays (it IS the
+   * classic look); its text turns dark ink, ~9:1. Success / error / info take
+   * the token mains, which carry white text at AA, so they read a shade deeper
+   * but keep their hue. `light` stays: it is a fill that never carries text.
+   */
   palette: {
-    primary: { main: '#f59e0b', light: '#fbbf24', dark: '#d97706', contrastText: '#fff' },
+    primary: { main: '#f59e0b', light: '#fbbf24', dark: '#d97706', contrastText: COLOR.text.primary },
     secondary: { main: '#6366f1', light: '#818cf8', dark: '#4f46e5' },
-    success: { main: '#10b981', light: '#d1fae5', dark: '#059669' },
-    warning: { main: '#f59e0b', light: '#fef3c7', dark: '#d97706' },
-    error: { main: '#ef4444', light: '#fee2e2', dark: '#dc2626' },
-    info: { main: '#3b82f6', light: '#dbeafe', dark: '#2563eb' },
+    success: { main: COLOR.success.main, light: '#d1fae5', dark: COLOR.success.dark, contrastText: COLOR.success.contrastText },
+    warning: { main: '#f59e0b', light: '#fef3c7', dark: '#d97706', contrastText: COLOR.text.primary },
+    error: { main: COLOR.error.main, light: '#fee2e2', dark: COLOR.error.dark, contrastText: COLOR.error.contrastText },
+    info: { main: COLOR.info.main, light: '#dbeafe', dark: COLOR.info.dark, contrastText: COLOR.info.contrastText },
     background: { default: '#f8fafc', paper: '#ffffff' },
     text: { primary: '#1e293b', secondary: '#64748b' },
     divider: '#e2e8f0',

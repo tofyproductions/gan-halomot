@@ -268,7 +268,7 @@ export default function ParentOnboarding() {
               />
             ) : (
               <Alert severity="info" sx={{ mb: 3, borderRadius: 2 }}>
-                החוזה יוצג כאן. אנא קרא/י בעיון לפני החתימה.
+                החוזה עדיין לא מוכן לחתימה. אפשר לחזור לקישור מאוחר יותר או לפנות לגן.
               </Alert>
             )}
 
@@ -293,10 +293,11 @@ export default function ParentOnboarding() {
               <SignatureCanvas
                 ref={sigRef}
                 penColor="#1e293b"
+                // No fixed width/height: the library sizes the drawing surface to
+                // the box it is shown in. A fixed 640px surface squeezed onto a
+                // phone put the ink away from the finger.
                 canvasProps={{
-                  width: 640,
-                  height: 200,
-                  style: { width: '100%', height: 200 },
+                  style: { width: '100%', height: 200, display: 'block', touchAction: 'none' },
                 }}
               />
             </Box>
@@ -312,7 +313,7 @@ export default function ParentOnboarding() {
               <Button
                 variant="contained"
                 onClick={handleSign}
-                disabled={submitting}
+                disabled={submitting || !(regData?.contractHTML || regData?.contractHtml)}
                 sx={{ flex: 1 }}
               >
                 {submitting ? 'שולח...' : 'חתום והמשך'}

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Box, Card, CardContent, Typography, TextField, Button, Stack, Alert,
   FormControlLabel, Checkbox, Divider,
@@ -15,6 +15,12 @@ const SAVED_USER_ID_KEY = 'gan_biometric_user_id';
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  // Where she was headed before being sent here (ProtectedRoute). Only an
+  // in-app path — never an absolute or protocol-relative URL.
+  const from = location.state?.from;
+  const afterLogin = typeof from === 'string' && from.startsWith('/') && !from.startsWith('//')
+    && !from.startsWith('/login') ? from : '/';
   const { login, loginWithPassword, requestResetCode, resetWithCode } = useAuth();
   const [fullName, setFullName] = useState('');
   const [idNumber, setIdNumber] = useState('');
@@ -99,7 +105,7 @@ export default function LoginPage() {
       localStorage.removeItem(SAVED_CREDS_KEY);
     }
     if (result.hasWebauthn) localStorage.setItem(SAVED_USER_ID_KEY, result.user.id);
-    navigate('/');
+    navigate(afterLogin, { replace: true });
   };
 
   const handleBiometricLogin = async () => {
@@ -163,7 +169,7 @@ export default function LoginPage() {
     setError(''); setLoading(true);
     try {
       await resetWithCode(fullName, idNumber, resetCode, newPassword, rememberMe);
-      navigate('/');
+      navigate(afterLogin, { replace: true });
     } catch (err) {
       setError(err.response?.data?.error || 'איפוס הסיסמה נכשל');
     } finally { setLoading(false); }
@@ -250,10 +256,14 @@ export default function LoginPage() {
                 <TextField
                   label="סיסמה חדשה" type="password" value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)} fullWidth required
-                  helperText="לפחות 4 תווים" inputProps={{ dir: 'ltr' }}
+                  error={newPassword.length > 0 && newPassword.length < 8}
+                  helperText={newPassword.length > 0 && newPassword.length < 8
+                    ? `לפחות 8 תווים — חסרים עוד ${8 - newPassword.length}`
+                    : 'לפחות 8 תווים'}
+                  inputProps={{ dir: 'ltr' }}
                 />
                 <Button type="submit" variant="contained" size="large" fullWidth
-                        disabled={loading || resetCode.length < 6} startIcon={<LoginIcon />}>
+                        disabled={loading || resetCode.length < 6 || newPassword.length < 8} startIcon={<LoginIcon />}>
                   {loading ? 'מאפס…' : 'שמירה וכניסה'}
                 </Button>
                 <Button variant="text" size="small" onClick={handleForgot} disabled={sending}>
