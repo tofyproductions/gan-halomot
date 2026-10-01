@@ -10,6 +10,7 @@
     "demo:viewer": "node scripts/viewer-demo-server.js",
     "import": "node scripts/import-from-gsheets.js",
     "test:finance-ingest": "node scripts/finance-ingest.test.js",
+    "test:card-settlement": "node scripts/card-settlement.test.js",
     "test:terms": "node scripts/employment-terms.test.js",
     "test:employee-scope": "node scripts/payroll-employee-scope.test.js",
     "test:user-guard": "node scripts/employee-user-guard.test.js",
