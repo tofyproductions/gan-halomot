@@ -15,7 +15,7 @@ const {
   BankAccount, BankTransaction, IncomeAllocation, IncomeRejection, IncomePayerAlias,
 } = require('../models');
 const { withLocks, atomically } = require('./expenseWrites.service');
-const { COVERAGE_TOLERANCE_ILS } = require('./expenseCore.service');
+const { COVERAGE_TOLERANCE_ILS, vendorKey } = require('./expenseCore.service');
 const { ACADEMIC_MONTHS, CAMP_MONTH } = require('./academic-year.service');
 const K = require('./incomeKaplan.service');
 
@@ -48,15 +48,37 @@ async function allocatedTotal(txId) {
   return round2(row ? row.total : 0);
 }
 
-/** Alias upsert; the unique index can race between two transfers of one payer — the loser retries as an update. */
-async function rememberPayer(payer, householdKey, by) {
-  if (!payer) return;
-  const set = { household_key: householdKey, created_by: by || null };
+/** Bank words that say nothing about who paid — an alias on them would swallow every transfer. */
+const GENERIC_PAYER_WORDS = ['העברה', 'העברה בנקאית', 'הפקדה', 'זיכוי', 'מזומן', 'שיק', 'צק', 'ביט', 'פייבוקס', 'bit', 'paybox'];
+const GENERIC_TOKENS = new Set(GENERIC_PAYER_WORDS.flatMap(w => vendorKey(w).split(' ')));
+const MIN_PAYER_KEY_LENGTH = 4;
+
+function isRememberablePayer(payer) {
+  if (!payer || payer.length < MIN_PAYER_KEY_LENGTH) return false;
+  return payer.split(' ').some(t => !GENERIC_TOKENS.has(t));
+}
+
+/**
+ * Remember who paid. The first confirmed mapping wins: a payer text already
+ * pointing at another family is kept and reported as a conflict (the office
+ * can clear it). Returns 'created' | 'same' | 'conflict' | 'skipped'.
+ * Runs inside the accept's scope, so a rolled-back accept leaves no alias.
+ */
+async function rememberPayer(payer, household, by, txId, { session, undo }) {
+  if (!isRememberablePayer(payer)) return 'skipped';
+  const opts = session ? { session } : {};
+  const existing = await IncomePayerAlias.findOne({ payer_key: payer }, null, opts).lean();
+  if (existing) return K.householdMatchesKey(household, existing.household_key) ? 'same' : 'conflict';
   try {
-    await IncomePayerAlias.updateOne({ payer_key: payer }, { $set: set }, { upsert: true });
+    const [made] = await IncomePayerAlias.create([{
+      payer_key: payer, household_key: household.household_key, source_transaction_id: txId, created_by: by || null,
+    }], opts);
+    undo(() => IncomePayerAlias.deleteOne({ _id: made._id }));
+    return 'created';
   } catch (e) {
-    if (e && e.code === 11000) await IncomePayerAlias.updateOne({ payer_key: payer }, { $set: set });
-    else throw e;
+    if (!(e && e.code === 11000)) throw e;
+    const now = await IncomePayerAlias.findOne({ payer_key: payer }).lean();
+    return now && K.householdMatchesKey(household, now.household_key) ? 'same' : 'conflict';
   }
 }
 
@@ -65,12 +87,15 @@ async function rememberPayer(payer, householdKey, by) {
  * Σ allocations of the transfer stays ≤ amount + 2 ₪. Without `split` the
  * earliest open months across the family's children are used.
  */
-async function acceptIncome({ transaction_id, household_key, split, by = null }) {
+async function acceptIncome({ transaction_id, household_key, split, academic_year, by = null }) {
   oid(transaction_id, 'מזהה תנועה');
   if (!household_key) throw fail(400, 'חסרה משפחה');
   return withLocks([lockKey(transaction_id)], async () => {
     const tx = await loadTransaction(transaction_id);
-    const year = K.academicYearOfDate(tx.date);
+    if (academic_year != null && !/^(\d{4})-(\d{4})$/.test(academic_year)) throw fail(400, 'שנת לימודים לא תקינה');
+    if (academic_year != null && Number(academic_year.slice(5)) !== Number(academic_year.slice(0, 4)) + 1) throw fail(400, 'שנת לימודים לא תקינה');
+    // A payment can belong to another gan year than its date (paid ahead / in arrears).
+    const year = academic_year || K.academicYearOfDate(tx.date);
     if (!year) throw fail(400, 'לתנועה אין תאריך תקין');
     const households = await K.kaplanHouseholds(year);
     const household = households.find(h => K.householdMatchesKey(h, household_key));
@@ -79,6 +104,7 @@ async function acceptIncome({ transaction_id, household_key, split, by = null })
     const remaining = round2(tx.amount - await allocatedTotal(tx._id));
     if (remaining <= COVERAGE_TOLERANCE_ILS) throw fail(409, 'ההעברה כבר הוקצתה במלואה');
 
+    const seen = new Set();
     let slices;
     if (Array.isArray(split) && split.length) {
       slices = split.map((s) => {
@@ -90,6 +116,11 @@ async function acceptIncome({ transaction_id, household_key, split, by = null })
         }
         const amount = round2(s.amount);
         if (!(amount > 0)) throw fail(400, 'סכום ההקצאה חייב להיות חיובי');
+        const dupKey = `${child.registration_id}|${month}`;
+        if (seen.has(dupKey)) throw fail(400, 'אותו ילד וחודש מופיעים פעמיים בפיצול');
+        seen.add(dupKey);
+        const cell = child.months.find(m => m.month_number === month);
+        if (amount > round2(cell.expected - cell.allocated) + TOLERANCE_ILS) throw fail(400, 'סכום ההקצאה גדול מהסכום הפתוח בחודש');
         return { registration_id: child.registration_id, month_number: month, amount };
       });
     } else {
@@ -100,6 +131,7 @@ async function acceptIncome({ transaction_id, household_key, split, by = null })
     const sum = round2(slices.reduce((s, x) => s + x.amount, 0));
     if (sum > remaining + TOLERANCE_ILS) throw fail(400, 'סכום ההקצאות גדול מיתרת ההעברה');
 
+    let alias = 'skipped';
     const allocations = await atomically(async ({ session, undo }) => {
       const docs = slices.map(s => ({
         transaction_id: tx._id,
@@ -112,10 +144,17 @@ async function acceptIncome({ transaction_id, household_key, split, by = null })
       }));
       const created = await IncomeAllocation.insertMany(docs, session ? { session } : {});
       undo(() => IncomeAllocation.deleteMany({ _id: { $in: created.map(c => c._id) } }));
-      await rememberPayer(K.payerKey(tx), household.household_key, by);
+      alias = await rememberPayer(K.payerKey(tx), household, by, tx._id, { session, undo });
+      // Accepting a family overrides an earlier "not this one" for it.
+      const keys = [household.household_key, ...(household.member_keys || [])];
+      const rej = await IncomeRejection.find({ transaction_id: tx._id, household_key: { $in: keys } }, null, session ? { session } : {}).lean();
+      if (rej.length) {
+        await IncomeRejection.deleteMany({ _id: { $in: rej.map(r => r._id) } }, session ? { session } : {});
+        undo(() => IncomeRejection.insertMany(rej.map(({ _id, ...r }) => r)));
+      }
       return created.map(c => c.toObject());
     }, { transaction_id: String(tx._id) });
-    return { allocations };
+    return { allocations, alias };
   });
 }
 
@@ -139,6 +178,8 @@ async function unallocate(transaction_id) {
   oid(transaction_id, 'מזהה תנועה');
   return withLocks([lockKey(transaction_id)], async () => {
     const r = await IncomeAllocation.deleteMany({ transaction_id });
+    // Only an alias this very transfer created goes with it.
+    await IncomePayerAlias.deleteMany({ source_transaction_id: transaction_id });
     return { removed: r.deletedCount || 0 };
   });
 }

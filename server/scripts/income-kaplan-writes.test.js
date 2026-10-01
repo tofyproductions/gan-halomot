@@ -173,6 +173,73 @@ const rejects = async (fn, status, l) => {
     eq(sc.score, 100, 'ניקוד 100 ממשלם מוכר');
   }
 
+  console.log('כינוי משלם — בטיחות');
+  {
+    const gen = async (desc, counterparty) => {
+      const t = await tx({ amount: 3000, description: desc, counterparty, date: '2026-03-03' });
+      const r = await W.acceptIncome({ transaction_id: t._id, household_key: co.household_key,
+        split: [{ registration_id: cohenA._id, month_number: 3, amount: 100 }] });
+      return { t, r };
+    };
+    const n0 = await IncomePayerAlias.countDocuments({});
+    eq((await gen('העברה')).r.alias, 'skipped', 'טקסט גנרי "העברה" — בלי כינוי');
+    eq((await gen('העברה בנקאית')).r.alias, 'skipped', 'ביטוי גנרי — בלי כינוי');
+    eq((await gen('ביט', 'PayBox')).r.alias, 'skipped', 'ביט/paybox — בלי כינוי');
+    eq((await gen('אבי')).r.alias, 'skipped', 'קצר מ-4 תווים — בלי כינוי');
+    eq((await gen('')).r.alias, 'skipped', 'ריק — בלי כינוי');
+    eq(await IncomePayerAlias.countDocuments({}), n0, 'לא נוצרו כינויים');
+
+    const t1 = await tx({ amount: 3000, description: 'משלם מיוחד אחד', date: '2026-04-03' });
+    const r1 = await W.acceptIncome({ transaction_id: t1._id, household_key: co.household_key,
+      split: [{ registration_id: cohenA._id, month_number: 4, amount: 100 }] });
+    eq(r1.alias, 'created', 'כינוי חדש נוצר');
+    const a1 = await IncomePayerAlias.findOne({ payer_key: K.payerKey(t1) }).lean();
+    eq(String(a1.source_transaction_id), String(t1._id), 'נשמר source_transaction_id');
+    const t2 = await tx({ amount: 3000, description: 'משלם מיוחד אחד', date: '2026-04-05' });
+    const r2 = await W.acceptIncome({ transaction_id: t2._id, household_key: lv.household_key,
+      split: [{ registration_id: levi._id, month_number: 4, amount: 100 }] });
+    eq(r2.alias, 'conflict', 'ממופה ל-B, אישור ל-A — קונפליקט');
+    eq((await IncomePayerAlias.findOne({ payer_key: K.payerKey(t1) }).lean()).household_key, co.household_key, 'המיפוי הישן נשמר');
+    const t3 = await tx({ amount: 3000, description: 'משלם מיוחד אחד', date: '2026-04-07' });
+    eq((await W.acceptIncome({ transaction_id: t3._id, household_key: co.household_key,
+      split: [{ registration_id: cohenA._id, month_number: 5, amount: 100 }] })).alias, 'same', 'אותה משפחה — same');
+    await W.unallocate(t2._id);
+    ok(await IncomePayerAlias.findOne({ payer_key: K.payerKey(t1) }), 'ביטול של עסקה שלא יצרה את הכינוי — הכינוי נשאר');
+    await W.unallocate(t1._id);
+    eq(await IncomePayerAlias.countDocuments({ payer_key: K.payerKey(t1) }), 0, 'ביטול העסקה שיצרה — הכינוי נמחק');
+
+    // rollback leaves no alias: force a failure after the alias step
+    const t4 = await tx({ amount: 3000, description: 'משלם לגלגול', date: '2026-05-03' });
+    const orig = IncomeRejection.find;
+    IncomeRejection.find = () => { throw new Error('boom'); };
+    try { await W.acceptIncome({ transaction_id: t4._id, household_key: co.household_key,
+      split: [{ registration_id: cohenA._id, month_number: 5, amount: 100 }] }); ok(false, 'אמור להיכשל'); } catch (e) { ok(e.message === 'boom', 'כשל אחרי כינוי'); }
+    IncomeRejection.find = orig;
+    eq(await IncomePayerAlias.countDocuments({ payer_key: K.payerKey(t4) }), 0, 'גלגול לאחור — אין כינוי');
+    eq(await IncomeAllocation.countDocuments({ transaction_id: t4._id }), 0, 'גלגול לאחור — אין הקצאות');
+  }
+
+  console.log('קבלה מנקה דחייה; פיצול כפול; תקרת תא; שנה מפורשת');
+  {
+    const t = await tx({ amount: 3000, description: 'דחוי ואז אושר', date: '2026-05-10' });
+    await W.rejectIncome({ transaction_id: t._id, household_key: lv.household_key });
+    await W.acceptIncome({ transaction_id: t._id, household_key: lv.household_key,
+      split: [{ registration_id: levi._id, month_number: 5, amount: 100 }] });
+    eq(await IncomeRejection.countDocuments({ transaction_id: t._id }), 0, 'הדחייה נמחקה בקבלה');
+    const cell6 = (await find('רותם כהן')).children.find(c => String(c.registration_id) === String(cohenA._id)).months.find(m => m.month_number === 6);
+    const u = await tx({ amount: cell6.expected + 10, description: 'כפילות', date: '2026-05-11' });
+    await rejects(() => W.acceptIncome({ transaction_id: u._id, household_key: co.household_key, split: [
+      { registration_id: cohenA._id, month_number: 6, amount: 100 }, { registration_id: cohenA._id, month_number: 6, amount: 100 }] }), 400, 'אותו (ילד, חודש) פעמיים — 400');
+    await rejects(() => W.acceptIncome({ transaction_id: u._id, household_key: co.household_key, split: [
+      { registration_id: cohenA._id, month_number: 6, amount: cell6.expected + 3 }] }), 400, 'מעל הפתוח בתא + 2 — 400');
+    await rejects(() => W.acceptIncome({ transaction_id: u._id, household_key: co.household_key, academic_year: '2026', split: [
+      { registration_id: cohenA._id, month_number: 6, amount: 100 }] }), 400, 'שנה לא תקינה — 400');
+    await rejects(() => W.acceptIncome({ transaction_id: u._id, household_key: co.household_key, academic_year: '2031-2032' }), 404, 'שנה בלי משפחה — 404');
+    const r = await W.acceptIncome({ transaction_id: u._id, household_key: co.household_key, academic_year: '2025-2026',
+      split: [{ registration_id: cohenA._id, month_number: 6, amount: 100 }] });
+    eq(r.allocations[0].academic_year, '2025-2026', 'שנה מפורשת נשמרת');
+  }
+
   console.log('\nkaplanMonthReport');
   {
     await IncomeAllocation.deleteMany({});

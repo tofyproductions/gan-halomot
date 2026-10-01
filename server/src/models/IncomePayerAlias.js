@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const incomePayerAliasSchema = new mongoose.Schema({
   payer_key: { type: String, required: true },
   household_key: { type: String, required: true },
+  source_transaction_id: { type: mongoose.Schema.Types.ObjectId, ref: 'BankTransaction', default: null },
   created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
