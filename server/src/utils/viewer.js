@@ -156,9 +156,17 @@ function isBlockedForViewer(url) {
   return BLOCKED_PREFIXES.some(p => startsWithPrefix(path, p));
 }
 
+/**
+ * Filing to iCount / reporting paid there writes irreversibly into the gan's
+ * books. A viewer's request must never become a proposal: a replay days later
+ * would file from stale data. Refused outright, whatever grant she holds.
+ */
+const WRITE_BLOCKED_PATTERNS = [/^\/api\/expenses\/documents\/[^/]+\/icount-(file|paid)\/?$/];
+
 function isWriteBlockedForViewer(url) {
   const path = pathOnly(url);
-  return WRITE_BLOCKED_PREFIXES.some(p => startsWithPrefix(path, p));
+  return WRITE_BLOCKED_PREFIXES.some(p => startsWithPrefix(path, p))
+    || WRITE_BLOCKED_PATTERNS.some(re => re.test(path));
 }
 
 function isMultipart(req) {

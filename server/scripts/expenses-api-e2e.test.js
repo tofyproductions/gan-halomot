@@ -400,8 +400,15 @@ async function main() {
     eq((await request({ path: A + p, token: teacher })).status, 403, `גננת — ${p} — 403`);
   }
   eq((await request({ method: 'POST', path: `${A}/icount/pull`, token: accountant })).status, 503, 'משיכה בלי חיבור — 503');
-  const nc = await request({ method: 'POST', path: `${A}/documents/${docId}/icount-file`, token: accountant, body: {} });
-  ok(nc.status === 400 || nc.status === 409 || nc.status === 503, 'העלאה לא מחוברת לא עוברת', `status ${nc.status}`);
+  {
+    const cd = await ExpenseDocument.create({ source: 'mail_sorter', mail_sorter_id: 8999, vendor_name: 'חשמל ישראל בע"מ', supplier_tax_id: TAX, doc_type: 'tax_invoice', doc_number: 'ICN-NC', doc_date: '2026-09-10', amount_total: 30 });
+    const ct = await BankTransaction.create({ account_id: bank._id, date: '2026-09-12', amount: -30, description: 'נ"ק', hash: 'icn-nc' });
+    await ExpensePayment.create({ document_id: cd._id, transaction_id: ct._id, amount: 30 });
+    await SettingM.findOneAndUpdate({ key: 'icount_expense_type_id' }, { $set: { value: 2 } }, { upsert: true });
+    const nc = await request({ method: 'POST', path: `${A}/documents/${cd._id}/icount-file`, token: accountant, body: {} });
+    eq(nc.status, 503, 'מסמך סגור, אייקאונט לא מחובר — 503'); eq(nc.body?.code, 'NOT_CONFIGURED', 'קוד NOT_CONFIGURED');
+    await SettingM.deleteOne({ key: 'icount_expense_type_id' });
+  }
 
   head('אייקאונט — הגדרות והרשאות העלאה');
   eq((await request({ path: `${A}/icount/settings`, token: viewer })).body?.expense_type_id, null, 'סוג הוצאה לא מוגדר');
@@ -443,8 +450,10 @@ async function main() {
   }
   for (const [m, pth] of [['POST', 'icount-file'], ['POST', 'icount-paid'], ['DELETE', 'icount-paid']]) {
     eq((await request({ method: m, path: `${A}/documents/${fid}/${pth}`, token: teacher, body: {} })).status, 403, `גננת — ${m} ${pth} — 403`);
+    const pcBefore = await mongo.ProposedChange.countDocuments();
     const vr = await request({ method: m, path: `${A}/documents/${fid}/${pth}`, token: viewer, body: {} });
-    ok(vr.status === 202 || vr.status === 403, `צופה — ${m} ${pth} — לא ישיר`, `status ${vr.status}`);
+    eq(vr.status, 403, `צופה — ${m} ${pth} — 403 (לא הצעה)`);
+    eq(await mongo.ProposedChange.countDocuments(), pcBefore, `צופה — ${m} ${pth} — לא נשמרה הצעה`);
   }
   eq((await request({ path: `${A}/documents/${fid}/icount-preview`, token: teacher })).status, 403, 'גננת — preview — 403');
 
@@ -496,7 +505,7 @@ async function main() {
 
   eq((await request({ path: `${A}/closed`, token: viewer })).body?.documents?.find(d => d._id === fid)?.icount?.status, 'not_in_icount', '/closed — not_in_icount לפני העלאה');
   const vf = await request({ method: 'POST', path: `${A}/documents/${fid}/icount-file`, token: viewer, body: {} });
-  ok(vf.status === 202 || vf.status === 403, 'צופה לא מעלה', `status ${vf.status}`);
+  eq(vf.status, 403, 'צופה לא מעלה — 403');
   eq(ofM('/expense/create').length, 0, 'צופה — לא נוצר דבר באייקאונט');
 
   const filed = await request({ method: 'POST', path: `${A}/documents/${fid}/icount-file`, token: accountant, body: {} });

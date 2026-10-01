@@ -250,8 +250,11 @@ const icountPreview = async (req, res) => res.json(await filing.previewFiling(re
 /** Same status/code shape the filing service throws, for errors raised here. */
 function filingError(e) {
   if (e && e.status) return e;
-  const throttled = e && (e.code === 'THROTTLED' || e.code === 'NOT_CONFIGURED');
-  return Object.assign(new Error(String((e && e.message) || 'שגיאה לא ידועה מאייקאונט')), { status: throttled ? 503 : 502, code: throttled ? e.code : 'ICOUNT_ERROR' });
+  if (e && (e.code === 'THROTTLED' || e.code === 'NOT_CONFIGURED')) return Object.assign(new Error(e.message), { status: 503, code: e.code });
+  // iCount's own refusals carry code ICOUNT_ERROR; anything else is a network/internal failure — log it, show a fixed message.
+  if (e && e.code === 'ICOUNT_ERROR') return Object.assign(new Error(e.message), { status: 502, code: 'ICOUNT_ERROR' });
+  console.error('[expenses] iCount call failed:', (e && e.stack) || e);
+  return Object.assign(new Error('אייקאונט לא ענה — נסו שוב מאוחר יותר'), { status: 502, code: 'ICOUNT_ERROR' });
 }
 
 // ── writes ─────────────────────────────────────────────────────────────────
@@ -341,7 +344,7 @@ const intakePull = async (req, res) => {
 
 // Same lock name as the daily job: a click never overlaps a run.
 const ICOUNT_LOCK = 'icount-mirror';
-const ICOUNT_LOCK_LEASE_MS = 30 * 60 * 1000;
+const ICOUNT_LOCK_LEASE_MS = 60 * 60 * 1000;
 const runIcountPull = () => withJobLock(ICOUNT_LOCK, ICOUNT_LOCK_LEASE_MS, () => bridge.pullAndSync());
 
 async function icountPull(req, res) {
