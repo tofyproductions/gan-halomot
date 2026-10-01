@@ -66,6 +66,10 @@ export const TAB_GROUPS = [
       { id: 'expenses', label: 'הוצאות ומסמכים', path: '/expenses', defaultRoles: ['system_admin', 'admin_viewer', 'accountant'] },
       // Not a screen — the right to act on הוצאות (upload, pair, decide).
       { id: 'expenses_write', label: 'הוצאות ומסמכים — פעולות', path: null, defaultRoles: ['system_admin', 'accountant'], writeGrantFor: 'expenses' },
+      // Income: Kaplan bank transfers attributed to families, ClickTac monthly report, Emunah settlement.
+      { id: 'income', label: 'הכנסות', path: '/income', defaultRoles: ['system_admin', 'admin_viewer', 'accountant'] },
+      // Not a screen — the right to act on הכנסות (allocate, import, rules).
+      { id: 'income_write', label: 'הכנסות — פעולות', path: null, defaultRoles: ['system_admin', 'accountant'], writeGrantFor: 'income' },
       // Not a screen — the right to FILE a closed document to iCount and report it paid there (iCount has no undo).
       { id: 'icount_upload', label: 'הוצאות — העלאה לאייקאונט', path: null, defaultRoles: ['system_admin', 'accountant'], writeGrantFor: 'expenses' },
       // אישור שהות ואישור קייטנה — the papers a family asks the office for,

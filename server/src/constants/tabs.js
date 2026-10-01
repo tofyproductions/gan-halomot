@@ -37,6 +37,9 @@ const TAB_DEFAULT_ROLES = {
   // Not a screen — the write grant for הוצאות. See the client file.
   expenses_write: ['system_admin', 'accountant'],
   // Not a screen — the right to file to iCount and report paid. See the client file.
+  income: ['system_admin', 'admin_viewer', 'accountant'],
+  // Not a screen — the write grant for הכנסות. See the client file.
+  income_write: ['system_admin', 'accountant'],
   icount_upload: ['system_admin', 'accountant'],
   proposed_changes: ['system_admin', 'accountant', 'admin_viewer'],
   contact_inbox: ['system_admin', 'accountant', 'admin_viewer'],

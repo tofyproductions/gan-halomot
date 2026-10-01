@@ -291,6 +291,9 @@ connectDB().then(() => {
   if (!require('./platform/connection').isEnabled()) {
     require('./services/noInvoiceRules.service').seed()
       .catch((e) => console.error('⚠️  זריעת חוקי "לא צריך חשבונית" נכשלה:', e.message));
+    // Same for the built-in "not parent income" rules of the income screen.
+    require('./services/incomeRules.service').seed()
+      .catch((e) => console.error('⚠️  זריעת חוקי "לא הכנסת הורים" נכשלה:', e.message));
   }
 
   const server = app.listen(env.PORT, () => {

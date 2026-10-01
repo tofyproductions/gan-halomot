@@ -114,6 +114,13 @@ const IcountPull = require('./IcountPull');
 const ExpenseIdentityDecision = require('./ExpenseIdentityDecision');
 const IcountPaidReport = require('./IcountPaidReport');
 const NoInvoiceRule = require('./NoInvoiceRule');
+const IncomeRule = require('./IncomeRule');
+const IncomeAllocation = require('./IncomeAllocation');
+const IncomeRejection = require('./IncomeRejection');
+const IncomePayerAlias = require('./IncomePayerAlias');
+const ClickTacImport = require('./ClickTacImport');
+const ClickTacMonthRow = require('./ClickTacMonthRow');
+const EmunahStatement = require('./EmunahStatement');
 const ProductScanMark = require('./ProductScanMark');
 const ParentAccount = require('./ParentAccount');
 const ParentPortalChange = require('./ParentPortalChange');
@@ -240,6 +247,13 @@ const real = {
   ExpenseIdentityDecision,
   IcountPaidReport,
   NoInvoiceRule,
+  IncomeRule,
+  IncomeAllocation,
+  IncomeRejection,
+  IncomePayerAlias,
+  ClickTacImport,
+  ClickTacMonthRow,
+  EmunahStatement,
   ProductScanMark,
   ParentAccount,
   ParentPortalChange,
