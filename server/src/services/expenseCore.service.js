@@ -236,6 +236,7 @@ module.exports = {
   chargePool,
   computeState,
   isReceiptLike,
+  withStates,
   documentsWithState,
   isClosed,
   findDuplicate,

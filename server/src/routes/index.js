@@ -110,6 +110,7 @@ router.use(authMiddleware);
 router.use(attachBranchScope);
 // The bank screen (user JWT). The agent's signed door is mounted above, before auth.
 router.use('/finance', require('./finance.routes'));
+router.use('/expenses', require('./expenses.routes'));
 router.use('/branches', require('./branch.routes'));
 // The customer's own subscription — what they pay and why. Read-only.
 router.use('/account', require('./account.routes'));
