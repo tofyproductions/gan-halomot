@@ -104,8 +104,6 @@ async function ingestAccount(raw, source) {
     if (res.upsertedCount) { if (r.status !== 'pending') out.inserted++; }
     else out.updated++;
   }
-  // A re-laid pending row is not news.
-  out.pending_replaced = Math.max(0, out.pending_replaced);
   return out;
 }
 
@@ -120,12 +118,22 @@ async function ingest(accounts, { agentVersion = null, source = 'agent' } = {}) 
       result.updated += r.updated;
       result.pending_replaced += r.pending_replaced;
     }
+    // Existence is resolved on its own: an error thrown INSIDE an existing
+    // cardSettlement.service (e.g. its own missing dependency) must not look
+    // like "module not built yet".
+    let detect = null;
     try {
-      const { detectCardSettlements } = require('./cardSettlement.service');
-      result.card_settlements = (await detectCardSettlements()).length;
+      require.resolve('./cardSettlement.service');
+      detect = require('./cardSettlement.service').detectCardSettlements;
     } catch (e) {
-      const missingSelf = e.code === 'MODULE_NOT_FOUND' && /cardSettlement\.service/.test(e.message);
-      if (!missingSelf) console.error('[finance] card settlement pass failed:', e.message);
+      if (!(e.code === 'MODULE_NOT_FOUND' && /^Cannot find module '\.\/cardSettlement\.service'/.test(e.message))) throw e;
+    }
+    if (detect) {
+      try {
+        result.card_settlements = (await detect()).length;
+      } catch (e) {
+        console.error('[finance] card settlement pass failed:', e.message);
+      }
     }
     await FinanceSyncLog.create({ source, agent_version: agentVersion, status: 'ok', ...result });
     return result;

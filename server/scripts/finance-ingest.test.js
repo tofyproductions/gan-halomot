@@ -91,7 +91,9 @@ const tx = (o) => ({ date: '2026-09-10', amount: -100, description: 'ספק א',
   console.log('\nיומן');
   {
     const n = await FinanceSyncLog.countDocuments({ source: 'agent', status: 'ok' });
-    ok(n >= 5, 'כל קליטה נרשמה ביומן');
+    eq(n, 7, 'כל קליטה מוצלחת נרשמה ביומן');
+    const bad = await FinanceSyncLog.countDocuments({ source: 'agent', status: 'error' });
+    eq(bad, 2, 'וכל קליטה שנכשלה נרשמה ביומן כשגיאה');
   }
 
   await mongoose.disconnect();
