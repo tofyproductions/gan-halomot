@@ -215,6 +215,9 @@ async function main() {
       eq(pdf.headers['content-type'], 'application/pdf', 'octet-stream עם %PDF — מוגש כ-PDF');
       ok(/^inline/.test(pdf.headers['content-disposition'] || ''), 'ומוצג inline');
       eq(pdf.headers['x-content-type-options'], 'nosniff', 'עם nosniff');
+      ok(/sandbox/.test(pdf.headers['content-security-policy'] || ''), 'עם CSP sandbox');
+      const avif = await serve(Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypavif'), pad]), 'application/octet-stream');
+      ok(avif.headers['content-type'] === 'image/heic' && /^attachment/.test(avif.headers['content-disposition'] || ''), 'AVIF/HEIF — משפחת HEIC, attachment');
       const jpg = await serve(Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]), pad]), '');
       eq(jpg.headers['content-type'], 'image/jpeg', 'JPEG בלי סוג — image/jpeg');
       const png = await serve(Buffer.concat([Buffer.from([0x89, 0x50, 0x4E, 0x47]), pad]), 'image/jpeg');

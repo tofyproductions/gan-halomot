@@ -624,7 +624,7 @@ connectDB().then(() => {
     // Expenses — copy what mail-sorter already read (invoices + receipts) every 6 hours.
     const expenseIntake = require('./services/expenseIntake.service');
     const mailSorterClient = require('./services/mailSorter.service');
-    const runExpenseMailPull = () => withJobLock('expense-mail-pull', 15 * 60 * 1000, () => expenseIntake.pullFromMailSorter())
+    const runExpenseMailPull = () => withJobLock(expenseIntake.PULL_LOCK, expenseIntake.PULL_LOCK_LEASE_MS, () => expenseIntake.pullFromMailSorter())
       .then(({ ran, result: n }) => { if (ran && n && (n.created || n.errors)) console.log(`[expense-pull] created ${n.created}, skipped ${n.skipped}, too old ${n.skipped_old}, errors ${n.errors}`); })
       .catch(e => console.error('[expense-pull] failed:', e.message));
     if (!platformMode && mailSorterClient.isConfigured()) {

@@ -50,14 +50,15 @@ async function call(path, init = {}) {
  * prevents rework, and a form that vanished from the list the first time it was
  * fetched could never be re-examined after a fix.
  */
-async function listDocuments(docType, { all = true, offset = 0 } = {}) {
+async function listDocuments(docType, { all = true, offset = 0, limit = 0 } = {}) {
   // `all: false` asks only for what gan has not acked yet (the expenses pull);
   // form101 and recruitment keep their full list.
   const q = new URLSearchParams({ system: 'gan' });
   if (all) q.set('all', '1');
   if (docType) q.set('doc_type', docType);
-  // mail-sorter answers at most 200 per call; an older server ignores `offset`.
+  // mail-sorter honours offset and limit (limit <= 500, newest first).
   if (offset) q.set('offset', String(offset));
+  if (limit) q.set('limit', String(limit));
   const res = await call(`/api/pull?${q.toString()}`);
   return res.json();
 }

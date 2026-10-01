@@ -269,28 +269,35 @@ async function attachMailItem(doc, data) {
  * it is skipped (duplicate, or dated before the start date) — and
  * then drops off mail-sorter's list (asked WITHOUT `all=1`).
  */
-const PULLED_FROM_KEY = 'expense_mail_pulled_from';
+const PULLED_FROM_KEY = 'expense_mail_pulled_from';   // "everything dated >= this is filed"
+const ATTEMPTS_KEY = 'expense_mail_backfill_attempts';
+const MAX_AUTO_ATTEMPTS = 3;
 // The first pull ever ran with this start date (and acked everything older).
 const FIRST_PULL_START = '2026-09-01';
-const PAGE_SIZE = 200;   // mail-sorter's per-call cap
+const PAGE_LIMIT = 500;  // mail-sorter's maximum per call
 const MAX_PAGES = 25;
+// One lease for the 6-hourly job and the button; a full pull is long.
+const PULL_LOCK = 'expense-mail-pull';
+const PULL_LOCK_LEASE_MS = 60 * 60 * 1000;
 
 const asList = (raw) => (Array.isArray(raw) ? raw : (raw && raw.items) || []);
 
-/** One kind's list; with `full`, pages through while the server keeps offering new ids. */
+/** One kind's list. `capped` = the end of the data was not reached. */
 async function listKind(client, kind, full) {
-  if (!full) return asList(await client.listDocuments(kind, { all: false }));
+  if (!full) {
+    const items = asList(await client.listDocuments(kind, { all: false, limit: PAGE_LIMIT }));
+    return Object.assign(items, { capped: items.length >= PAGE_LIMIT });
+  }
   const out = [];
   const seen = new Set();
   for (let page = 0; page < MAX_PAGES; page++) {
-    const items = asList(await client.listDocuments(kind, { all: true, offset: out.length }));
+    const items = asList(await client.listDocuments(kind, { all: true, offset: out.length, limit: PAGE_LIMIT }));
     const fresh = items.filter(i => i && !seen.has(i.id));
     fresh.forEach(i => seen.add(i.id));
     out.push(...fresh);
-    // Short page = done. No new ids = a server that ignores `offset`.
-    if (items.length < PAGE_SIZE || !fresh.length) {
-      return Object.assign(out, { capped: items.length >= PAGE_SIZE && !fresh.length });
-    }
+    if (items.length < PAGE_LIMIT) return Object.assign(out, { capped: false });
+    // A full page of ids already seen: the server ignores `offset`.
+    if (!fresh.length) return Object.assign(out, { capped: true });
   }
   return Object.assign(out, { capped: true });
 }
@@ -302,17 +309,22 @@ async function pullFromMailSorter({ client = mailSorter, full = false } = {}) {
   // acked and will not be listed again, so this one pull asks for everything.
   const marker = await Setting.findOne({ key: PULLED_FROM_KEY }).lean();
   const pulledFrom = marker && core.isYmd(marker.value) ? marker.value : FIRST_PULL_START;
-  const backfill = start < pulledFrom;
+  const att = await Setting.findOne({ key: ATTEMPTS_KEY }).lean();
+  const attempts = att && Number(att.value) > 0 ? Number(att.value) : 0;
+  // Automatic back-fill gives up after 3 incomplete tries; the button still works.
+  const backfill = start < pulledFrom && attempts < MAX_AUTO_ATTEMPTS;
   const fullRun = full || backfill;
+  let pagingIncomplete = false;
   result.full = fullRun;
   for (const kind of ['invoice', 'receipt']) {
     let list;
     try {
       list = await listKind(client, kind, fullRun);
-      if (list.capped) result.capped = true;
+      if (list.capped) { result.capped = true; pagingIncomplete = true; }
     } catch (e) {
       console.error(`[expense-pull] list ${kind} failed:`, e.message);
       result.errors++;
+      pagingIncomplete = true;
       continue;
     }
     for (const item of list) {
@@ -324,7 +336,8 @@ async function pullFromMailSorter({ client = mailSorter, full = false } = {}) {
         // earlier ack failed, so acking it here recovers that.
         if (await ExpenseDocument.exists({ mail_sorter_id: item.id })) {
           result.skipped++;
-          await client.ack(item.id);
+          // A full run re-lists what was acked long ago; no need to ack it again.
+          if (!fullRun) await client.ack(item.id);
           continue;
         }
         const data = mapItem(item, kind);
@@ -353,7 +366,13 @@ async function pullFromMailSorter({ client = mailSorter, full = false } = {}) {
           await client.ack(item.id);
           continue;
         }
-        await ExpenseDocument.create(data);
+        try {
+          await ExpenseDocument.create(data);
+        } catch (e) {
+          // Unique sparse index on mail_sorter_id: a racing writer already filed it.
+          if (e && e.code === 11000) { result.skipped++; if (!fullRun) await client.ack(item.id); continue; }
+          throw e;
+        }
         result.created++;
         await client.ack(item.id);
       } catch (e) {
@@ -362,13 +381,15 @@ async function pullFromMailSorter({ client = mailSorter, full = false } = {}) {
       }
     }
   }
-  if (!result.errors && !result.capped && start < pulledFrom) {
+  // Per-item errors do not block the marker; only incomplete paging does.
+  if (!pagingIncomplete) {
     await Setting.findOneAndUpdate({ key: PULLED_FROM_KEY }, { $set: { value: start } }, { upsert: true });
-  } else if (!marker && !result.errors && start >= pulledFrom) {
-    await Setting.findOneAndUpdate({ key: PULLED_FROM_KEY }, { $set: { value: pulledFrom } }, { upsert: true });
+    if (attempts) await Setting.deleteOne({ key: ATTEMPTS_KEY });
+  } else if (start < pulledFrom) {
+    await Setting.findOneAndUpdate({ key: ATTEMPTS_KEY }, { $set: { value: attempts + 1 } }, { upsert: true });
   }
   if (result.capped) {
-    result.note = 'mail-sorter מחזיר עד 200 פריטים לקריאה והשרת לא תמך בדפדוף — ייתכן שחלק מההיסטוריה עוד לא נמשך; הריצו שוב או עדכנו את mail-sorter לתמוך ב-offset.';
+    result.note = 'המשיכה לא הגיעה לסוף הרשימה — ייתכן שחלק מההיסטוריה עוד לא נמשך; הריצו משיכה מלאה שוב.';
   }
   return result;
 }
@@ -389,4 +410,4 @@ async function getFile(docId, { client = mailSorter } = {}) {
   throw fail(404, 'למסמך אין קובץ');
 }
 
-module.exports = { MAX_FILE_BYTES, createManual, updateDocument, createSupplierFromDocument, pullFromMailSorter, getFile };
+module.exports = { MAX_FILE_BYTES, createManual, updateDocument, createSupplierFromDocument, pullFromMailSorter, getFile, PULL_LOCK, PULL_LOCK_LEASE_MS };

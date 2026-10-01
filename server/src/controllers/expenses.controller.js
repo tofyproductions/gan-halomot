@@ -145,7 +145,7 @@ function sniffMime(buf) {
   if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return 'image/jpeg';
   if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return 'image/png';
   if (buf.slice(0, 4).toString('latin1') === 'RIFF' && buf.slice(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
-  if (/^ftyp(heic|heix|mif1)$/.test(buf.slice(4, 12).toString('latin1'))) return 'image/heic';
+  if (/^ftyp(heic|heix|mif1|heif|avif)$/.test(buf.slice(4, 12).toString('latin1'))) return 'image/heic';
   return null;
 }
 
@@ -162,6 +162,7 @@ async function getFile(req, res) {
     'Content-Length': f.buffer.length,
     'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${name}`,
     'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': "sandbox; default-src 'none'",
     'Cache-Control': 'private, no-store',
   });
   res.end(f.buffer);
@@ -373,7 +374,7 @@ async function deleteRule(req, res) {
 // Same lock as the 6-hour job (same name, same lease), so a click never overlaps a run.
 const intakePull = async (req, res) => {
   if (!mailSorter.isConfigured()) throw fail(409, 'מיון המיילים לא מוגדר בשרת');
-  const { ran, result } = await withJobLock('expense-mail-pull', 15 * 60 * 1000, () => intake.pullFromMailSorter({ full: req.query.full === '1' }));
+  const { ran, result } = await withJobLock(intake.PULL_LOCK, intake.PULL_LOCK_LEASE_MS, () => intake.pullFromMailSorter({ full: req.query.full === '1' }));
   if (!ran) throw fail(409, 'משיכה כבר רצה');
   res.json(result);
 };

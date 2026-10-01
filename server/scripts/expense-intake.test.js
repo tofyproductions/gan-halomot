@@ -143,6 +143,7 @@ async function suite() {
   console.log('pullFromMailSorter');
   await reset();
   {
+    await require('../src/models').Setting.updateOne({ key: 'expense_mail_pulled_from' }, { $set: { value: '2024-10-01' } }, { upsert: true });
     const sup = await Supplier.create({ name: 'ספק ידוע', tax_id: '511111111' });
     const c = fake({
       invoice: [item(1), item(1), item(2, { vendor_name: 'משהו', supplier_tax_id: '511-111-111' }), item(3, { currency: 'USD', amount_total: 40 })],
@@ -315,13 +316,68 @@ async function suite() {
     // paging: a server that honours offset is walked to the end; one that ignores it is flagged
     const page = (from, n) => Array.from({ length: n }, (_, i) => item(1000 + from + i, { doc_date: '2025-01-01' }));
     const offs = [];
-    const paged = { ...fake({}), listDocuments: async (k, o) => { offs.push(o.offset); return k === 'invoice' ? (o.offset === 0 ? page(0, 200) : o.offset === 200 ? page(200, 30) : []) : []; } };
+    const paged = { ...fake({}), listDocuments: async (k, o) => { offs.push(o.offset); return k === 'invoice' ? (o.offset === 0 ? page(0, 500) : o.offset === 500 ? page(500, 30) : []) : []; } };
     const r3 = await intake.pullFromMailSorter({ client: paged, full: true });
-    eq(r3.created, 230, 'דפדוף: כל 230 הפריטים נמשכו');
-    ok(offs.includes(200) && !r3.capped, 'הדפדוף ביקש offset=200 ולא סומן כחתוך');
-    const stuck = { ...fake({}), listDocuments: async (k) => (k === 'invoice' ? page(5000, 200) : []) };
+    eq(r3.created, 530, 'דפדוף: כל 530 הפריטים נמשכו');
+    ok(offs.includes(500) && !r3.capped, 'הדפדוף ביקש offset=200 ולא סומן כחתוך');
+    const stuck = { ...fake({}), listDocuments: async (k) => (k === 'invoice' ? page(5000, 500) : []) };
     const r4 = await intake.pullFromMailSorter({ client: stuck, full: true });
-    ok(r4.capped && /200/.test(r4.note), 'שרת שמתעלם מ-offset — מסומן capped עם הסבר');
+    ok(r4.capped && r4.note, 'שרת שמתעלם מ-offset — מסומן capped עם הסבר');
+  }
+
+  console.log('\nסימן המים הנמוך — שני הכיוונים, ניסיונות, מרוץ');
+  await reset();
+  {
+    const { Setting } = require('../src/models');
+    const core = require('../src/services/expenseCore.service');
+    const mark = async () => (await Setting.findOne({ key: 'expense_mail_pulled_from' }).lean())?.value;
+    const calls = [];
+    const mk = (items, o = {}) => ({ ...fake({}), listDocuments: async (k, opt) => { calls.push({ k, ...opt }); if (o.fail) throw new Error('down'); return k === 'invoice' ? items : []; } });
+    await Setting.deleteMany({});
+    await core.setStartDate('2024-10-01');
+    await intake.pullFromMailSorter({ client: mk([]) });
+    eq(await mark(), '2024-10-01', 'סימן = תאריך ההתחלה');
+    await core.setStartDate('2026-01-01');
+    calls.length = 0;
+    await intake.pullFromMailSorter({ client: mk([]) });
+    eq(await mark(), '2026-01-01', 'העלאת התאריך מעלה את הסימן');
+    ok(calls.every(c => c.all === false && c.limit === 500), 'משיכה רגילה: בלי all, limit=500');
+    await core.setStartDate('2025-01-01');
+    calls.length = 0;
+    await intake.pullFromMailSorter({ client: mk([]) });
+    ok(calls.every(c => c.all === true), 'הורדה אחרי העלאה — משיכה מלאה');
+    eq(await mark(), '2025-01-01', 'והסימן ירד');
+
+    // a per-item error does not block the marker
+    await core.setStartDate('2024-06-01');
+    const bad = item(80, {}, { id: null });
+    await intake.pullFromMailSorter({ client: mk([bad]) });
+    eq(await mark(), '2024-06-01', 'שגיאת פריט לא חוסמת את הסימן');
+
+    // failing paging: 3 automatic attempts, then no more all=true; button still full
+    await core.setStartDate('2023-01-01');
+    for (let i = 0; i < 3; i++) await intake.pullFromMailSorter({ client: mk([], { fail: true }) });
+    eq(await mark(), '2024-06-01', 'סימן לא זז כשהדפדוף נכשל');
+    calls.length = 0;
+    await intake.pullFromMailSorter({ client: mk([]) });
+    ok(calls.every(c => c.all === false), 'אחרי 3 ניסיונות — אין all=true אוטומטי');
+    calls.length = 0;
+    await intake.pullFromMailSorter({ client: mk([]), full: true });
+    ok(calls.every(c => c.all === true), 'הכפתור עדיין עובד');
+    eq(await mark(), '2023-01-01', 'ומשיכה שהושלמה מורידה את הסימן');
+
+    // full run: existing items are not re-acked; E11000 counts as skipped
+    await reset();
+    const c = mk([item(90)]);
+    await intake.pullFromMailSorter({ client: c, full: true });
+    c.acks.length = 0;
+    await intake.pullFromMailSorter({ client: c, full: true });
+    eq(c.acks.length, 0, 'מסמך קיים במשיכה מלאה — בלי ack חוזר');
+    await reset();
+    const real = ExpenseDocument.create;
+    ExpenseDocument.create = async () => { throw Object.assign(new Error('dup'), { code: 11000 }); };
+    let r; try { r = await intake.pullFromMailSorter({ client: mk([item(91)]) }); } finally { ExpenseDocument.create = real; }
+    ok(r.errors === 0 && r.skipped === 1 && r.created === 0, 'E11000 — נספר כדולג, לא כשגיאה');
   }
 
   console.log('\nעריכת מסמך עם תשלומים');
