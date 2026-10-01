@@ -25,6 +25,13 @@ const env = {
   JWT_SECRET: requireInProd('JWT_SECRET', 'dev-secret-change-in-production'),
   FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:5173',
 
+  // iCount (expenses ledger). All three or the integration is off. Not the
+  // platform's ICOUNT_API_TOKEN — that is a different account and a different
+  // auth scheme.
+  GAN_ICOUNT_COMPANY_ID: process.env.GAN_ICOUNT_COMPANY_ID,
+  GAN_ICOUNT_USER: process.env.GAN_ICOUNT_USER,
+  GAN_ICOUNT_PASS: process.env.GAN_ICOUNT_PASS,
+
   // Email
   SMTP_HOST: process.env.SMTP_HOST || 'smtp.gmail.com',
   SMTP_PORT: parseInt(process.env.SMTP_PORT, 10) || 587,
