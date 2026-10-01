@@ -151,7 +151,9 @@ async function importDebt({ buffer, branch_id, by = null, file_name = '' }) {
 async function debtSummary({ branch_id, month } = {}) {
   const q = {};
   if (branch_id) q.branch_id = branch_id;
-  if (month) q.month = month;
+  // A month still being swapped in is staged as `YYYY-MM~<importId>`: never a real month.
+  if (month && /~/.test(String(month))) return [];
+  q.month = month ? month : { $not: /~/ };
   const rows = await ClickTacMonthRow.find(q).lean();
 
   const ids = [...new Set(rows.map(r => r.child_id_number))];

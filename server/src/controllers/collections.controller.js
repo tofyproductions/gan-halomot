@@ -1,4 +1,4 @@
-const { Registration, Classroom, Child, Collection, CollectionHistory, PriceAdjustment, Discount, SummerCamp, Branch } = require('../models');
+const { Registration, Classroom, Child, Collection, CollectionHistory, PriceAdjustment, Discount, SummerCamp, Branch, IncomeAllocation } = require('../models');
 const {
   normalizeYear, getAcademicYears, academicYearOf,
   ACADEMIC_MONTHS, CAMP_MONTH,
@@ -107,6 +107,14 @@ async function getAll(req, res, next) {
       return (siblingMap[key] || []).filter(s => String(s.reg._id) !== String(reg._id));
     }
 
+    // Bank-found money per registration+month (Kaplan transfers attributed in the
+    // income module). Read-only, additive: the month's own fields are untouched.
+    const allocRows = await IncomeAllocation.aggregate([
+      { $match: { registration_id: { $in: regIds }, academic_year: targetYear } },
+      { $group: { _id: { r: '$registration_id', m: '$month_number' }, total: { $sum: '$amount' } } },
+    ]);
+    const bankAllocated = new Map(allocRows.map(a => [`${a._id.r}|${a._id.m}`, Math.round(a.total * 100) / 100]));
+
     // Build grouped result
     const grouped = {};
     for (const reg of filteredRegs) {
@@ -143,7 +151,7 @@ async function getAll(req, res, next) {
         registration_fee: reg.registration_fee || 0,
         registration_fee_receipt: detectedRegFeeReceipt || null,
         notes: collection?.notes || '',
-        months: monthData,
+        months: monthData.map(m => ({ ...m, bank_allocated: bankAllocated.get(`${reg._id}|${m.month}`) || 0 })),
         camp: campCell,
       });
     }
