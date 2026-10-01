@@ -489,6 +489,14 @@ async function importFile(req, res, next) {
     // names both accepted exports instead of listing columns.
     const verdict = identifyHeader(rows[0]);
     if (!verdict.type) return res.status(400).json(verdict);
+    // The monthly collection report is read by the income module, never by this
+    // registrations/contracts import.
+    if (verdict.type === 'debt') {
+      return res.status(400).json({
+        error: 'זה דוח הגבייה החודשי של קליקטאק (debt_contract_export) — הוא נקלט במסך ההכנסות, לא כאן.',
+        code: 'WRONG_EXPORT_TYPE',
+      });
+    }
 
     const ctx = { req, res, next, branch, branchId, rows, sheetName };
     return verdict.type === 'contracts'

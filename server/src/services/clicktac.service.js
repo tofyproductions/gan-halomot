@@ -182,6 +182,39 @@ const CONTRACT_COLUMNS = {
 };
 
 /**
+ * The monthly collection report — debt_contract_export_<digits>.xlsx, sheet
+ * "Worksheet 1". One row per child per month (`חודש` is the first of the month).
+ * Parsed by services/clicktacDebt.service.js; only the column names live here,
+ * next to the other two, so a vendor relabel is a one-line change in one file.
+ *
+ * Like `מעון` in the contracts export, `מוסד` is NOT the branch (two Kfar Saba
+ * gans answer to "כפר סבא"); the branch is chosen at upload.
+ */
+const DEBT_COLUMNS = {
+  institution: 'מוסד',
+  month: 'חודש',
+  child_first: 'שם פרטי',
+  child_last: 'שם משפחה',
+  id_number: 'ת.ז. או דרכון',
+  status: 'סטטוס',
+  charges: 'כל חיובי החודש',
+  limit: 'מגבלה חודשית',
+  target: 'יעד החודש לאחר מגבלה',
+  cumulative_target: 'יעד מצטבר עד החודש (לאחר מגבלה)',
+  marked_for_collection: 'סומן לגבייה החודש (ללא נכשל)',
+  paid: 'תשלומי החודש',
+  handled: 'סומן כטופל',
+  adjustments: 'התאמות עד החודש',
+  prep_status: 'סטטוס הכנת גביה',
+  collection_status: 'סטטוס גביה',
+  second_payer: 'יש משלם שני',
+  payment_method: 'אמצעי תשלום',
+};
+
+/** What a debt file cannot do without; the rest is read when present. */
+const DEBT_REQUIRED = ['month', 'child_first', 'child_last', 'id_number', 'target', 'paid'];
+
+/**
  * Does this file's `מעון` belong to the branch the upload was aimed at?
  *
  * WHY THIS EXISTS. The contracts export the vendor now publishes is for the
@@ -725,10 +758,17 @@ function looksLikeContractsExport(headers) {
   return CONTRACT_ONLY_COLUMNS.filter(c => names.has(c)).length >= 2;
 }
 
-/** `'registrations'` | `'contracts'` | `null`. */
+/** The monthly debt report: its own pair of columns no other export has. */
+function looksLikeDebtExport(headers) {
+  const names = new Set(headerNames(headers));
+  return names.has(DEBT_COLUMNS.target) && names.has(DEBT_COLUMNS.collection_status);
+}
+
+/** `'registrations'` | `'contracts'` | `'debt'` | `null`. */
 function detectExportType(headers) {
   const names = new Set(headerNames(headers));
   if (names.has(COLUMNS.child_first)) return 'registrations';
+  if (looksLikeDebtExport(headers)) return 'debt';
   if (names.has(CONTRACT_COLUMNS.id_number) && looksLikeContractsExport(headers)) {
     return 'contracts';
   }
@@ -768,6 +808,17 @@ function identifyHeader(row) {
     };
   }
 
+  if (type === 'debt') {
+    const names = new Set(headerNames(row));
+    const missing = DEBT_REQUIRED.filter(k => !names.has(DEBT_COLUMNS[k])).map(k => DEBT_COLUMNS[k]);
+    if (!missing.length) return { type: 'debt' };
+    return {
+      error: `חסרות עמודות בקובץ הגבייה החודשי: ${missing.join(', ')}`,
+      code: 'MISSING_COLUMNS',
+      expected: Object.values(DEBT_COLUMNS),
+    };
+  }
+
   if (type === 'contracts') {
     const missing = missingContractColumns(row);
     if (!missing.length) return { type: 'contracts' };
@@ -800,7 +851,7 @@ function validateHeader(row) {
 }
 
 module.exports = {
-  COLUMNS, CONTRACT_COLUMNS, AGE_GROUPS, CONTRACT_ONLY_COLUMNS, WRONG_EXPORT_MESSAGE,
+  COLUMNS, CONTRACT_COLUMNS, DEBT_COLUMNS, looksLikeDebtExport, AGE_GROUPS, CONTRACT_ONLY_COLUMNS, WRONG_EXPORT_MESSAGE,
   parseRow, parseSheet, missingColumns, missingContractColumns,
   looksLikeContractsExport, detectExportType, identifyHeader, validateHeader,
   parseContractsRow, parseContractsSheet, hashContract, parseIdNumber, idKey,
