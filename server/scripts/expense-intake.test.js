@@ -1,0 +1,225 @@
+#!/usr/bin/env node
+/**
+ * Expenses intake — manual entry, update, supplier from document, mail-sorter
+ * pull (fake client), file serving. Standalone server, loopback only.
+ *
+ *   node scripts/expense-intake.test.js
+ */
+const dotenvPath = require.resolve('dotenv');
+require.cache[dotenvPath] = { id: dotenvPath, filename: dotenvPath, loaded: true, children: [], paths: [],
+  exports: { config: () => ({ parsed: {} }), parse: () => ({}) } };
+
+const { MongoMemoryServer } = require('mongodb-memory-server');
+const mongoose = require('mongoose');
+
+let failures = 0;
+const ok = (c, l, d = '') => { console.log(`  ${c ? '✅' : '❌'} ${l}${c || !d ? '' : `  (${d})`}`); if (!c) failures++; };
+const eq = (a, b, l) => ok(a === b, l, `קיבלנו ${JSON.stringify(a)}, ציפינו ${JSON.stringify(b)}`);
+const refuses = async (fn, status, l, code) => {
+  try { await fn(); ok(false, `${l} — לא נזרקה שגיאה`); return null; } catch (e) {
+    eq(e.status, status, `${l} → ${status}`);
+    if (code) eq(e.code, code, `${l} → code ${code}`);
+    return e;
+  }
+};
+
+async function suite() {
+  const { ExpenseDocument, ExpenseFile, Supplier } = require('../src/models');
+  const intake = require('../src/services/expenseIntake.service');
+  await ExpenseDocument.init();
+  const reset = () => Promise.all([ExpenseDocument, ExpenseFile, Supplier].map(m => m.deleteMany({})));
+  const user = new mongoose.Types.ObjectId();
+  const base = { vendor_name: 'חשמל בע"מ', doc_type: 'tax_invoice', doc_number: '100', doc_date: '2026-09-10', amount_total: 250 };
+
+  const item = (id, extracted = {}, o = {}) => ({
+    id, doc_type: 'invoice', attachment_sha256: `sha${id}`,
+    extracted: { vendor_name: 'ספק חדש', supplier_tax_id: '', doc_number: `D${id}`, doc_date: '2026-09-01', amount_total: 118, doc_type: 'tax_invoice', currency: 'ILS', ...extracted },
+    ...o,
+  });
+  const fake = (byKind, { ackThrows = false } = {}) => {
+    const acks = [];
+    return { acks,
+      listDocuments: async (k) => byKind[k] || [],
+      ack: async (id) => { acks.push(id); if (ackThrows) throw new Error('ack down'); },
+      fetchFile: async (id) => ({ buffer: Buffer.from(`ms-${id}`), filename: 'a.pdf', mime: 'application/pdf' }) };
+  };
+
+  console.log('createManual');
+  await reset();
+  {
+    const d = await intake.createManual({ fields: base, by: user });
+    eq(d.source, 'manual', 'source manual');
+    eq(d.needs_review, false, 'needs_review=false');
+    eq(String(d.confirmed_by), String(user), 'confirmed_by');
+    eq(d.fx_confirmed, true, 'ILS → fx_confirmed');
+    const e = await refuses(() => intake.createManual({ fields: { ...base, vendor_name: 'חשמל' }, by: user }), 409, 'כפילות ספק+מספר', 'DUPLICATE');
+    eq(e.existing_id, String(d._id), 'existing_id');
+    await refuses(() => intake.createManual({ fields: { ...base, doc_number: '1', doc_date: 'x' } }), 400, 'תאריך לא תקין');
+    await refuses(() => intake.createManual({ fields: { ...base, doc_number: '1', doc_type: 'zzz' } }), 400, 'סוג לא תקין');
+    await refuses(() => intake.createManual({ fields: { ...base, doc_number: '1', vendor_name: '' } }), 400, 'חסר ספק');
+
+    const withFile = await intake.createManual({ fields: { ...base, doc_number: '2' }, file: { data: Buffer.from('hello'), name: 'x.pdf', mime: 'application/pdf' }, by: user });
+    ok(!!withFile.file_id && withFile.attachment_sha256.length === 64, 'קובץ נשמר + sha');
+    eq(await ExpenseFile.countDocuments(), 1, 'ExpenseFile אחד');
+    const f = await intake.getFile(withFile._id);
+    eq(f.buffer.toString(), 'hello', 'getFile מחזיר את הבתים');
+    eq(f.mime, 'application/pdf', 'getFile mime');
+    const same = await refuses(() => intake.createManual({ fields: { ...base, doc_number: '3', vendor_name: 'אחר' }, file: { data: Buffer.from('hello'), name: 'y.pdf', mime: 'application/pdf' } }), 409, 'אותו קובץ', 'DUPLICATE');
+    eq(same.existing_id, String(withFile._id), 'existing_id לפי sha');
+    eq(await ExpenseFile.countDocuments(), 1, 'הקובץ הכפול לא נשמר');
+    await refuses(() => intake.createManual({ fields: { ...base, doc_number: '4' }, file: { data: Buffer.alloc(11 * 1024 * 1024, 1), name: 'big.pdf', mime: 'application/pdf' } }), 400, 'קובץ 11MB');
+    eq(await ExpenseFile.countDocuments(), 1, 'הגדול לא נשמר');
+    const b64 = await intake.createManual({ fields: { ...base, doc_number: '5' }, file: { data: Buffer.from('b64').toString('base64'), name: 'z.png', mime: 'image/png' } });
+    eq((await intake.getFile(b64._id)).buffer.toString(), 'b64', 'data כ-base64 מתקבל');
+
+    const sup = await Supplier.create({ name: 'ספק קיים', tax_id: '515-123456' });
+    const m = await intake.createManual({ fields: { ...base, doc_number: '6', vendor_name: 'משהו', supplier_tax_id: '515123456' } });
+    eq(String(m.supplier_id), String(sup._id), 'ספק זוהה לפי מספר עוסק');
+
+    const fx = await intake.createManual({ fields: { ...base, doc_number: '7', currency: 'USD', amount_total: 100 } });
+    eq(fx.fx_confirmed, false, 'מט"ח בלי סכום מקורי → לא מאושר');
+    eq(fx.amount_original, 100, 'הסכום שהוקלד נשמר כמקורי');
+    const fx2 = await intake.createManual({ fields: { ...base, doc_number: '8', currency: 'USD', amount_total: 370, amount_original: 100 } });
+    eq(fx2.fx_confirmed, true, 'מט"ח עם סכום מקורי → מאושר');
+  }
+
+  console.log('updateDocument');
+  await reset();
+  {
+    const d = await intake.createManual({ fields: base });
+    const other = await intake.createManual({ fields: { ...base, doc_number: '200' } });
+    const u = await intake.updateDocument(d._id, { amount_total: 300, status: 'void', source: 'mail_sorter', is_general: true }, user);
+    eq(u.amount_total, 300, 'סכום עודכן');
+    eq(u.is_general, true, 'is_general');
+    eq(u.status, 'active', 'status לא ברשימה הלבנה');
+    eq(u.source, 'manual', 'source לא ברשימה הלבנה');
+    await refuses(() => intake.updateDocument(d._id, { doc_number: '200' }, user), 409, 'שינוי למספר קיים', 'DUPLICATE');
+    await refuses(() => intake.updateDocument(new mongoose.Types.ObjectId(), { amount_total: 1 }), 404, 'לא קיים');
+    await refuses(() => intake.updateDocument('zzz', {}), 400, 'מזהה לא תקין');
+    await refuses(() => intake.updateDocument(d._id, { supplier_id: new mongoose.Types.ObjectId() }), 404, 'ספק לא קיים');
+    const usd = await intake.updateDocument(d._id, { currency: 'USD' }, user);
+    eq(usd.fx_confirmed, false, 'שינוי למט"ח → לא מאושר');
+    eq(usd.amount_original, 300, 'המקורי נשמר מהסכום');
+    const usd2 = await intake.updateDocument(d._id, { amount_total: 1100, amount_original: 300 }, user);
+    eq(usd2.fx_confirmed, true, 'שקלים הוקלדו → מאושר');
+    const back = await intake.updateDocument(d._id, { currency: 'ILS' }, user);
+    eq(back.fx_confirmed, true, 'חזרה ל-ILS → מאושר');
+    await ExpenseDocument.updateOne({ _id: other._id }, { status: 'void' });
+    await refuses(() => intake.updateDocument(other._id, { amount_total: 1 }), 409, 'מסמך מבוטל');
+    // a mail-sorter row becomes confirmed by an edit
+    const ms = await ExpenseDocument.create({ source: 'mail_sorter', mail_sorter_id: 9001, vendor_name: 'x', needs_review: true });
+    const mu = await intake.updateDocument(ms._id, { amount_total: 5 }, user);
+    eq(mu.needs_review, false, 'עריכה מאשרת מסמך ממערכת המיון');
+    eq(String(mu.confirmed_by), String(user), 'confirmed_by אחרי עריכה');
+  }
+
+  console.log('createSupplierFromDocument');
+  await reset();
+  {
+    const d = await intake.createManual({ fields: { ...base, supplier_tax_id: '514000111' } });
+    eq(d.supplier_id, null, 'אין ספק אוטומטי');
+    eq(await Supplier.countDocuments(), 0, 'לא נוצר ספק בלי לחיצה');
+    const s = await intake.createSupplierFromDocument(d._id, user);
+    eq(s.name, base.vendor_name, 'שם הספק');
+    eq(s.tax_id, '514000111', 'מספר עוסק');
+    eq(String((await ExpenseDocument.findById(d._id)).supplier_id), String(s._id), 'המסמך קושר');
+    await refuses(() => intake.createSupplierFromDocument(d._id), 409, 'כבר יש ספק');
+    const d2 = await ExpenseDocument.create({ source: 'manual', vendor_name: 'חשמל', supplier_tax_id: '514000111', doc_number: '77' });
+    await refuses(() => intake.createSupplierFromDocument(d2._id), 409, 'ספק כזה קיים', 'SUPPLIER_EXISTS');
+    await refuses(() => intake.createSupplierFromDocument(new mongoose.Types.ObjectId()), 404, 'מסמך לא קיים');
+  }
+
+  console.log('pullFromMailSorter');
+  await reset();
+  {
+    const sup = await Supplier.create({ name: 'ספק ידוע', tax_id: '511111111' });
+    const c = fake({
+      invoice: [item(1), item(1), item(2, { vendor_name: 'משהו', supplier_tax_id: '511-111-111' }), item(3, { currency: 'USD', amount_total: 40 })],
+      receipt: [item(4, { doc_type: 'receipt' }, { doc_type: 'receipt' }), item(5, { doc_type: undefined }, { doc_type: 'receipt' })],
+    });
+    const r = await intake.pullFromMailSorter({ client: c });
+    eq(r.fetched, 6, 'fetched');
+    eq(r.created, 5, 'created');
+    eq(r.skipped, 1, 'הפריט הכפול דולג');
+    eq(r.errors, 0, 'בלי שגיאות');
+    eq(await ExpenseDocument.countDocuments(), 5, 'חמישה מסמכים');
+    eq(c.acks.filter(x => x === 1).length, 1, 'ack פעם אחת לפריט הכפול');
+    eq(c.acks.length, 5, 'ack לכל מסמך שנשמר');
+    const d1 = await ExpenseDocument.findOne({ mail_sorter_id: 1 });
+    eq(d1.needs_review, true, 'needs_review');
+    eq(d1.source, 'mail_sorter', 'source');
+    eq(d1.attachment_sha256, 'sha1', 'sha נשמר');
+    eq(d1.amount_total, 118, 'סכום ממופה');
+    eq(String((await ExpenseDocument.findOne({ mail_sorter_id: 2 })).supplier_id), String(sup._id), 'ספק זוהה לפי מספר עוסק');
+    eq((await ExpenseDocument.findOne({ mail_sorter_id: 4 })).doc_type, 'receipt', 'קבלה ממופה');
+    eq((await ExpenseDocument.findOne({ mail_sorter_id: 5 })).doc_type, 'receipt', 'בלי doc_type → לפי סוג הרשימה');
+    const fx = await ExpenseDocument.findOne({ mail_sorter_id: 3 });
+    eq(fx.fx_confirmed, false, 'מט"ח לא מאושר');
+    eq(fx.amount_original, 40, 'הסכום המקורי');
+    eq(await Supplier.countDocuments(), 1, 'לא נוצר ספק');
+
+    const again = await intake.pullFromMailSorter({ client: fake({ invoice: [item(1)] }) });
+    eq(again.created, 0, 'הרצה חוזרת — כלום חדש');
+    // void rows keep their mail_sorter_id and must not be re-created
+    await ExpenseDocument.updateOne({ mail_sorter_id: 1 }, { status: 'void' });
+    const c2 = fake({ invoice: [item(1)] });
+    const v = await intake.pullFromMailSorter({ client: c2 });
+    eq(v.created, 0, 'מסמך מבוטל לא נוצר מחדש');
+    eq(v.skipped, 1, 'דולג');
+    eq(c2.acks.length, 0, 'ואין ack');
+    // wrapped list shape
+    const w = await intake.pullFromMailSorter({ client: { ...fake({}), listDocuments: async (k) => (k === 'invoice' ? { items: [item(50)] } : []) } });
+    eq(w.created, 1, 'תומך ב-{items}');
+  }
+  await reset();
+  {
+    // a failed save never acks and never blocks the others
+    const bad = item(10, { amount_total: 5, doc_type: 'tax_invoice' });
+    bad.extracted.doc_date = '2026-09-01';
+    const c = fake({ invoice: [item(10), item(11)] });
+    const realCreate = ExpenseDocument.create;
+    ExpenseDocument.create = async function (d, ...rest) { if (d.mail_sorter_id === 10) throw new Error('db down'); return realCreate.call(this, d, ...rest); };
+    const orig = console.error; console.error = () => {};
+    let r;
+    try { r = await intake.pullFromMailSorter({ client: c }); } finally { ExpenseDocument.create = realCreate; console.error = orig; }
+    eq(r.errors, 1, 'שגיאה אחת');
+    eq(r.created, 1, 'השני נשמר');
+    ok(!c.acks.includes(10), 'אין ack לפריט שנכשל');
+    ok(c.acks.includes(11), 'ack לשני');
+    // a failing ack leaves the saved doc in place
+    const c3 = fake({ invoice: [item(20)] }, { ackThrows: true });
+    const orig2 = console.error; console.error = () => {};
+    let r3; try { r3 = await intake.pullFromMailSorter({ client: c3 }); } finally { console.error = orig2; }
+    eq(r3.created, 1, 'נשמר למרות ack שנכשל');
+    eq(r3.errors, 1, 'השגיאה נספרה');
+    // a list that fails does not stop the other kind
+    const c4 = { ...fake({ receipt: [item(30, {}, { doc_type: 'receipt' })] }), listDocuments: async (k) => { if (k === 'invoice') throw new Error('down'); return [item(30)]; } };
+    const orig3 = console.error; console.error = () => {};
+    let r4; try { r4 = await intake.pullFromMailSorter({ client: c4 }); } finally { console.error = orig3; }
+    eq(r4.created, 1, 'הקבלות נמשכו');
+    eq(r4.errors, 1, 'כשל הרשימה נספר');
+  }
+
+  console.log('getFile — mail-sorter');
+  {
+    const ms = await ExpenseDocument.create({ source: 'mail_sorter', mail_sorter_id: 777, vendor_name: 'x' });
+    const f = await intake.getFile(ms._id, { client: fake({}) });
+    eq(f.buffer.toString(), 'ms-777', 'נמשך לפי דרישה');
+    eq(f.name, 'a.pdf', 'שם');
+    const none = await ExpenseDocument.create({ source: 'manual', vendor_name: 'x' });
+    await refuses(() => intake.getFile(none._id), 404, 'אין קובץ');
+    await refuses(() => intake.getFile(new mongoose.Types.ObjectId()), 404, 'מסמך לא קיים');
+  }
+}
+
+(async () => {
+  const mongod = await MongoMemoryServer.create();
+  const uri = mongod.getUri();
+  if (!/127\.0\.0\.1|localhost/.test(uri)) throw new Error('not loopback');
+  await mongoose.connect(uri);
+  await suite();
+  await mongoose.disconnect();
+  await mongod.stop();
+  console.log(failures ? `\n❌ ${failures} נכשלו` : '\n✅ הכול עבר');
+  process.exit(failures ? 1 : 0);
+})().catch((e) => { console.error(e); process.exit(1); });

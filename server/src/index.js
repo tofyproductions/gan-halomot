@@ -620,6 +620,16 @@ connectDB().then(() => {
     if (!platformMode) {
       setInterval(runBankWatch, 60 * 60 * 1000);
     }
+
+    // Expenses — copy what mail-sorter already read (invoices + receipts) every 6 hours.
+    const expenseIntake = require('./services/expenseIntake.service');
+    const mailSorterClient = require('./services/mailSorter.service');
+    const runExpenseMailPull = () => withJobLock('expense-mail-pull', 15 * 60 * 1000, () => expenseIntake.pullFromMailSorter())
+      .then(({ ran, result: n }) => { if (ran && n && n.created) console.log(`[expense-pull] created ${n.created}, skipped ${n.skipped}, errors ${n.errors}`); })
+      .catch(e => console.error('[expense-pull] failed:', e.message));
+    if (!platformMode && mailSorterClient.isConfigured()) {
+      setInterval(runExpenseMailPull, 6 * 60 * 60 * 1000);
+    }
   });
 
   // A server that could not take the port must not stay alive pretending to.
