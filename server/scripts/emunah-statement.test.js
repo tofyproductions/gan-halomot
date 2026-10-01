@@ -27,7 +27,7 @@ const BLOCKS = [
 ];
 
 /** The workbook as an array of rows; `rowOff`/`colOff` shift everything to prove nothing is hard-coded. */
-function sheetRows({ rowOff = 0, colOff = 0, payments = null, yearLabel = 'תשפ"ו ' } = {}) {
+function sheetRows({ rowOff = 0, colOff = 0, payments = null, yearLabel = 'תשפ"ו ', collision = false } = {}) {
   const grid = [];
   const put = (r, c, v) => {
     r += rowOff; c += colOff;
@@ -55,6 +55,10 @@ function sheetRows({ rowOff = 0, colOff = 0, payments = null, yearLabel = 'תש�
     put(19, c0, 'סה"כ'); put(19, c0 + 1, 99999); // the file's own total (stored, not trusted)
     put(20, c0 + 1, 123456); // block total under the total row
   });
+  if (collision) { // block titles with a number beside them — not the summary
+    put(2, 1, 'הוצאות'); put(2, 2, 777);
+    put(23, 4, 'הכנסות'); put(23, 5, 888);
+  }
   put(22, 13, 'סיכום ');
   put(23, 1, 'הוצאות '); put(23, 6, 'תשלומים ששולמו '); put(23, 13, 'הכנסות '); put(23, 14, 500000);
   put(24, 1, 'חודשים '); put(24, 2, 'שכר דירה '); put(24, 3, 'שונות ');
@@ -129,6 +133,18 @@ const book = (opts) => {
   eq(p.summary.paid, 108000.5, 'סיכום — שולם');
   eq(p.summary.balance, 351999.5, 'סיכום — יתרה');
 
+  // a label that collides with the summary's, outside the summary area, is ignored
+  const col = E.parseEmunah(book({ collision: true }));
+  eq(col.summary.expenses, 40000, 'תווית "הוצאות" עם מספר מחוץ לאזור הסיכום — לא נקראת');
+  eq(col.summary.income, 500000, 'תווית "הכנסות" עם מספר משמאל לתשלומים — לא נקראת');
+  eq(col.branches[0].name, 'הרצליה', 'ההתנגשות לא משבשת את שם הסניף');
+
+  // "for August": the opening August when paid early in the year, the closing one otherwise
+  const aug = E.parseEmunah(book({ payments: [['20.8.25', 100, 8], ['20.8.26', 100, 8], ['1.9.25', 100, 'אוגוסט']] }));
+  eq(aug.payments[0].for_month, '2025-08', 'עבור אוגוסט, שולם 08.2025 → אוגוסט הפותח');
+  eq(aug.payments[1].for_month, '2026-08', 'עבור אוגוסט, שולם 08.2026 → אוגוסט הסוגר');
+  eq(aug.payments[2].for_month, '2025-08', 'עבור "אוגוסט" בשם, שולם 09.2025 → אוגוסט הפותח');
+
   // a shifted sheet parses the same
   const s = E.parseEmunah(book({ rowOff: 3, colOff: 2 }));
   eq(s.branches.length, 3, 'גיליון מוזז — שלושה גושים');
@@ -156,7 +172,8 @@ const book = (opts) => {
   if (!/127\.0\.0\.1|localhost/.test(uri)) throw new Error('not loopback');
   await mongoose.connect(uri);
   const M = require('../src/models');
-  const { Branch, BankAccount, BankTransaction, ClickTacMonthRow, EmunahStatement } = M;
+  const { Branch, BankAccount, BankTransaction, ClickTacMonthRow, EmunahStatement, IncomeRule } = M;
+  await require('../src/services/incomeRules.service').seed();
 
   const herz = await Branch.create({ name: 'הרצליה הרצוג' });
   await Branch.create({ name: 'כפר סבא - קפלן' });
@@ -193,7 +210,9 @@ const book = (opts) => {
   await tx({ date: '2025-11-20', amount: 32000, description: 'אמונה', is_internal_transfer: true });
   await BankTransaction.create({ account_id: card._id, hash: 'hc', date: '2025-11-21', amount: 32000, description: 'אמונה' });
   await tx({ date: '2025-11-21', amount: -32000, description: 'אמונה' }); // money out
-  await tx({ date: '2027-03-01', amount: 5000, description: 'אמונה' }); // outside the statement's range
+  await tx({ date: '2099-03-01', amount: 5000, description: 'אמונה' }); // after today
+  await tx({ date: '2025-07-15', amount: 5000, description: 'אמונה' }); // before the statement's year
+  const tLate = await tx({ date: '2026-02-20', amount: 16000, description: 'העברה', counterparty: 'אמונה' }); // after the last payment row
 
   // ClickTac: הרצליה September matches, משה דיין September differs, staged rows ignored
   const row = (o) => ClickTacMonthRow.create({ child_id_number: `${Math.random()}`.slice(2, 11), ...o });
@@ -213,8 +232,12 @@ const book = (opts) => {
   eq(v.payments[3].bank, null, 'תשלום בלי תנועה — null');
   const unexplained = v.unexplained_bank.map(u => String(u.transaction_id)).sort();
   ok(unexplained.includes(String(t1b._id)), 'תנועת אמונה שלא שובצה — "בלי שורה בתחשיב"');
-  eq(v.unexplained_bank.length, 3, 'שלוש תנועות אמונה בלי שורה (נכנסת, בנק, לא פנימית, בטווח)');
-  ok(!v.unexplained_bank.some(u => u.date === '2027-03-01'), 'תנועה מחוץ לטווח התחשיב לא נספרת');
+  ok(unexplained.includes(String(tLate._id)), 'העברת אמונה אחרי שורת התשלום האחרונה — מופיעה');
+  eq(v.unexplained_bank.length, 4, 'ארבע תנועות אמונה בלי שורה (נכנסת, בנק, לא פנימית, מ-1.8 של השנה עד היום)');
+  ok(!v.unexplained_bank.some(u => u.date === '2099-03-01'), 'תנועה אחרי היום לא נספרת');
+  ok(!v.unexplained_bank.some(u => u.date === '2025-07-15'), 'תנועה לפני 1.8 של שנת התחשיב לא נספרת');
+  eq(v.emunah_rule_inactive, false, 'חוק אמונה פעיל');
+  eq(v.unmapped_branches.length, 0, 'כל הסניפים מופו');
   ok(v.unexplained_bank.every(u => u.amount > 0), 'רק כסף נכנס');
 
   const cc = (bid, m) => v.clicktac_check.find(c => String(c.branch_id) === String(bid) && c.month === m);
@@ -237,6 +260,30 @@ const book = (opts) => {
   eq(v.recomputed.expenses, 28250.25, 'הוצאות מחושבות מחדש');
   ok(typeof v.recomputed.income === 'number' && typeof v.recomputed.balance === 'number', 'הכנסות ויתרה מחושבות');
   eq(Math.round((v.recomputed.income - v.recomputed.expenses - v.recomputed.paid) * 100) / 100, v.recomputed.balance, 'יתרה = הכנסות − הוצאות − שולם');
+
+  // the expenses start date bounds the pool
+  const expenseCore = require('../src/services/expenseCore.service');
+  await expenseCore.setStartDate('2025-10-01');
+  const vs = await E.emunahView();
+  eq(vs.payments[0].bank, null, 'תנועה לפני תאריך ההתחלה — לא בהתאמה');
+  ok(!vs.unexplained_bank.some(u => u.date < '2025-10-01'), 'תנועה לפני תאריך ההתחלה — לא בתנועות ללא שורה');
+  eq(String(vs.payments[2].bank && vs.payments[2].bank.transaction_id), String(t3._id), 'אחרי תאריך ההתחלה — עדיין מותאם');
+  await expenseCore.setStartDate('2024-10-01');
+
+  // the built-in "אמונה" rule switched off → no Emunah lines, and the view says so
+  await IncomeRule.updateOne({ pattern: 'אמונה', built_in: true }, { $set: { is_active: false } });
+  const vi = await E.emunahView();
+  eq(vi.emunah_rule_inactive, true, 'חוק אמונה כבוי — emunah_rule_inactive');
+  ok(vi.payments.every(x => x.bank === null), 'חוק כבוי — אין התאמות');
+  eq(vi.unexplained_bank.length, 0, 'חוק כבוי — אין תנועות אמונה');
+  await IncomeRule.updateOne({ pattern: 'אמונה', built_in: true }, { $set: { is_active: true } });
+
+  // a block with no Branch
+  await Branch.deleteOne({ _id: tlv._id });
+  await new Promise(r => setTimeout(r, 5));
+  await E.importEmunah({ buffer: book(), by, file_name: 'no-tlv.xlsx' });
+  const vu = await E.emunahView();
+  eq(JSON.stringify(vu.unmapped_branches), JSON.stringify(['אייזיק חריף']), 'unmapped_branches — גוש בלי סניף');
 
   // never writes the collections side
   const { Collection, Registration, ExternalEnrollment } = M;

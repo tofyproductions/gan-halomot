@@ -17,6 +17,8 @@ const {
   Branch, BankAccount, BankTransaction, ClickTacMonthRow, EmunahStatement,
 } = require('../models');
 const { hebrewYearForStart } = require('./academic-year.service');
+const { getStartDate } = require('./expenseCore.service');
+const incomeRules = require('./incomeRules.service');
 
 const httpError = (status, message) => Object.assign(new Error(message), { status });
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -24,7 +26,8 @@ const EXCEL_EPOCH_OFFSET = 25569;
 const DAY_MS = 86400000;
 const MATCH_AMOUNT_ILS = 1;
 const MATCH_DAYS = 7;
-const EMUNAH = /אמונה/;
+const EMUNAH_PATTERN = 'אמונה';
+const todayIL = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 
 /** Cell text, with Hebrew gershayim/geresh folded to ASCII and spaces collapsed. */
 const norm = (v) => (v == null ? '' : String(v))
@@ -192,11 +195,22 @@ function parsePayments(g, start) {
   return out;
 }
 
+/**
+ * The summary sits right of the "payments made" block (from a few rows above
+ * its header down). Only labels there count — "הכנסות"/"הוצאות" are also block
+ * titles elsewhere in the sheet, and a number next to one of those is not the summary.
+ */
 function parseSummary(g) {
+  const pay = findAll(g, 'תאריך העברה')[0];
+  let inArea = () => true;
+  if (pay) {
+    const right = Math.max(pay.c, inRow(g, pay.r, 'סכום', pay.c, Infinity) ?? -1, inRow(g, pay.r, 'עבור חודש', pay.c, Infinity) ?? -1);
+    inArea = ({ r, c }) => c > right && r >= pay.r - 3;
+  }
   const out = {};
   for (const [key, label] of SUMMARY_FIELDS) {
     out[key] = null;
-    for (const { r, c } of findAll(g, label)) {
+    for (const { r, c } of findAll(g, label).filter(inArea)) {
       const v = num(cell(g, r, c + 1));
       if (v != null) { out[key] = v; break; }
     }
@@ -263,18 +277,27 @@ function latestStatement() {
 const dayNumber = (d) => Date.parse(`${d}T00:00:00Z`) / DAY_MS;
 const shift = (d, days) => ymd(new Date((dayNumber(d) + days) * DAY_MS));
 
-/** Incoming Emunah lines (description/payee contains "אמונה") on bank accounts, between `from` and `to`. */
-async function emunahBankLines(from, to) {
+/**
+ * The bank pool (income constraint): money in, bank (not card) accounts, not an
+ * internal transfer, from the expenses start date, up to `to`. An "Emunah line"
+ * is one the ACTIVE built-in "אמונה" income rule catches (description, original
+ * description or payee). `rule_inactive` when that rule was switched off — then
+ * there are no Emunah lines at all.
+ */
+async function emunahBankLines(to) {
+  const rule = (await incomeRules.activeRules()).find(r => r.built_in && String(r.pattern).trim() === EMUNAH_PATTERN);
+  if (!rule) return { rule_inactive: true, lines: [] };
   const bankIds = (await BankAccount.find({ type: 'bank' }, '_id').lean()).map(a => a._id);
-  if (!bankIds.length) return [];
-  return BankTransaction.find({
+  if (!bankIds.length) return { rule_inactive: false, lines: [] };
+  const txs = await BankTransaction.find({
     account_id: { $in: bankIds },
-    date: { $gte: from, $lte: to },
+    date: { $gte: await getStartDate(), $lte: to },
     amount: { $gt: 0 },
     is_internal_transfer: { $ne: true },
     status: 'completed',
-    $or: [{ description: EMUNAH }, { counterparty: EMUNAH }, { original_description: EMUNAH }],
   }).sort({ date: 1, _id: 1 }).lean();
+  const lines = txs.filter(t => incomeRules.match([t.description, t.original_description, t.counterparty].filter(Boolean).join(' '), [rule]));
+  return { rule_inactive: false, lines };
 }
 
 /** One-to-one, closest first: date distance, then amount distance. → Map(paymentIndex → tx). */
@@ -342,9 +365,11 @@ function recompute(statement) {
 }
 
 /**
- * The newest statement with: each payment's bank line (or null), the Emunah
- * bank lines in the statement's date range that no payment row explains, the
- * per branch+month ClickTac cross-check, and the summary recomputed. null when
+ * The newest statement with: each payment's bank line (or null, ±1 ₪ / ±7
+ * days), the Emunah bank lines from max(expenses start, 1 Aug of the
+ * statement's year) to today that no payment row explains, whether the
+ * built-in "אמונה" rule is off, the blocks with no Branch, the per
+ * branch+month ClickTac cross-check, and the summary recomputed. null when
  * nothing was imported.
  */
 async function emunahView() {
@@ -352,12 +377,16 @@ async function emunahView() {
   if (!statement) return null;
   const start = academicStartYear(statement.academic_year_label);
 
+  // Matching uses ±7 days around each payment row; "no row in the statement"
+  // covers the whole year so far: from the later of the expenses start date and
+  // 1 August of the statement's year, up to today.
+  const today = todayIL();
   const dates = (statement.payments || []).map(p => p.date).filter(Boolean).sort();
-  let from = null;
-  let to = null;
-  if (dates.length) { from = shift(dates[0], -MATCH_DAYS); to = shift(dates[dates.length - 1], MATCH_DAYS); }
-  else if (start) { from = `${start}-08-01`; to = `${start + 1}-08-31`; }
-  const txs = from ? await emunahBankLines(from, to) : [];
+  const lastPay = dates.length ? shift(dates[dates.length - 1], MATCH_DAYS) : today;
+  const { rule_inactive, lines: txs } = await emunahBankLines(lastPay > today ? lastPay : today);
+  const startDate = await getStartDate();
+  const yearStart = start ? `${start}-08-01` : startDate;
+  const from = yearStart > startDate ? yearStart : startDate;
 
   const matched = matchPayments(statement.payments || [], txs);
   const payments = (statement.payments || []).map((p, i) => {
@@ -365,7 +394,7 @@ async function emunahView() {
     return { ...p, bank: t ? { transaction_id: t._id, date: t.date, amount: t.amount } : null };
   });
   const used = new Set([...matched.values()].map(t => String(t._id)));
-  const unexplained_bank = txs.filter(t => !used.has(String(t._id))).map(t => ({
+  const unexplained_bank = txs.filter(t => !used.has(String(t._id)) && t.date >= from && t.date <= today).map(t => ({
     transaction_id: t._id, date: t.date, amount: t.amount, description: t.description, counterparty: t.counterparty,
   }));
 
@@ -373,6 +402,8 @@ async function emunahView() {
     statement,
     payments,
     unexplained_bank,
+    emunah_rule_inactive: rule_inactive,
+    unmapped_branches: (statement.branches || []).filter(b => !b.branch_id).map(b => b.name),
     clicktac_check: await clicktacCheck(statement, start),
     recomputed: recompute(statement),
   };
