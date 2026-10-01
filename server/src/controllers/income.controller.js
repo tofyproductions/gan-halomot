@@ -64,6 +64,11 @@ const kaplanReport = async (req, res) => {
   res.json({ academic_year: year, ...(await kaplanWrites.kaplanMonthReport(year)) });
 };
 
+const kaplanMatched = async (req, res) => {
+  const year = yearOf(req);
+  res.json({ academic_year: year, matched: await kaplanWrites.matchedTransfers(year) });
+};
+
 const kaplanHouseholds = async (req, res) => {
   const year = yearOf(req);
   res.json({ academic_year: year, households: await kaplan.kaplanHouseholds(year) });
@@ -139,6 +144,6 @@ async function deleteRule(req, res) {
 }
 
 module.exports = {
-  errorHandler, kaplanQueue, kaplanAlternatives, kaplanReport, kaplanHouseholds, clicktacSummary, emunahGet, listRules,
+  errorHandler, kaplanQueue, kaplanAlternatives, kaplanReport, kaplanMatched, kaplanHouseholds, clicktacSummary, emunahGet, listRules,
   kaplanAccept, kaplanReject, kaplanUnallocate, clicktacImport, emunahImport, createRule, deleteRule,
 };

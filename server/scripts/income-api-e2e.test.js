@@ -263,7 +263,7 @@ async function main() {
 
   head('הרשאות קריאה');
   const t0 = await tx({ amount: 3000, description: 'העברה מדנה לוי' });
-  const readPaths = ['/kaplan/queue', '/kaplan/report', '/kaplan/households', '/clicktac/summary', '/emunah', '/rules',
+  const readPaths = ['/kaplan/queue', '/kaplan/report', '/kaplan/matched', '/kaplan/households', '/clicktac/summary', '/emunah', '/rules',
     `/kaplan/alternatives?transaction_id=${t0._id}`];
   for (const p of readPaths) {
     eq((await request({ path: A + p, token: teacher })).status, 403, `גננת לא קוראת ${p}`);
@@ -326,6 +326,18 @@ async function main() {
   eq((await request({ method: 'POST', path: A + '/kaplan/accept', token: accountant, body: { transaction_id: 'x', household_key: lv.household_key } })).status, 400, 'מזהה לא תקין — 400');
   eq((await request({ method: 'POST', path: A + '/kaplan/accept', token: accountant, body: { transaction_id: String(oid()), household_key: lv.household_key } })).status, 404, 'תנועה לא קיימת — 404');
 
+  {
+    const m = await request({ path: `${A}/kaplan/matched?year=2025-2026`, token: viewer });
+    eq(m.status, 200, 'שויכו — 200');
+    const row = (m.body?.matched || []).find(r => String(r.transaction_id) === String(t0._id));
+    ok(row && row.tx.amount === 3000 && row.tx.description === 'העברה מדנה לוי', 'שויכו — פרטי ההעברה', JSON.stringify(row?.tx));
+    ok(row && row.parents.includes('דנה לוי'), 'שויכו — שמות ההורים');
+    ok(row && row.allocations.length === 1 && row.allocations[0].month_number === 9 && row.allocations[0].amount === 3000 && row.allocations[0].child_name, 'שויכו — ילד, חודש וסכום');
+    ok(row && row.created_at && row.created_by, 'שויכו — מי ומתי');
+    eq((await request({ path: `${A}/kaplan/matched?year=2024-2025`, token: viewer })).body?.matched?.length, 0, 'שויכו — שנה אחרת ריקה');
+    eq((await request({ path: `${A}/kaplan/matched?year=nope`, token: viewer })).status, 400, 'שויכו — שנה לא תקינה 400');
+  }
+
   head('GET /collections — רק bank_allocated נוסף');
   {
     const after = (await request({ path: '/api/collections?year=2025-2026', token: admin })).body;
@@ -359,6 +371,7 @@ async function main() {
   eq(unal.status, 200, 'ביטול הקצאה');
   eq(unal.body?.removed, 1, 'הוסרה הקצאה אחת');
   eq(await IncomeAllocation.countDocuments({}), 0, 'אין הקצאות');
+  eq((await request({ path: `${A}/kaplan/matched?year=2025-2026`, token: viewer })).body?.matched?.length, 0, 'אחרי ביטול — שויכו ריק');
   eq((await request({ method: 'POST', path: A + '/kaplan/unallocate', token: accountant, body: { transaction_id: 'x' } })).status, 400, 'ביטול — מזהה לא תקין 400');
   const rep = await request({ path: `${A}/kaplan/report?year=2025-2026`, token: viewer });
   eq(rep.status, 200, 'דוח חודשי');

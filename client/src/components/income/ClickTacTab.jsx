@@ -82,7 +82,7 @@ function MonthGroup({ g, branchName }) {
         <Typography variant="body2">{g.unpaid_count} לא שילמו</Typography>
         {g.no_method_count > 0 && <Chip size="small" color="warning" variant="outlined" label={`${g.no_method_count} בלי אמצעי תשלום`} />}
         {g.unpaid_count > 0 && (
-          <Button size="small" onClick={() => setOpen(o => !o)} sx={{ ms: { sm: 'auto' } }}>
+          <Button size="small" onClick={() => setOpen(o => !o)} sx={{ marginInlineStart: { sm: 'auto' } }}>
             {open ? 'הסתר' : 'מי לא שילם'}
           </Button>
         )}

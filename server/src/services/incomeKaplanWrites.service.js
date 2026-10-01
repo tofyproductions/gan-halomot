@@ -12,7 +12,7 @@
  */
 const mongoose = require('mongoose');
 const {
-  BankAccount, BankTransaction, IncomeAllocation, IncomeRejection, IncomePayerAlias,
+  BankAccount, BankTransaction, IncomeAllocation, IncomeRejection, IncomePayerAlias, Registration, User,
 } = require('../models');
 const { withLocks, atomically } = require('./expenseWrites.service');
 const { COVERAGE_TOLERANCE_ILS, vendorKey } = require('./expenseCore.service');
@@ -216,4 +216,53 @@ async function kaplanMonthReport(academicYear) {
   return { academic_year: academicYear, months, receipt_no_bank, bank_no_receipt };
 }
 
-module.exports = { acceptIncome, rejectIncome, unallocate, kaplanMonthReport };
+/**
+ * Transfers with allocations in a gan year, newest allocation first — what
+ * "בטל שיוך" lists. Per transfer: the bank line, the family's parents, every
+ * child+month slice, who matched it and when. Read only.
+ */
+async function matchedTransfers(academicYear) {
+  const allocs = await IncomeAllocation.find({ academic_year: academicYear }).sort({ created_at: -1, _id: -1 }).lean();
+  if (!allocs.length) return [];
+  const txIds = [...new Set(allocs.map(a => String(a.transaction_id)))];
+  const regIds = [...new Set(allocs.map(a => String(a.registration_id)))];
+  const userIds = [...new Set(allocs.map(a => a.created_by && String(a.created_by)).filter(Boolean))];
+  const [txs, regs, users, households] = await Promise.all([
+    BankTransaction.find({ _id: { $in: txIds } }, 'date amount description counterparty').lean(),
+    Registration.find({ _id: { $in: regIds } }, 'child_name').lean(),
+    userIds.length ? User.find({ _id: { $in: userIds } }, 'full_name').lean() : [],
+    K.kaplanHouseholds(academicYear),
+  ]);
+  const txById = new Map(txs.map(t => [String(t._id), t]));
+  const childName = new Map(regs.map(r => [String(r._id), r.child_name]));
+  const userName = new Map(users.map(u => [String(u._id), u.full_name]));
+
+  const groups = new Map();
+  for (const a of allocs) {
+    const k = String(a.transaction_id);
+    if (!groups.has(k)) {
+      const t = txById.get(k) || {};
+      const h = households.find(x => K.householdMatchesKey(x, a.household_key));
+      groups.set(k, {
+        transaction_id: a.transaction_id,
+        tx: { date: t.date || null, amount: t.amount ?? null, description: t.description || '', counterparty: t.counterparty || '' },
+        household_key: a.household_key,
+        parents: h ? h.parents : [],
+        allocations: [],
+        total: 0,
+        created_by: a.created_by || null,
+        created_by_name: a.created_by ? userName.get(String(a.created_by)) || null : null,
+        created_at: a.created_at,
+      });
+    }
+    const g = groups.get(k);
+    g.allocations.push({
+      registration_id: a.registration_id, child_name: childName.get(String(a.registration_id)) || '',
+      month_number: a.month_number, amount: a.amount,
+    });
+    g.total = round2(g.total + a.amount);
+  }
+  return [...groups.values()];
+}
+
+module.exports = { acceptIncome, rejectIncome, unallocate, kaplanMonthReport, matchedTransfers };

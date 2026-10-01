@@ -11,6 +11,7 @@ const write = requireTabWrite('income', 'system_admin', 'accountant');
 router.get('/kaplan/queue', read, asyncWrap(c.kaplanQueue));
 router.get('/kaplan/alternatives', read, asyncWrap(c.kaplanAlternatives));
 router.get('/kaplan/report', read, asyncWrap(c.kaplanReport));
+router.get('/kaplan/matched', read, asyncWrap(c.kaplanMatched));
 router.get('/kaplan/households', read, asyncWrap(c.kaplanHouseholds));
 router.get('/clicktac/summary', read, asyncWrap(c.clicktacSummary));
 router.get('/emunah', read, asyncWrap(c.emunahGet));

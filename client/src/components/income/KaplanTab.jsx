@@ -9,10 +9,11 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import api, { apiError } from '../../api/client';
 import EmptyState from '../ui/EmptyState';
 import { BusyButton } from '../shared/UploadControls';
+import { useConfirm } from '../shared/ConfirmProvider';
 import { TxCard, Reasons } from '../expenses/ExpenseCards';
 import { useAcademicYear, formatAcademicYear } from '../../hooks/useAcademicYear';
 import {
-  formatILS, monthName, academicYearOfDate, remainingOf, openCells, defaultSplit, sumOf,
+  formatILS, formatDay, monthName, academicYearOfDate, remainingOf, openCells, defaultSplit, sumOf,
   useLoad, LoadGate, Section, ResponsiveTable,
 } from './incomeUi';
 
@@ -24,7 +25,7 @@ const ALIAS_MSG = {
   same: 'שויך · שם המשלם כבר מוכר למשפחה הזו',
   skipped: 'שויך',
 };
-const ALIAS_CONFLICT = 'שויך — אבל שם המשלם בבנק כבר שמור למשפחה אחרת, ולכן לא נשמר כ"משלם מוכר" למשפחה הזו. אם זו טעות — בטלו את השיוך הקודם.';
+const ALIAS_CONFLICT = 'שם המשלם כבר שמור למשפחה אחרת — השיוך נשמר, אבל השם לא עודכן. אם השם שייך למשפחה הזו, בטלו את השיוך הקודם ברשימת "שויכו".';
 
 const childList = (h) => (h.children || []).map(c => c.child_name).join(', ');
 const parentList = (h) => (h.parents || []).join(' / ') || '— אין שם הורה —';
@@ -72,8 +73,8 @@ function SplitEditor({ household, amount, value, onChange, disabled }) {
           const n = Number(r.amount);
           const bad = !(n > 0) || n > openOfRow(r) + TOLERANCE_ILS;
           return (
-            <Stack key={`${r.registration_id}|${r.month_number}`} direction="row" spacing={1} alignItems="center">
-              <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }}>
+            <Stack key={`${r.registration_id}|${r.month_number}`} direction="row" spacing={1} alignItems="flex-start">
+              <Typography variant="body2" sx={{ flex: 1, minWidth: 0, pt: 1 }}>
                 {r.child_name} · {monthName(r.month_number)}
                 <Typography component="span" variant="caption" color="text.secondary"> (פתוח {formatILS(openOfRow(r))})</Typography>
               </Typography>
@@ -349,6 +350,68 @@ function MonthReport({ year, tick }) {
   );
 }
 
+/** One matched transfer: the bank line, the family, its slices — and "בטל שיוך". */
+function MatchedRow({ m, canWrite, onDone }) {
+  const confirm = useConfirm();
+  const [busy, setBusy] = useState(false);
+  const family = (m.parents || []).join(' / ') || 'משפחה';
+  const undo = async () => {
+    const ok = await confirm({
+      title: 'ביטול שיוך',
+      message: `לבטל את שיוך ההעברה מ-${formatDay(m.tx.date)} (${formatILS(m.tx.amount)}) למשפחת ${family}? כל החלוקה שלה תימחק וההעברה תחזור להצעות. שם משלם שנזכר בשיוך הזה יימחק גם הוא.`,
+      confirm_label: 'בטל שיוך',
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const { data } = await api.post('/income/kaplan/unallocate', { transaction_id: m.transaction_id });
+      toast.success(data.removed ? 'השיוך בוטל — ההעברה חזרה להצעות' : 'לא נמצא שיוך לבטל');
+      onDone();
+    } catch (err) { toast.error(apiError(err, 'ביטול השיוך נכשל')); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Paper variant="outlined" sx={{ p: 1.25 }}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ sm: 'flex-start' }}>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="subtitle2">
+            🏦 {formatDay(m.tx.date)} · {formatILS(m.tx.amount)} · {m.tx.counterparty || m.tx.description || '—'}
+          </Typography>
+          {m.tx.counterparty && m.tx.description && <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{m.tx.description}</Typography>}
+          <Typography variant="body2" sx={{ mt: 0.5 }}>👪 {family}</Typography>
+          <Typography variant="body2" color="text.secondary">
+            {m.allocations.map(a => `${a.child_name || 'ילד/ה'} · ${monthName(a.month_number)} ${formatILS(a.amount)}`).join(' | ')}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            שויך {formatILS(m.total)}{m.created_at ? ` · ${new Date(m.created_at).toLocaleString('he-IL')}` : ''}{m.created_by_name ? ` · ${m.created_by_name}` : ''}
+          </Typography>
+        </Box>
+        {canWrite && <BusyButton size="small" variant="outlined" color="error" loading={busy} loadingText="מבטל…" onClick={undo} sx={{ flexShrink: 0 }}>בטל שיוך</BusyButton>}
+      </Stack>
+    </Paper>
+  );
+}
+
+/** "שויכו" — matched transfers of the year, newest first, each can be undone. */
+function MatchedList({ year, tick, canWrite, onDone }) {
+  const [state, reload] = useLoad('/income/kaplan/matched', { year });
+  useEffect(() => { if (tick) reload(); }, [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const list = state.data?.matched || [];
+  return (
+    <Section title={`✅ שויכו — ${formatAcademicYear(year)}`} count={state.data ? list.length : null}
+      hint="העברות ששויכו למשפחות בשנה הזו, האחרונות קודם. ביטול שיוך מחזיר את ההעברה להצעות.">
+      <LoadGate state={state} reload={reload}>
+        {!list.length ? <Typography variant="body2" color="text.secondary">עוד לא שויכו העברות בשנה הזו.</Typography> : (
+          <Stack spacing={1}>
+            {list.map(m => <MatchedRow key={String(m.transaction_id)} m={m} canWrite={canWrite} onDone={onDone} />)}
+          </Stack>
+        )}
+      </LoadGate>
+    </Section>
+  );
+}
+
 const cardsGrid = { display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } };
 
 /** קפלן — parents' bank transfers ↔ families, and the per-month cross-check. */
@@ -409,6 +472,7 @@ export default function KaplanTab({ canWrite }) {
         )}
       </LoadGate>
 
+      <MatchedList year={selectedYear} tick={tick} canWrite={canWrite} onDone={done} />
       <MonthReport year={selectedYear} tick={tick} />
     </Box>
   );
