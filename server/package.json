@@ -173,6 +173,7 @@
     "test:bank-watch": "node scripts/bank-watch.test.js",
     "test:income-models": "node scripts/income-models.test.js",
     "test:income-kaplan": "node scripts/income-kaplan.test.js",
+    "test:income-kaplan-writes": "node scripts/income-kaplan-writes.test.js",
     "test:expense-models": "node scripts/expense-models.test.js",
     "test:expense-core": "node scripts/expense-core.test.js",
     "test:expense-pairs": "node scripts/expense-pairs.test.js",

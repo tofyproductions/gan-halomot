@@ -210,8 +210,8 @@ async function kaplanHouseholds(academicYear) {
         camp,
         siblings: members.filter(s => String(s.reg._id) !== String(reg._id)),
       });
-      const cells = [...months.map(m => ({ month_number: m.month, expected: m.expected_amount, receipt: m.receipt_number }))];
-      if (campCell) cells.push({ month_number: CAMP_MONTH, expected: campCell.expected_amount, receipt: campCell.receipt_number });
+      const cells = [...months.map(m => ({ month_number: m.month, expected: m.expected_amount, receipt: m.receipt_number, paid: m.payment_status === 'paid' }))];
+      if (campCell) cells.push({ month_number: CAMP_MONTH, expected: campCell.expected_amount, receipt: campCell.receipt_number, paid: campCell.payment_status === 'paid' });
       return {
         registration_id: reg._id,
         child_name: reg.child_name,
@@ -220,6 +220,7 @@ async function kaplanHouseholds(academicYear) {
           expected: round2(c.expected),
           allocated: round2(allocatedOf.get(`${reg._id}|${c.month_number}`) || 0),
           receipt: c.receipt || null,
+          paid: !!c.paid,
         })),
       };
     });
@@ -458,6 +459,7 @@ module.exports = {
   kaplanHouseholds,
   scoreIncome,
   splitInto,
+  ledgerOf,
   incomeQueue,
   alternativesForTx,
 };
