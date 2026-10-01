@@ -293,6 +293,38 @@ async function suite(label) {
     eq((await stateOf(r1._id)).lane, 'receipt', 'מסלול קבלות');
     eq(String((await ExpenseDocument.findById(r2._id).lean()).linked_invoice_id), String(other._id), 'קבלה של חשבונית אחרת לא נגעה');
   }
+
+  console.log('\nvoidDocument משחרר את הקישור לאייקאונט (רק במסמך שלנו)');
+  {
+    const mine = await doc({ icount_id: `IC${label}${++seq}` });
+    const held = mine.icount_id;
+    await w.voidDocument(mine._id);
+    const after = await ExpenseDocument.findById(mine._id).lean();
+    eq(after.status, 'void', 'בוטל');
+    eq(after.icount_id, null, 'icount_id שוחרר');
+    eq(after.icount_id_released, held, 'ונשמר ב-icount_id_released');
+
+    const fromIcount = await doc({ source: 'icount', icount_id: `IC${label}${++seq}` });
+    await w.voidDocument(fromIcount._id);
+    const fi = await ExpenseDocument.findById(fromIcount._id).lean();
+    eq(fi.icount_id, fromIcount.icount_id, 'מסמך שמקורו באייקאונט שומר את icount_id');
+    eq(fi.icount_id_released ?? null, null, 'ולא משחרר');
+
+    const plain = await doc({});
+    await w.voidDocument(plain._id);
+    eq((await ExpenseDocument.findById(plain._id).lean()).icount_id_released ?? null, null, 'מסמך בלי אייקאונט — אין מה לשחרר');
+
+    // a failed void rolls the release back too
+    const rb = await doc({ icount_id: `IC${label}${++seq}` });
+    const origUpd = ExpenseDocument.updateOne;
+    let calls = 0;
+    ExpenseDocument.updateOne = function (...a) { if (++calls === 1) throw new Error('boom4'); return origUpd.apply(this, a); };
+    try { await w.voidDocument(rb._id); ok(false, 'ביטול לא נכשל'); } catch (e) { eq(e.message, 'boom4', 'ביטול נכשל'); }
+    finally { ExpenseDocument.updateOne = origUpd; }
+    const rba = await ExpenseDocument.findById(rb._id).lean();
+    eq(rba.status, 'active', 'נשאר פעיל');
+    eq(rba.icount_id, rb.icount_id, 'icount_id לא שוחרר');
+  }
 }
 
 (async () => {

@@ -429,5 +429,5 @@ async function pullAndSync({ client, ...opts } = {}) {
 }
 
 module.exports = {
-  compareToIcount, docTypeFor, kindsAgree, syncBridge, pendingIdentityQuestions, decideIdentity, attachableIcountTwin, pullAndSync,
+  compareToIcount, docTypeFor, kindsAgree, linkToRow, syncBridge, pendingIdentityQuestions, decideIdentity, attachableIcountTwin, pullAndSync,
 };

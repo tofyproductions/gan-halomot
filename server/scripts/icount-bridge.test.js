@@ -357,6 +357,24 @@ const TAX_BAD = '510000555'; // fails the check digit — ignored
     eq(again.attached + again.created, 0, 'הרצה חוזרת — הפריט כבר מוכר');
   }
 
+  console.log('ביטול של אדם במסמך שלנו המקושר → השורה מקבלת מסמך משלה');
+  await reset();
+  {
+    const { voidDocument } = require('../src/services/expenseWrites.service');
+    const row = await mirrorRow({ doc_number: 'R-9' });
+    const mine = await ours({ doc_number: 'R-9' });
+    await bridge.syncBridge();
+    eq((await ExpenseDocument.findById(mine._id).lean()).icount_id, row.icount_id, 'קושר');
+    await voidDocument(mine._id);
+    const res = await bridge.syncBridge();
+    eq(res.created, 1, 'הסנכרון הבא יצר מסמך אייקאונט');
+    const own = await ExpenseDocument.findOne({ icount_id: row.icount_id }).lean();
+    eq(own && own.source, 'icount', 'השורה מוחזקת עכשיו במסמך שמקורו באייקאונט');
+    eq(own && own.status, 'active', 'פעיל');
+    eq((await ExpenseDocument.findById(mine._id).lean()).status, 'void', 'המסמך שבוטל נשאר מבוטל');
+    eq((await bridge.syncBridge()).created, 0, 'הרצה חוזרת — לא נוצר שוב');
+  }
+
   console.log('pullAndSync — משיכה ואז גשר');
   await reset();
   {

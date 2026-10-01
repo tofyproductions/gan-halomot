@@ -334,8 +334,15 @@ async function voidDocument(document_id, by) {
         $set: { linked_invoice_id: r.linked_invoice_id, receipt_disposition: r.receipt_disposition ?? null, receipt_disposition_at: r.receipt_disposition_at ?? null },
       }))));
     }
-    await ExpenseDocument.updateOne({ _id: doc._id }, { $set: { status: 'void' } }, { session });
-    undo(() => ExpenseDocument.updateOne({ _id: doc._id }, { $set: { status: 'active' } }));
+    // Ruling (Task 3/4): our document linked to an iCount row lets go of it, so
+    // the next sync gives that row its own document — Orly's entry still exists
+    // and its charge must stay explained. An iCount-sourced document keeps its
+    // icount_id: the bridge restores it if the row comes back.
+    const release = doc.source !== 'icount' && doc.icount_id ? { icount_id: null, icount_id_released: doc.icount_id } : {};
+    await ExpenseDocument.updateOne({ _id: doc._id }, { $set: { status: 'void', ...release } }, { session });
+    undo(() => ExpenseDocument.updateOne({ _id: doc._id }, {
+      $set: { status: 'active', ...(release.icount_id_released ? { icount_id: doc.icount_id, icount_id_released: doc.icount_id_released ?? null } : {}) },
+    }));
     return { ok: true, removed_payments: pays.length, released_receipts: receipts.length };
   }, { document_id });
 }

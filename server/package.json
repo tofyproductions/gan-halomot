@@ -180,6 +180,7 @@
     "test:expense-orders": "node scripts/expense-orders.test.js",
     "test:icount-mirror": "node scripts/icount-mirror.test.js",
     "test:icount-bridge": "node scripts/icount-bridge.test.js",
+    "test:icount-filing": "node scripts/icount-filing.test.js",
     "test:expense-search": "node scripts/expense-search.test.js",
     "test:expenses-api-e2e": "node scripts/expenses-api-e2e.test.js",
     "test:gan-icount-client": "node scripts/gan-icount-client.test.js"
