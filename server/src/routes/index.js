@@ -108,6 +108,8 @@ router.use(authMiddleware);
 // directly after authMiddleware so req.user exists and nothing scoped runs
 // before it.
 router.use(attachBranchScope);
+// The bank screen (user JWT). The agent's signed door is mounted above, before auth.
+router.use('/finance', require('./finance.routes'));
 router.use('/branches', require('./branch.routes'));
 // The customer's own subscription — what they pay and why. Read-only.
 router.use('/account', require('./account.routes'));

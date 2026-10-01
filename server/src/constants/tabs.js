@@ -30,6 +30,7 @@ const TAB_DEFAULT_ROLES = {
   // Not a screen — the write grant for רישום חיצוני. See the client file.
   clicktac_write: ['system_admin', 'accountant'],
   collections: ['system_admin', 'admin_viewer', 'accountant'],
+  bank: ['system_admin', 'admin_viewer', 'accountant'],
   proposed_changes: ['system_admin', 'accountant', 'admin_viewer'],
   contact_inbox: ['system_admin', 'accountant', 'admin_viewer'],
   parent_letters: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'],
