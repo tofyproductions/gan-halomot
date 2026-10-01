@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * The user-facing bank screen API, end to end, against the REAL server.
+ * The expenses & documents API (/api/expenses) and its permissions, end to end, against the REAL server.
  * Ephemeral local Mongo; dotenv is stubbed so server/.env (production on this
  * machine) is never read; the connection host is asserted loopback.
  *
- *   node scripts/finance-api-e2e.test.js
+ *   node scripts/expenses-api-e2e.test.js
  */
 const net = require('net');
 const http = require('http');
@@ -227,7 +227,7 @@ async function main() {
   const acc = await request({ method: 'POST', path: `${A}/pairs/accept`, token: accountant, body: { document_id: docId, transaction_id: String(t1._id) } });
   eq(acc.status, 200, 'חשבת מאשרת התאמה', acc.text);
   const pay = await ExpensePayment.findOne({ document_id: docId }).lean();
-  ok(pay && String(pay.created_by || pay.by || '') !== '' || pay, 'נוצר תשלום');
+  ok(pay && pay.amount === 100, 'נוצר תשלום בסכום החשבונית');
   eq((await request({ path: `${A}/documents/${docId}`, token: admin })).body?.document?.lane, 'closed', 'המסמך נסגר');
   eq((await request({ method: 'POST', path: `${A}/pairs/accept`, token: accountant, body: { document_id: 'bad', transaction_id: 'bad' } })).status, 400, 'מזהים לא תקינים — 400');
 
@@ -294,6 +294,11 @@ async function main() {
   eq((await request({ method: 'POST', path: `${A}/documents/${d4}/order`, token: accountant, body: { order_id: 'bad' } })).status, 400, 'קישור הזמנה לא תקין — 400');
   eq((await request({ method: 'POST', path: `${A}/documents/${d4}/void`, token: accountant })).status, 200, 'ביטול מסמך');
   eq((await request({ method: 'PATCH', path: `${A}/documents/${d4}`, token: accountant, body: { fields: { amount_total: 1 } } })).status, 409, 'עריכת מבוטל — 409');
+  eq((await request({ method: 'POST', path: `${A}/documents/${d4}/supplier`, token: accountant })).status, 409, 'ספק ממסמך מבוטל — 409');
+  eq(await mongo.Supplier.countDocuments({ name: 'ספק ד' }), 0, 'לא נוצר ספק ממסמך מבוטל');
+  eq((await request({ method: 'POST', path: `${A}/documents`, token: admin, body: { fields: 'x' } })).status, 400, 'fields שאינו אובייקט — 400');
+  eq((await request({ method: 'POST', path: `${A}/documents`, token: admin, body: { fields, file: 'x' } })).status, 400, 'file שאינו אובייקט — 400');
+  eq((await request({ method: 'PATCH', path: `${A}/documents/${docId}`, token: accountant, body: { fields: [1] } })).status, 400, 'fields מערך ב-PATCH — 400');
   const rc = d3.body.document._id;
   eq((await request({ path: `${A}/receipts/${rc}/candidates`, token: viewer })).status, 200, 'מועמדי חשבונית לקבלה');
   eq((await request({ method: 'POST', path: `${A}/receipts/${rc}/link`, token: accountant, body: { invoice_id: String(oid()) } })).status, 404, 'קישור לחשבונית לא קיימת — 404');
@@ -302,6 +307,41 @@ async function main() {
   eq((await request({ method: 'POST', path: `${A}/pairs/reject`, token: accountant, body: { document_id: docId, transaction_id: String(t1._id) } })).status, 200, 'דחיית זוג');
   eq((await request({ method: 'POST', path: `${A}/intake/pull`, token: accountant })).status, 409, 'משיכה בלי mail-sorter מוגדר — 409');
   eq((await request({ path: `${A}/intake/status`, token: viewer })).body?.mail_sorter_configured, false, 'סטטוס קליטה');
+
+  head('מטריצת הרשאות — כל נתיבי הכתיבה');
+  const mid = String(oid()); const mid2 = String(oid());
+  const WRITES = [
+    ['POST', '/documents', { fields: { vendor_name: 'מטריצה', doc_date: '2026-09-01', amount_total: 5 } }],
+    ['PATCH', `/documents/${docId}`, { fields: { amount_total: 5 } }],
+    ['POST', `/documents/${docId}/void`, {}],
+    ['POST', `/documents/${docId}/confirm`, { fields: {} }],
+    ['POST', `/documents/${docId}/supplier`, {}],
+    ['POST', '/pairs/accept', { document_id: docId, transaction_id: mid }],
+    ['POST', '/pairs/reject', { document_id: docId, transaction_id: mid }],
+    ['POST', '/pairs/unpair', { document_id: docId, transaction_id: mid }],
+    ['POST', `/documents/${docId}/unpaid`, {}],
+    ['DELETE', `/documents/${docId}/unpaid`, undefined],
+    ['POST', `/documents/${docId}/decision`, { kind: 'closed_anyway' }],
+    ['DELETE', `/documents/${docId}/decision`, undefined],
+    ['POST', `/receipts/${rc}/link`, { invoice_id: mid }],
+    ['DELETE', `/receipts/${rc}/link`, undefined],
+    ['POST', `/receipts/${rc}/is-document`, {}],
+    ['POST', `/suppliers/${mid2}/receipt-is-document`, { value: true }],
+    ['POST', `/documents/${docId}/order`, { order_id: mid }],
+    ['DELETE', `/documents/${docId}/order`, undefined],
+    ['POST', '/rules', { pattern: 'מטריצה-כלל' }],
+    ['DELETE', `/rules/${builtIn._id}`, undefined],
+    ['POST', '/intake/pull', {}],
+  ];
+  for (const [method, path, b] of WRITES) {
+    const label = `${method} ${path.replace(/[0-9a-f]{24}/g, ':id')}`;
+    eq((await request({ method, path: A + path, token: teacher, body: b })).status, 403, `גננת — ${label} — 403`);
+    eq((await request({ method, path: A + path, body: b })).status, 401, `אנונימי — ${label} — 401`);
+    const snap = await snapshot();
+    const vr = await request({ method, path: A + path, token: viewer, body: b });
+    ok(vr.status === 202 || vr.status === 403, `צופה — ${label} — לא ישיר`, `status ${vr.status}`);
+    eq(await snapshot(), snap, `צופה — ${label} — הנתונים לא השתנו`);
+  }
 
   head('שגיאת שרת לא דולפת');
   const orig = ExpenseDocument.findById;

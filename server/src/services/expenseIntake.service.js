@@ -178,6 +178,7 @@ async function createSupplierFromDocument(docId, by = null) {
   checkId(docId, 'מזהה מסמך');
   const doc = await ExpenseDocument.findById(docId).lean();
   if (!doc) throw fail(404, 'המסמך לא נמצא');
+  if (doc.status === 'void') throw fail(409, 'המסמך מבוטל — אי אפשר לשנות אותו');
   if (doc.supplier_id) throw fail(409, 'למסמך כבר יש ספק');
   const name = str(doc.vendor_name);
   if (!name) throw fail(400, 'למסמך אין שם ספק');

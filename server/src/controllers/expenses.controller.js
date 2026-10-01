@@ -118,20 +118,26 @@ async function intakeStatus(req, res) {
 }
 
 // ── writes ─────────────────────────────────────────────────────────────────
+const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
 async function createDocument(req, res) {
   const { fields, file } = body(req);
+  if (fields !== undefined && !isObj(fields)) throw fail(400, 'שדות המסמך לא תקינים');
+  if (file !== undefined && file !== null && !isObj(file)) throw fail(400, 'הקובץ לא תקין');
   const doc = await intake.createManual({ fields: fields || {}, file: file || null, by: by(req) });
   res.status(201).json({ document: doc });
 }
 
 async function patchDocument(req, res) {
   const b = body(req);
+  if (b.fields !== undefined && !isObj(b.fields)) throw fail(400, 'שדות המסמך לא תקינים');
   res.json({ document: await intake.updateDocument(req.params.id, b.fields || b, by(req)) });
 }
 
 const voidDoc = async (req, res) => res.json({ document: await writes.voidDocument(req.params.id, by(req)) });
 async function confirmDoc(req, res) {
   const b = body(req);
+  if (b.fields !== undefined && !isObj(b.fields)) throw fail(400, 'שדות המסמך לא תקינים');
   res.json({ document: await writes.confirmDocument(req.params.id, b.fields || b, by(req)) });
 }
 const createSupplier = async (req, res) => res.status(201).json({ supplier: await intake.createSupplierFromDocument(req.params.id, by(req)) });
