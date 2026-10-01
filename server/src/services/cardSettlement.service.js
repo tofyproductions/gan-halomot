@@ -37,6 +37,13 @@ async function detectCardSettlements() {
     const pattern = CARD_PATTERNS.find(p => p.institution === card.institution);
 
     for (const bill of bills) {
+      // Already paid by a linked bank line? A second card-looking debit (a
+      // re-taken bounce) must not also be marked internal.
+      const linked = await BankTransaction.exists({
+        matched_card_account_id: card._id,
+        date: { $gte: shiftDay(bill._id, -2), $lte: shiftDay(bill._id, 2) },
+      });
+      if (linked) continue;
       const candidates = await BankTransaction.find({
         account_id: { $in: bankIds },
         amount: { $lt: 0 },

@@ -100,6 +100,11 @@ function toIngestAccounts(rows, cards) {
   for (const r of rows) {
     if (!cards.includes(r.card)) continue;
     const list = byCard.get(r.card) || [];
+    // An installment purchase repeats in every monthly export with the ORIGINAL
+    // date, merchant and per-installment amount; only the note differs. The
+    // installment number must therefore be part of the identity (bank_ref feeds
+    // the hash) or month 2 overwrites month 1.
+    const inst = /תשלום\s*(\d+)\s*מתוך\s*(\d+)/.exec(r.note || '');
     list.push({
       date: r.date,
       processed_date: r.chargeDate || r.date,
@@ -109,7 +114,7 @@ function toIngestAccounts(rows, cards) {
       original_description: r.note ? `${r.merchant} · ${r.note}` : r.merchant,
       provider_category: r.category,
       status: 'completed',
-      bank_ref: null,
+      bank_ref: inst ? `inst:${inst[1]}/${inst[2]}` : null,
     });
     byCard.set(r.card, list);
   }

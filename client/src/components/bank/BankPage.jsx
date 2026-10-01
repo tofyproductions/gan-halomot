@@ -17,6 +17,7 @@ import { hasTabAccess } from '../../config/tabs';
 import MaxImportDialog from './MaxImportDialog';
 import { formatILS, formatDay, thisMonth, shiftMonth, monthLabel } from './bankFormat';
 
+const SYNC_STATUS_HE = { pending: 'ממתין', claimed: 'בטיפול מחשב הבנק', done: 'הושלם', failed: 'נכשל' };
 const EMPTY = { transactions: [], totals: { in: 0, out: 0, net: 0 } };
 
 /**
@@ -28,7 +29,7 @@ export default function BankPage() {
   const theme = useTheme();
   const phone = useMediaQuery(theme.breakpoints.down('sm'));
   const { user } = useAuth();
-  const canWrite = user?.role === 'system_admin' || user?.role === 'accountant' || hasTabAccess(user, 'bank_write');
+  const canWrite = hasTabAccess(user, 'bank_write');
 
   const [month, setMonth] = useState(thisMonth());
   const [accountId, setAccountId] = useState('');
@@ -142,7 +143,7 @@ export default function BankPage() {
         ))}
         {canWrite && (
           <Stack justifyContent="center">
-            <Tooltip title={status?.last_request ? `בקשה אחרונה: ${status.last_request.status}${status.last_request.result ? ` · ${status.last_request.result}` : ''}` : ''}>
+            <Tooltip title={status?.last_request ? `בקשה אחרונה: ${SYNC_STATUS_HE[status.last_request.status] || status.last_request.status}${status.last_request.result ? ` · ${status.last_request.result}` : ''}` : ''}>
               <span>
                 <Button startIcon={<SyncIcon />} onClick={syncNow} disabled={syncBusy}>סנכרן עכשיו</Button>
               </span>
@@ -165,11 +166,13 @@ export default function BankPage() {
         <TextField size="small" label="חיפוש (תיאור / מוטב)" value={q} onChange={e => setQ(e.target.value)} sx={{ flex: 1 }} />
       </Stack>
 
-      <Stack direction="row" spacing={3} flexWrap="wrap" useFlexGap sx={{ mb: 2, fontVariantNumeric: 'tabular-nums' }}>
-        <Typography>נכנס: <b>{formatILS(data.totals.in)}</b></Typography>
-        <Typography>יוצא: <b>{formatILS(data.totals.out)}</b></Typography>
-        <Typography>נטו: <b>{formatILS(data.totals.net)}</b></Typography>
-      </Stack>
+      {!loadError && (
+        <Stack direction="row" spacing={3} flexWrap="wrap" useFlexGap sx={{ mb: 2, fontVariantNumeric: 'tabular-nums' }}>
+          <Typography>נכנס: <b>{formatILS(data.totals.in)}</b></Typography>
+          <Typography>יוצא: <b>{formatILS(data.totals.out)}</b></Typography>
+          <Typography>נטו: <b>{formatILS(data.totals.net)}</b></Typography>
+        </Stack>
+      )}
 
       {loadError ? (
         <Alert severity="error" action={<Button color="inherit" size="small" onClick={load}>נסו שוב</Button>}>{loadError}</Alert>

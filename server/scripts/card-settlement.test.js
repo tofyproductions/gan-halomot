@@ -52,6 +52,21 @@ const ok = (c, l) => { console.log(`  ${c ? '✅' : '❌'} ${l}`); if (!c) failu
   const after = await BankTransaction.findOne({ bank_ref: '9' }).lean();
   ok(after.is_internal_transfer === false && after.settlement_dismissed === true, 'ביטול ידני נשמר — המעבר הבא לא מקשר שוב');
 
+  console.log('\nחיוב שני לאותו חשבון');
+  await ingest([{
+    external_id: 'max:••••8093', institution: 'max', label: 'Max ••••8093', type: 'card',
+    transactions: [{ date: '2026-08-10', processed_date: '2026-09-02', amount: -400, description: 'פז' }],
+  }], { source: 'max_xlsx' });
+  await ingest([{
+    external_id: 'beinleumi:••••0463', institution: 'beinleumi', label: 'בינלאומי', type: 'bank',
+    transactions: [
+      { date: '2026-09-03', amount: -400, description: 'מקס איט פיננסים', bank_ref: '21' },
+      { date: '2026-09-04', amount: -400, description: 'מקס איט פיננסים', bank_ref: '22' },
+    ],
+  }]);
+  const twoLines = await BankTransaction.find({ bank_ref: { $in: ['21', '22'] } }).lean();
+  ok(twoLines.filter(t => t.matched_card_account_id).length === 1, 'שני חיובים תואמים לחשבון אחד — רק אחד קושר');
+
   await mongoose.disconnect(); await mongod.stop();
   console.log(failures ? `\n❌ ${failures} נכשלו` : '\n✅ הכל עבר');
   process.exit(failures ? 1 : 0);

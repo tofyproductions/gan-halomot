@@ -90,6 +90,19 @@ function makeXlsx(rows, { extraColumnFirst = false } = {}) {
     eq(await BankTransaction.countDocuments(), 3, 'ואין כפילויות');
   }
 
+  console.log('\nתשלומים');
+  {
+    const before = await BankTransaction.countDocuments();
+    const mk = (note, charge) => makeXlsx([{ date: '01-08-2026', merchant: 'מקס מציאות', card: '7996', amount: 100, note, charge }]);
+    const fa = mk('תשלום 1 מתוך 3', '02-09-2026');
+    const fb = mk('תשלום 2 מתוך 3', '02-10-2026');
+    await importMaxExport(fa);
+    await importMaxExport(fb);
+    eq(await BankTransaction.countDocuments(), before + 2, 'שני תשלומים של אותה רכישה — שתי שורות, שניהם נשמרו');
+    await importMaxExport(fa);
+    eq(await BankTransaction.countDocuments(), before + 2, 'העלאה חוזרת של קובץ התשלום הראשון — עדיין אידמפוטנטי');
+  }
+
   console.log('\nהגדרה');
   {
     await Setting.create({ key: 'max_import_cards', value: '7996' });
