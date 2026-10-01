@@ -633,6 +633,18 @@ connectDB().then(() => {
       setTimeout(runExpenseMailPull, 8 * 60 * 1000);
       setInterval(runExpenseMailPull, 6 * 60 * 60 * 1000);
     }
+
+    // iCount — mirror the gan's iCount expenses and join them to our documents once a day.
+    // Same lock name as POST /icount/pull. Off unless the GAN_ICOUNT_* credentials are set.
+    const icountBridge = require('./services/icountBridge.service');
+    const icountClient = require('./services/ganIcount.client');
+    const runIcountMirror = () => withJobLock('icount-mirror', 30 * 60 * 1000, () => icountBridge.pullAndSync())
+      .then(({ ran, result: r }) => { if (ran && r && r.pull) console.log(`[icount-mirror] suppliers ${r.pull.suppliers}, upserted ${r.pull.upserted}, gone ${r.pull.gone}, partial ${r.pull.partial}`); })
+      .catch(e => console.error('[icount-mirror] failed:', e.message));
+    if (!platformMode && icountClient.getClient().isConfigured()) {
+      setTimeout(runIcountMirror, 15 * 60 * 1000);
+      setInterval(runIcountMirror, 24 * 60 * 60 * 1000);
+    }
   });
 
   // A server that could not take the port must not stay alive pretending to.

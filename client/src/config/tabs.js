@@ -66,6 +66,8 @@ export const TAB_GROUPS = [
       { id: 'expenses', label: 'הוצאות ומסמכים', path: '/expenses', defaultRoles: ['system_admin', 'admin_viewer', 'accountant'] },
       // Not a screen — the right to act on הוצאות (upload, pair, decide).
       { id: 'expenses_write', label: 'הוצאות ומסמכים — פעולות', path: null, defaultRoles: ['system_admin', 'accountant'], writeGrantFor: 'expenses' },
+      // Not a screen — the right to FILE a closed document to iCount and report it paid there (iCount has no undo).
+      { id: 'icount_upload', label: 'הוצאות — העלאה לאייקאונט', path: null, defaultRoles: ['system_admin', 'accountant'], writeGrantFor: 'expenses' },
       // אישור שהות ואישור קייטנה — the papers a family asks the office for,
       // filled from the system instead of typed from memory.
       { id: 'parent_letters', label: 'מסמכים להורים', path: '/parent-letters', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },

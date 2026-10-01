@@ -660,7 +660,20 @@ function requireTab(tabId, ...defaultRoles) {
  * Usage: requireTabWrite('clicktac', 'system_admin', 'accountant')
  */
 function requireTabWrite(tabId, ...roles) {
-  const grantId = `${tabId}_write`;
+  return requireWriteGrant(`${tabId}_write`, tabId, ...roles);
+}
+
+/**
+ * requireTabWrite with the grant id named instead of derived. Same precedence
+ * (per-user > role-wide > roles list), same refusals, same viewer handling —
+ * requireTabWrite is this with grantId = `${tabId}_write`. It exists for a
+ * grant narrower than a screen's write grant: `icount_upload` is "may file to
+ * iCount", which a person with `expenses_write` does not automatically have,
+ * and whose `deny` must not be bypassed by holding the broader grant.
+ *
+ * Usage: requireWriteGrant('icount_upload', 'expenses', 'system_admin', 'accountant')
+ */
+function requireWriteGrant(grantId, tabId, ...roles) {
   const tabGate = requireTab(tabId, ...roles);
 
   return (req, res, next) => {
@@ -812,5 +825,5 @@ function allowSelfWrite(reason) {
 
 module.exports = {
   authMiddleware, attachBranchScope, optionalAuth, requireRole, requireTab,
-  requireTabWrite, requireBranchScope, tabDecision, allowSelfWrite,
+  requireTabWrite, requireWriteGrant, requireBranchScope, tabDecision, allowSelfWrite,
 };

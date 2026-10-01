@@ -370,6 +370,12 @@ async function main() {
     ['DELETE', `/rules/${builtIn._id}`, undefined],
     ['POST', '/intake/pull', {}],
     ['PUT', '/settings/start-date', { start_date: '2026-01-01' }],
+    ['PUT', '/icount/settings', { expense_type_id: 7 }],
+    ['POST', '/icount/pull', {}],
+    ['POST', '/icount/identity', { document_id: docId, icount_expense_id: mid, same: false }],
+    ['POST', `/documents/${docId}/icount-file`, {}],
+    ['POST', `/documents/${docId}/icount-paid`, {}],
+    ['DELETE', `/documents/${docId}/icount-paid`, undefined],
   ];
   for (const [method, path, b] of WRITES) {
     const label = `${method} ${path.replace(/[0-9a-f]{24}/g, ':id')}`;
@@ -380,6 +386,191 @@ async function main() {
     ok(vr.status === 202 || vr.status === 403, `צופה — ${label} — לא ישיר`, `status ${vr.status}`);
     eq(await snapshot(), snap, `צופה — ${label} — הנתונים לא השתנו`);
   }
+
+
+  head('אייקאונט — לא מחובר');
+  const icountApi = require('../src/services/ganIcount.client');
+  const { Setting: SettingM, IcountExpense, IcountPaidReport, IcountPull } = mongo;
+  const TAX = '510000011';
+  const st0 = await request({ path: `${A}/icount/status`, token: viewer });
+  eq(st0.status, 200, 'צופה קורא סטטוס אייקאונט');
+  eq(st0.body?.configured, false, 'לא מוגדר — configured:false');
+  ok(!/pass|user|company/i.test(JSON.stringify(st0.body)), 'הסטטוס בלי שדות הרשאות');
+  for (const p of ['/icount/status', '/icount/settings', '/icount/suppliers-missing', '/icount/identity-questions', `/documents/${docId}/icount-preview`]) {
+    eq((await request({ path: A + p, token: teacher })).status, 403, `גננת — ${p} — 403`);
+  }
+  eq((await request({ method: 'POST', path: `${A}/icount/pull`, token: accountant })).status, 503, 'משיכה בלי חיבור — 503');
+  const nc = await request({ method: 'POST', path: `${A}/documents/${docId}/icount-file`, token: accountant, body: {} });
+  ok(nc.status === 400 || nc.status === 409 || nc.status === 503, 'העלאה לא מחוברת לא עוברת', `status ${nc.status}`);
+
+  head('אייקאונט — הגדרות והרשאות העלאה');
+  eq((await request({ path: `${A}/icount/settings`, token: viewer })).body?.expense_type_id, null, 'סוג הוצאה לא מוגדר');
+  eq((await request({ method: 'PUT', path: `${A}/icount/settings`, token: accountant, body: { expense_type_id: 'abc' } })).status, 400, 'סוג הוצאה לא מספר — 400');
+  eq((await request({ method: 'PUT', path: `${A}/icount/settings`, token: accountant, body: { expense_type_id: 2.5 } })).status, 400, 'סוג הוצאה לא שלם — 400');
+  eq((await request({ method: 'PUT', path: `${A}/icount/settings`, token: accountant, body: { expense_type_id: 7 } })).body?.expense_type_id, 7, 'סוג הוצאה נשמר');
+  eq((await request({ path: `${A}/icount/settings`, token: viewer })).body?.expense_type_id, 7, 'נקרא בחזרה');
+
+  // a closed document (covered by a charge), source mail_sorter
+  const mkClosed = async (n, amount = 100) => {
+    const d = await ExpenseDocument.create({
+      source: 'mail_sorter', mail_sorter_id: 9000 + n, vendor_name: 'חשמל ישראל בע"מ', supplier_tax_id: TAX,
+      doc_type: 'tax_invoice', doc_number: `ICN-${n}`, doc_date: '2026-09-10', amount_total: amount,
+    });
+    const t = await BankTransaction.create({ account_id: bank._id, date: '2026-09-12', amount: -amount, description: `ת${n}`, hash: `icn-${n}` });
+    await ExpensePayment.create({ document_id: d._id, transaction_id: t._id, amount });
+    return d;
+  };
+  const fdoc = await mkClosed(1);
+  const fid = String(fdoc._id);
+
+  // the accountant/admin may file; the viewer and teacher may not — checked BEFORE any fake is installed (nothing to call anyway)
+  {
+    const { requireWriteGrant } = require('../src/middleware/auth');
+    const gate = requireWriteGrant('icount_upload', 'expenses', 'system_admin', 'accountant');
+    const run = (user, method = 'POST') => new Promise((resolve) => {
+      const res = { status(c) { this.code = c; return this; }, json() { resolve(this.code); return this; } };
+      gate({ user, method, originalUrl: '/api/expenses/documents/x/icount-file', headers: {} }, res, () => resolve('next'));
+    });
+    eq(await run({ role: 'accountant' }), 'next', 'רואת חשבון — ברירת מחדל — עוברת');
+    eq(await run({ role: 'accountant', tab_overrides_remove: ['icount_upload'] }), 403, 'הסרה אישית של icount_upload — 403');
+    eq(await run({ role: 'accountant', role_tab_remove: ['icount_upload'] }), 403, 'הסרה לכל התפקיד — 403');
+    eq(await run({ role: 'accountant', tab_overrides_add: ['expenses_write'], tab_overrides_remove: ['icount_upload'] }), 403, 'expenses_write לא עוקף הסרת icount_upload');
+    eq(await run({ role: 'teacher', tab_overrides_add: ['icount_upload'] }), 'next', 'הענקה אישית לגננת — עוברת (ברירת מחדל לא נדרשת)');
+    eq(await run({ role: 'teacher', tab_overrides_add: ['icount_upload'], tab_overrides_remove: ['expenses'] }), 403, 'הסרת מסך הוצאות מבטלת את ההענקה');
+    ok((await run({ role: 'admin_viewer', tab_overrides_add: ['icount_upload'] })) !== 'next', 'צופה לעולם לא מעלה — גם עם הענקה');
+    ok((await run({ role: 'admin_viewer' })) !== 'next', 'צופה — ברירת מחדל — לא עוברת');
+    ok((await run({ role: 'teacher' })) !== 'next', 'גננת — ברירת מחדל — לא עוברת');
+  }
+  for (const [m, pth] of [['POST', 'icount-file'], ['POST', 'icount-paid'], ['DELETE', 'icount-paid']]) {
+    eq((await request({ method: m, path: `${A}/documents/${fid}/${pth}`, token: teacher, body: {} })).status, 403, `גננת — ${m} ${pth} — 403`);
+    const vr = await request({ method: m, path: `${A}/documents/${fid}/${pth}`, token: viewer, body: {} });
+    ok(vr.status === 202 || vr.status === 403, `צופה — ${m} ${pth} — לא ישיר`, `status ${vr.status}`);
+  }
+  eq((await request({ path: `${A}/documents/${fid}/icount-preview`, token: teacher })).status, 403, 'גננת — preview — 403');
+
+  head('אייקאונט — מחובר עם תעבורה מזויפת');
+  const calls = [];
+  let createN = 500;
+  const SUP = [{ supplier_id: 11, supplier_name: 'חשמל ישראל', vat_id: TAX }];
+  const fake = (extra = {}) => {
+    const h = {
+      '/auth/login': () => ({ status: true, sid: 'S1' }),
+      '/supplier/get_list': () => ({ status: true, total_count: SUP.length, results_list: SUP }),
+      '/expense/search': () => ({ status: true, total_count: 0, results_list: [] }),
+      '/expense/create': () => { const n = createN++; return { status: true, expense_id: `E${n}`, docnum: String(n) }; },
+      '/expense/update': () => ({ status: true }),
+      ...extra,
+    };
+    return icountApi.createIcountClient({
+      credentials: { companyId: 'c', user: 'u', pass: 'p' },
+      transport: async ({ url, form }) => {
+        const method = url.slice(icountApi.BASE.length);
+        calls.push({ method, params: Object.fromEntries([...form.entries()].filter(([k]) => k !== 'sid')) });
+        const out = await h[method]();
+        return { httpStatus: 200, text: typeof out === 'string' ? out : JSON.stringify(out) };
+      },
+    });
+  };
+  const ofM = (m) => calls.filter(c => c.method === m);
+  const { clearSupplierCache } = require('../src/services/icountSuppliers.service');
+  icountApi.__setClientForTests(fake());
+  clearSupplierCache();
+
+  const stOn = await request({ path: `${A}/icount/status`, token: viewer });
+  eq(stOn.body?.configured, true, 'מוגדר — configured:true');
+
+  const before = await ExpenseDocument.findById(fid).lean();
+  const pv = await request({ path: `${A}/documents/${fid}/icount-preview`, token: viewer });
+  eq(pv.status, 200, 'צופה קורא תצוגה מקדימה');
+  eq(pv.body?.ok, true, 'התצוגה המקדימה מאשרת');
+  eq(pv.body?.payload?.expense_sum, 100, 'ה-payload בתצוגה');
+  eq(ofM('/expense/create').length + ofM('/expense/update').length, 0, 'תצוגה מקדימה — אפס כתיבות לאייקאונט');
+  eq(JSON.stringify(await ExpenseDocument.findById(fid).lean()), JSON.stringify(before), 'תצוגה מקדימה — המסמך לא השתנה');
+
+  const ghost = await mongo.Supplier.create({ name: 'ספק רפאים', tax_id: '' });
+  await ExpenseDocument.create({ source: 'mail_sorter', mail_sorter_id: 9200, vendor_name: 'ספק רפאים', supplier_id: ghost._id, doc_type: 'tax_invoice', doc_number: 'GH-1', doc_date: '2026-09-10', amount_total: 9 });
+  const sm = await request({ path: `${A}/icount/suppliers-missing`, token: viewer });
+  eq(sm.status, 200, 'ספקים חסרים נקראים');
+  ok(!(sm.body?.suppliers || []).some(x => /חשמל ישראל/.test(x.name)), 'ספק שקיים באייקאונט לא ברשימת החסרים');
+  ok((sm.body?.suppliers || []).some(x => x.name === 'ספק רפאים'), 'ספק שלא קיים באייקאונט — ברשימת החסרים');
+
+  eq((await request({ path: `${A}/closed`, token: viewer })).body?.documents?.find(d => d._id === fid)?.icount?.status, 'not_in_icount', '/closed — not_in_icount לפני העלאה');
+  const vf = await request({ method: 'POST', path: `${A}/documents/${fid}/icount-file`, token: viewer, body: {} });
+  ok(vf.status === 202 || vf.status === 403, 'צופה לא מעלה', `status ${vf.status}`);
+  eq(ofM('/expense/create').length, 0, 'צופה — לא נוצר דבר באייקאונט');
+
+  const filed = await request({ method: 'POST', path: `${A}/documents/${fid}/icount-file`, token: accountant, body: {} });
+  eq(filed.status, 200, 'רואת חשבון מעלה');
+  eq(ofM('/expense/create').length, 1, 'נוצרה בדיוק הוצאה אחת באייקאונט');
+  eq(Object.keys(ofM('/expense/create')[0].params).sort().join(','), 'currency_code,expense_date,expense_docnum,expense_doctype,expense_sum,expense_type_id,supplier_id', 'שבעה שדות בדיוק');
+  const afterFile = await ExpenseDocument.findById(fid).lean();
+  ok(afterFile.icount_id && afterFile.icount_filed_at, 'המסמך נשמר עם icount_id ו-filed_at');
+  const again = await request({ method: 'POST', path: `${A}/documents/${fid}/icount-file`, token: admin, body: {} });
+  eq(again.status, 409, 'העלאה שנייה — 409');
+  eq(again.body?.code, 'ALREADY_FILED', 'קוד ALREADY_FILED');
+  eq(ofM('/expense/create').length, 1, 'העלאה שנייה לא יצרה כלום');
+  const cl = (await request({ path: `${A}/closed`, token: viewer })).body?.documents?.find(d => d._id === fid);
+  eq(cl?.icount?.status, 'filed', '/closed — filed אחרי העלאה');
+  eq(cl?.icount?.docnum, afterFile.icount_docnum, '/closed — docnum');
+
+  // not closed → 409 NOT_CLOSED with blockers shape preserved
+  const open = await ExpenseDocument.create({ source: 'mail_sorter', mail_sorter_id: 9100, vendor_name: 'חשמל ישראל בע"מ', supplier_tax_id: TAX, doc_type: 'tax_invoice', doc_number: 'ICN-OPEN', doc_date: '2026-09-10', amount_total: 40 });
+  const nc2 = await request({ method: 'POST', path: `${A}/documents/${open._id}/icount-file`, token: accountant, body: {} });
+  eq(nc2.status, 409, 'מסמך לא סגור — 409'); eq(nc2.body?.code, 'NOT_CLOSED', 'NOT_CLOSED');
+
+  // report paid / undo
+  const rp = await request({ method: 'POST', path: `${A}/documents/${fid}/icount-paid`, token: accountant, body: {} });
+  eq(rp.status, 200, 'דיווח ששולם'); eq(rp.body?.paid_date, '2026-09-12', 'תאריך מהחיוב');
+  eq(ofM('/expense/update').length, 1, 'עדכון אחד באייקאונט');
+  eq(Object.keys(ofM('/expense/update')[0].params).sort().join(','), 'expense_id,expense_paid,expense_paid_date', 'ששולם — שלושה שדות בלבד');
+  eq((await request({ path: `${A}/closed`, token: viewer })).body?.documents?.find(d => d._id === fid)?.icount?.paid_reported, true, '/closed — paid_reported');
+  const un = await request({ method: 'DELETE', path: `${A}/documents/${fid}/icount-paid`, token: accountant });
+  eq(un.status, 200, 'ביטול דיווח'); 
+  eq((await request({ method: 'DELETE', path: `${A}/documents/${fid}/icount-paid`, token: accountant })).body?.code, 'NOT_REPORTED', 'ביטול שני — NOT_REPORTED');
+  eq((await IcountPaidReport.findOne({ document_id: fid }).lean())?.undone_at ? 1 : 0, 1, 'הרשומה נשארת עם undone_at');
+  eq((await request({ path: `${A}/closed`, token: viewer })).body?.documents?.find(d => d._id === fid)?.icount?.paid_reported, false, 'אחרי ביטול — paid_reported:false');
+
+  // iCount refusal → 502 with its reason; throttle → 503 THROTTLED
+  const fdoc2 = await mkClosed(2);
+  icountApi.__setClientForTests(fake({ '/expense/create': () => ({ status: false, reason: 'ספק לא פעיל' }) }));
+  clearSupplierCache();
+  const ref = await request({ method: 'POST', path: `${A}/documents/${fdoc2._id}/icount-file`, token: accountant, body: {} });
+  eq(ref.status, 502, 'סירוב אייקאונט — 502'); ok(/ספק לא פעיל/.test(ref.body?.error || ''), 'הסיבה של אייקאונט מועברת');
+  eq(ref.body?.code, 'ICOUNT_ERROR', 'קוד ICOUNT_ERROR');
+  ok(!(await ExpenseDocument.findById(fdoc2._id).lean()).icount_id, 'סירוב — לא נשמר icount_id');
+  icountApi.__setClientForTests(fake({ '/expense/search': () => 'Too many requests' }));
+  clearSupplierCache();
+  const thr = await request({ method: 'POST', path: `${A}/documents/${fdoc2._id}/icount-file`, token: accountant, body: {} });
+  eq(thr.status, 503, 'הגבלת קצב — 503'); eq(thr.body?.code, 'THROTTLED', 'קוד THROTTLED');
+
+  // pull (same lock as the daily job): 409 while held, ok when free
+  icountApi.__setClientForTests(fake({ '/supplier/get_list': () => ({ status: true, total_count: 0, results_list: [] }) }));
+  clearSupplierCache();
+  {
+    const { JobLock } = require('../src/services/jobLock');
+    await JobLock.create({ name: 'icount-mirror', holder: 'other@job', expires_at: new Date(Date.now() + 60000) });
+    const busy = await request({ method: 'POST', path: `${A}/icount/pull`, token: accountant });
+    eq(busy.status, 409, 'משיכת אייקאונט בזמן שהעבודה רצה — 409');
+    await JobLock.deleteMany({ name: 'icount-mirror' });
+    const run = await request({ method: 'POST', path: `${A}/icount/pull`, token: accountant });
+    eq(run.status, 200, 'משיכת אייקאונט — 200');
+    ok(run.body?.pull, 'התשובה כוללת pull');
+    const st2 = await request({ path: `${A}/icount/status`, token: viewer });
+    ok(st2.body?.last_pull, 'הסטטוס מראה משיכה אחרונה');
+  }
+  eq((await request({ path: `${A}/icount/identity-questions`, token: viewer })).status, 200, 'שאלות זהות נקראות');
+  eq((await request({ method: 'POST', path: `${A}/icount/identity`, token: accountant, body: { document_id: fid } })).status, 400, 'זהות בלי same — 400');
+
+  // gone / in_icount annotation
+  {
+    const g = await ExpenseDocument.create({ source: 'icount', icount_id: 'X1', icount_docnum: '77', vendor_name: 'חשמל ישראל בע"מ', supplier_tax_id: TAX, doc_type: 'tax_invoice', doc_number: 'ICN-SRC', doc_date: '2026-09-10', amount_total: 55 });
+    const t = await BankTransaction.create({ account_id: bank._id, date: '2026-09-12', amount: -55, description: 'מקור אייקאונט', hash: 'icn-src' });
+    await ExpensePayment.create({ document_id: g._id, transaction_id: t._id, amount: 55 });
+    eq((await request({ path: `${A}/closed`, token: viewer })).body?.documents?.find(d => d._id === String(g._id))?.icount?.status, 'in_icount', 'מסמך שמקורו באייקאונט — in_icount');
+    await ExpenseDocument.updateOne({ _id: g._id }, { $set: { icount_gone_at: new Date() } });
+    eq((await request({ path: `${A}/closed`, token: viewer })).body?.documents?.find(d => d._id === String(g._id))?.icount?.status, 'gone', 'נעלם מאייקאונט — gone');
+  }
+  icountApi.__setClientForTests(null);
 
   head('שגיאת שרת לא דולפת');
   const orig = ExpenseDocument.findById;

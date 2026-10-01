@@ -165,4 +165,14 @@ function getClient() {
   return singleton;
 }
 
-module.exports = { createIcountClient, getClient, defaultFetchTransport, BASE, THROTTLE_MESSAGE };
+/**
+ * Test hook: put a client built with a fake transport in place of the
+ * singleton (null restores the real one). Refuses to run in production, and
+ * nothing outside tests calls it.
+ */
+function __setClientForTests(client) {
+  if (process.env.NODE_ENV === 'production') throw new Error('__setClientForTests is not available in production');
+  singleton = client || null;
+}
+
+module.exports = { createIcountClient, getClient, __setClientForTests, defaultFetchTransport, BASE, THROTTLE_MESSAGE };

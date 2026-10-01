@@ -1,11 +1,14 @@
 const express = require('express');
-const { requireTab, requireTabWrite } = require('../middleware/auth');
+const { requireTab, requireTabWrite, requireWriteGrant } = require('../middleware/auth');
 const { asyncWrap: w } = require('../utils/asyncWrap');
 const c = require('../controllers/expenses.controller');
 
 const router = express.Router();
 const read = requireTab('expenses', 'system_admin', 'admin_viewer', 'accountant');
 const write = requireTabWrite('expenses', 'system_admin', 'accountant');
+// Filing to iCount has no undo on their side, so it has its own grant (icount_upload),
+// decided with the same precedence; admin_viewer is not in the role list.
+const icountUpload = requireWriteGrant('icount_upload', 'expenses', 'system_admin', 'accountant');
 
 // reads — pure, no GET writes
 router.get('/pairs', read, w(c.pairQueue));
@@ -23,6 +26,11 @@ router.get('/suppliers-missing-tax-id', read, w(c.suppliersMissingTaxId));
 router.get('/intake/status', read, w(c.intakeStatus));
 router.get('/credits', read, w(c.credits));
 router.get('/settings/start-date', read, w(c.getStartDate));
+router.get('/icount/status', read, w(c.icountStatus));
+router.get('/icount/settings', read, w(c.getIcountSettings));
+router.get('/icount/suppliers-missing', read, w(c.icountSuppliersMissing));
+router.get('/icount/identity-questions', read, w(c.identityQuestions));
+router.get('/documents/:id/icount-preview', read, w(c.icountPreview));
 
 // writes
 router.post('/documents', write, w(c.createDocument));
@@ -47,6 +55,12 @@ router.post('/rules', write, w(c.createRule));
 router.delete('/rules/:id', write, w(c.deleteRule));
 router.post('/intake/pull', write, w(c.intakePull));
 router.put('/settings/start-date', write, w(c.putStartDate));
+router.put('/icount/settings', write, w(c.putIcountSettings));
+router.post('/icount/pull', write, w(c.icountPull));
+router.post('/icount/identity', write, w(c.icountIdentity));
+router.post('/documents/:id/icount-file', icountUpload, w(c.icountFile));
+router.post('/documents/:id/icount-paid', icountUpload, w(c.icountReportPaid));
+router.delete('/documents/:id/icount-paid', icountUpload, w(c.icountUndoPaid));
 
 router.use(c.errorHandler);
 

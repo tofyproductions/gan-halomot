@@ -7,7 +7,7 @@
  * turns those into responses. Reads never write (rules are seeded at boot).
  */
 const mongoose = require('mongoose');
-const { BankTransaction, ExpenseDocument, Supplier, NoInvoiceRule } = require('../models');
+const { BankTransaction, ExpenseDocument, Supplier, NoInvoiceRule, Setting, IcountPull, IcountPaidReport } = require('../models');
 const core = require('../services/expenseCore.service');
 const pairs = require('../services/expensePairs.service');
 const writes = require('../services/expenseWrites.service');
@@ -17,6 +17,10 @@ const orders = require('../services/expenseOrders.service');
 const search = require('../services/expenseSearch.service');
 const mailSorter = require('../services/mailSorter.service');
 const { withJobLock } = require('../services/jobLock');
+const { getClient } = require('../services/ganIcount.client');
+const icountSuppliers = require('../services/icountSuppliers.service');
+const bridge = require('../services/icountBridge.service');
+const filing = require('../services/icountFiling.service');
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const by = (req) => (req.user && (req.user.id || req.user._id)) || null;
@@ -30,11 +34,17 @@ function checkId(v, what) {
 function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-vars
   if (res.headersSent) return;
   const status = Number.isInteger(err && err.status) && err.status >= 400 && err.status < 600 ? err.status : null;
-  if (status && status < 500) {
+  // 502/503 pass through only from the iCount services (they set a code and a
+  // Hebrew message: THROTTLED / NOT_CONFIGURED → 503, iCount's own refusal → 502).
+  // Any other 5xx stays the generic message.
+  const passThrough = status && (status < 500 || ((status === 502 || status === 503) && err.code));
+  if (passThrough) {
     return res.status(status).json({
       error: err.message,
       ...(err.code ? { code: err.code } : {}),
       ...(err.existing_id ? { existing_id: String(err.existing_id) } : {}),
+      ...(Array.isArray(err.blockers) ? { blockers: err.blockers } : {}),
+      ...(err.icount_id ? { icount_id: String(err.icount_id) } : {}),
     });
   }
   console.error('[expenses] request failed:', req.method, req.originalUrl, err && err.stack || err);
@@ -42,8 +52,29 @@ function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-va
 }
 
 // ── reads ──────────────────────────────────────────────────────────────────
+/**
+ * iCount standing of each document row, for the screens:
+ * gone (left iCount) > filed (we put it there) > in_icount (linked or created from iCount) > not_in_icount.
+ * `paid_reported` = we told iCount it was paid (an IcountPaidReport not undone).
+ */
+async function attachIcountInfo(docs) {
+  const ids = docs.map(d => d._id).filter(Boolean);
+  const reported = ids.length
+    ? new Set((await IcountPaidReport.find({ document_id: { $in: ids }, undone_at: null }, 'document_id').lean()).map(r => String(r.document_id)))
+    : new Set();
+  for (const d of docs) {
+    let status = 'not_in_icount';
+    if (d.icount_gone_at) status = 'gone';
+    else if (d.icount_filed_at) status = 'filed';
+    else if (d.icount_id || d.source === 'icount') status = 'in_icount';
+    d.icount = { status, docnum: d.icount_docnum || '', paid_reported: reported.has(String(d._id)) };
+  }
+  return docs;
+}
+
 async function pairQueue(req, res) {
   const q = await pairs.pairQueue();
+  await attachIcountInfo([...q.pairs.map(p => p.doc), ...q.unmatchedDocs]);
   await orders.attachOrderInfo([...q.pairs.map(p => p.doc), ...q.unmatchedDocs]);
   res.json(q);
 }
@@ -83,6 +114,7 @@ async function closed(req, res) {
     });
   }
   await orders.attachOrderInfo(docs);
+  await attachIcountInfo(docs);
   res.json({ documents: docs });
 }
 
@@ -147,6 +179,79 @@ async function intakeStatus(req, res) {
     needs_review: needsReview,
     last_pulled_at: last ? last.created_at : null,
   });
+}
+
+// ── iCount (reads) ─────────────────────────────────────────────────────────
+// Booleans and timestamps only — never a credential, never iCount's raw reply.
+async function icountStatus(req, res) {
+  const [last, lastComplete] = await Promise.all([
+    IcountPull.findOne().sort({ started_at: -1 }).lean(),
+    IcountPull.findOne({ complete: true }).sort({ started_at: -1 }).lean(),
+  ]);
+  const st = getClient().status();
+  res.json({
+    configured: st.configured,
+    logged_in: st.logged_in,
+    last_pull: last ? {
+      started_at: last.started_at, finished_at: last.finished_at, complete: last.complete,
+      suppliers_total: last.suppliers_total, suppliers_read: last.suppliers_read,
+      rows_seen: last.rows_seen, upserted: last.upserted, gone: last.gone, failed_suppliers: (last.failures || []).length,
+    } : null,
+    last_complete_pull_at: lastComplete ? lastComplete.finished_at || lastComplete.started_at : null,
+  });
+}
+
+const typeIdValue = (v) => {
+  const n = Number(v);
+  return v !== null && v !== '' && Number.isInteger(n) && n > 0 ? n : null;
+};
+
+async function getIcountSettings(req, res) {
+  const row = await Setting.findOne({ key: filing.EXPENSE_TYPE_KEY }).lean();
+  res.json({ expense_type_id: row ? typeIdValue(row.value) : null });
+}
+
+async function putIcountSettings(req, res) {
+  const raw = body(req).expense_type_id;
+  if (raw === null || raw === '') {
+    await Setting.deleteOne({ key: filing.EXPENSE_TYPE_KEY });
+    return res.json({ expense_type_id: null });
+  }
+  const n = typeIdValue(raw);
+  if (n === null) throw fail(400, 'סוג ההוצאה באייקאונט חייב להיות מספר שלם חיובי');
+  await Setting.findOneAndUpdate({ key: filing.EXPENSE_TYPE_KEY }, { $set: { value: n } }, { upsert: true });
+  res.json({ expense_type_id: n });
+}
+
+/** Our suppliers behind active, not-yet-in-iCount documents that have no card in iCount — what Orly must open there. */
+async function icountSuppliersMissing(req, res) {
+  const client = getClient();
+  if (!client.isConfigured()) throw Object.assign(fail(503, 'אייקאונט לא מחובר'), { code: 'NOT_CONFIGURED' });
+  let list;
+  try { list = await icountSuppliers.listSuppliers({ client }); } catch (e) { throw filingError(e); }
+  if (!list.complete) throw Object.assign(fail(502, 'רשימת הספקים מאייקאונט לא נקראה במלואה — נסו שוב'), { code: 'ICOUNT_ERROR' });
+  const docs = await ExpenseDocument.find({
+    status: 'active', source: { $ne: 'icount' }, icount_id: null, supplier_id: { $ne: null },
+  }, 'supplier_id vendor_name supplier_tax_id').lean();
+  const seen = new Map();
+  for (const d of docs) {
+    const k = String(d.supplier_id);
+    const e = seen.get(k) || { supplier_id: k, name: d.vendor_name || '', tax_id: d.supplier_tax_id || '', documents: 0 };
+    e.documents += 1;
+    seen.set(k, e);
+  }
+  const missing = [...seen.values()].filter(e => !icountSuppliers.resolveIn(list.suppliers, { tax_id: e.tax_id, name: e.name }));
+  res.json({ suppliers: missing.sort((a, b) => a.name.localeCompare(b.name, 'he')) });
+}
+
+const identityQuestions = async (req, res) => res.json({ questions: await bridge.pendingIdentityQuestions() });
+const icountPreview = async (req, res) => res.json(await filing.previewFiling(req.params.id, { expense_type_id: req.query.expense_type_id }));
+
+/** Same status/code shape the filing service throws, for errors raised here. */
+function filingError(e) {
+  if (e && e.status) return e;
+  const throttled = e && (e.code === 'THROTTLED' || e.code === 'NOT_CONFIGURED');
+  return Object.assign(new Error(String((e && e.message) || 'שגיאה לא ידועה מאייקאונט')), { status: throttled ? 503 : 502, code: throttled ? e.code : 'ICOUNT_ERROR' });
 }
 
 // ── writes ─────────────────────────────────────────────────────────────────
@@ -234,7 +339,37 @@ const intakePull = async (req, res) => {
   res.json(result);
 };
 
+// Same lock name as the daily job: a click never overlaps a run.
+const ICOUNT_LOCK = 'icount-mirror';
+const ICOUNT_LOCK_LEASE_MS = 30 * 60 * 1000;
+const runIcountPull = () => withJobLock(ICOUNT_LOCK, ICOUNT_LOCK_LEASE_MS, () => bridge.pullAndSync());
+
+async function icountPull(req, res) {
+  if (!getClient().isConfigured()) throw Object.assign(fail(503, 'אייקאונט לא מחובר'), { code: 'NOT_CONFIGURED' });
+  const { ran, result } = await runIcountPull();
+  if (!ran) throw fail(409, 'משיכה כבר רצה');
+  res.json(result);
+}
+
+async function icountIdentity(req, res) {
+  const b = body(req);
+  if (typeof b.same !== 'boolean') throw fail(400, 'יש לציין same: true או false');
+  res.json(await bridge.decideIdentity(b.document_id, b.icount_expense_id, b.same, by(req)));
+}
+
+const icountFile = async (req, res) => {
+  const b = body(req);
+  res.json(await filing.fileToIcount(req.params.id, {
+    expense_type_id: b.expense_type_id, confirm_duplicate: b.confirm_duplicate === true, by: by(req),
+  }));
+};
+const icountReportPaid = async (req, res) => res.json(await filing.reportPaid(req.params.id, { date: body(req).date, by: by(req) }));
+const icountUndoPaid = async (req, res) => res.json(await filing.undoReportPaid(req.params.id, { by: by(req) }));
+
 module.exports = {
+  runIcountPull, ICOUNT_LOCK, ICOUNT_LOCK_LEASE_MS,
+  icountStatus, getIcountSettings, putIcountSettings, icountSuppliersMissing, identityQuestions, icountPreview,
+  icountPull, icountIdentity, icountFile, icountReportPaid, icountUndoPaid,
   errorHandler,
   pairQueue, pairAlternatives, receiptsLane, receiptCandidates, closed, searchAll, counts, getDocument, getFile,
   documentOrders, listRules, suppliersMissingTaxId, intakeStatus, credits, getStartDate, putStartDate,
