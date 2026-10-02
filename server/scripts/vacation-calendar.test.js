@@ -134,6 +134,44 @@ console.log('\n💰  יום מקוצר לא מוריד יום חופש\n');
   eq(worked.total, 0, 'סגירה שהיא כן הגיעה אליה — לא יורד יום (התנהגות קיימת, נשמרת)');
 }
 
+console.log('\n🗓️  סגירה על היום החופשי של העובדת — מוצגת אך לא נספרת ולא משולמת\n');
+{
+  const src = require('fs').readFileSync('src/controllers/payrollMonth.controller.js', 'utf8');
+  const start = src.indexOf('function computeKindergartenVacationDays');
+  const body = src.slice(start, src.indexOf('\n}\n', start) + 3);
+  // eslint-disable-next-line no-new-func
+  const compute = new Function(`${body}; return computeKindergartenVacationDays;`)();
+  const hol = (kind, name, s, e) => ({
+    kind, name,
+    start_date: new Date(`${s}T00:00:00.000Z`),
+    end_date: new Date(`${e}T00:00:00.000Z`),
+    is_half_day: false,
+  });
+
+  // Sukkot 2026: Fri 25.09 through Wed 30.09. An employee working Sun–Thu
+  // (work_days 0-4, no commitment): Friday falls on her day off.
+  const sukkot = compute([hol('closure', 'סוכות', '2026-09-25', '2026-09-30')],
+    '2026-09', null, [], [], undefined, [0, 1, 2, 3, 4]);
+  eq(sukkot.total, 4, 'שישי לא נספר — רק ראשון עד רביעי (4 ימים)');
+  eq(sukkot.details.length, 4, 'הפירוט מכיל רק את ימי העבודה');
+  eq(sukkot.off_day_details.length, 1, 'שישי מוחזר בנפרד, מסומן כיום חופשי');
+  eq(sukkot.off_day_details[0].date, '2026-09-25', 'וזה אכן יום שישי 25.09');
+  eq(sukkot.off_day_details[0].value, 0, 'בערך 0 — לא משולם ולא יורד מהיתרה');
+
+  // No work_days on file → previous behavior: every non-Saturday day counts.
+  const noList = compute([hol('closure', 'סוכות', '2026-09-25', '2026-09-30')],
+    '2026-09', null, [], [], undefined, undefined);
+  eq(noList.total, 5, 'בלי work_days — כל ימי החול נספרים, כמו קודם');
+  eq(noList.off_day_details.length, 0, 'ואין ימים חופשיים מסומנים');
+
+  // A commitment still wins over work_days: committed Sun+Tue only.
+  const commitment = { days: [{ day: 0, is_off: false }, { day: 2, is_off: false }] };
+  const withCommit = compute([hol('closure', 'סוכות', '2026-09-25', '2026-09-30')],
+    '2026-09', commitment, [], [], undefined, [0, 1, 2, 3, 4, 5]);
+  eq(withCommit.total, 2, 'עם התחייבות — רק ראשון ושלישי נספרים');
+  eq(withCommit.off_day_details.length, 3, 'שאר ימי החול מוחזרים כימים חופשיים (שישי, שני, רביעי)');
+}
+
 console.log('\n🏷️  כל שורה נשמרת למודל הנכון\n');
 {
   const B = 'bbbbbbbbbbbbbbbbbbbbbbbb';

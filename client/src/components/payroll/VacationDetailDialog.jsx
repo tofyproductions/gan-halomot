@@ -140,7 +140,7 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
             <Alert severity="warning">חרגתם מהיתרה הקיימת ({Math.abs(remaining)} ימים).</Alert>
           )}
 
-          {row.vacation_days_auto?.total_days > 0 && (
+          {(row.vacation_days_auto?.total_days > 0 || (row.vacation_days_auto?.off_day_details || []).length > 0) && (
             <>
               <Divider />
               <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
@@ -156,24 +156,40 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
                   <TableRow>
                     <TableCell>תאריך</TableCell>
                     <TableCell>חופשה/חג</TableCell>
+                    <TableCell align="center">יום עבודה?</TableCell>
                     <TableCell align="center">ערך</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {row.vacation_days_auto.details.map((d, i) => (
-                    <TableRow key={i}>
+                  {[...(row.vacation_days_auto.details || []).map(d => ({ ...d, is_work_day: true })),
+                    ...(row.vacation_days_auto.off_day_details || [])]
+                    .sort((a, b) => a.date.localeCompare(b.date))
+                    .map((d, i) => (
+                    <TableRow key={i} sx={d.is_work_day ? undefined : { opacity: 0.55 }}>
                       <TableCell>{d.date}</TableCell>
                       <TableCell>{d.name}</TableCell>
                       <TableCell align="center">
-                        <Chip size="small" label={d.value === 0.5 ? '½' : d.value} color="primary" />
+                        {d.is_work_day
+                          ? <Chip size="small" label="יום עבודה" color="success" variant="outlined" />
+                          : <Chip size="small" label="יום חופשי שלה" variant="outlined" />}
+                      </TableCell>
+                      <TableCell align="center">
+                        {d.is_work_day
+                          ? <Chip size="small" label={d.value === 0.5 ? '½' : d.value} color="primary" />
+                          : <Chip size="small" label="—" />}
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
+              {(row.vacation_days_auto.off_day_details || []).length > 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  ימים שנופלים על היום החופשי של העובדת אינם נספרים, אינם משולמים ואינם יורדים מהיתרה — גם לא באישור הנה״ח.
+                </Typography>
+              )}
               <Stack direction="row" justifyContent="space-between" alignItems="center">
                 <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                  סה״כ ימי חופשה מלוח: {row.vacation_days_auto.total_days}
+                  סה״כ ימי חופשה מלוח (ימי עבודה בלבד): {row.vacation_days_auto.total_days}
                 </Typography>
                 <Stack direction="row" spacing={1}>
                   {Number(manualDays) > 0 && (

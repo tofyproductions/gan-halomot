@@ -286,17 +286,25 @@ function committedDayOverages(commitment, workedDays, excludeSet, graceH = 1) {
  * `worked_on_holiday` so the month still shows that she worked a day the
  * calendar says the gan was shut.
  *
- * Returns { total, details: [{date, name, value}], worked_on_holiday: [...] }.
+ * Returns { total, details: [{date, name, value}], off_day_details: [...],
+ * worked_on_holiday: [...] }.
  */
-function computeKindergartenVacationDays(holidays, monthYM, commitment, statutoryDates, workedDates, excludedDates) {
+function computeKindergartenVacationDays(holidays, monthYM, commitment, statutoryDates, workedDates, excludedDates, workDays) {
   // Only days she was supposed to WORK count as paid vacation. With a commitment
   // that means a required weekday; a closure on her off-day / a non-work weekday
-  // gives no vacation pay.
+  // gives no vacation pay. Without a commitment, the employee's own work_days
+  // list says which weekdays are hers — a closure on her weekly day off is not
+  // her leave, gets no pay, and draws nothing from her balance. It is still
+  // RETURNED, in off_day_details, so the dialog can show the day labeled as
+  // her day off instead of silently dropping it. No commitment and no
+  // work_days on file → every non-Saturday weekday counts, as before.
   const requiredWeekdays = new Set();
   const hasCommitment = !!(commitment && Array.isArray(commitment.days) && commitment.days.length);
   if (hasCommitment) {
     for (const d of commitment.days) if (!d.is_off) requiredWeekdays.add(d.day);
   }
+  const workWeekdays = (!hasCommitment && Array.isArray(workDays) && workDays.length)
+    ? new Set(workDays.map(Number)) : null;
   const statutory = statutoryDates instanceof Set ? statutoryDates : new Set(statutoryDates || []);
   const worked = workedDates instanceof Set ? workedDates : new Set(workedDates || []);
   // Days handed over to another pay mechanism entirely — currently the August
@@ -304,7 +312,7 @@ function computeKindergartenVacationDays(holidays, monthYM, commitment, statutor
   // day is a GIFT day the gan grants, and an unapproved one is simply unpaid.
   // Neither is her vacation, so neither may draw from her balance.
   const excluded = excludedDates instanceof Set ? excludedDates : new Set(excludedDates || []);
-  const result = { total: 0, details: [], worked_on_holiday: [] };
+  const result = { total: 0, details: [], off_day_details: [], worked_on_holiday: [] };
   for (const h of holidays) {
     // A short day is a day the gan RAN and finished early. She worked it and is
     // paid for the hours she punched; charging her a vacation day on top would
@@ -318,8 +326,13 @@ function computeKindergartenVacationDays(holidays, monthYM, commitment, statutor
       if (!ymd.startsWith(monthYM)) continue;
       const wd = d.getUTCDay();
       if (wd === 6) continue;
-      // Only a day she was supposed to work counts (when a commitment exists).
-      if (hasCommitment && !requiredWeekdays.has(wd)) continue;
+      // Only a day she was supposed to work counts — by commitment when one
+      // exists, by her work_days list otherwise. Her off-days are kept aside
+      // for display, never paid and never drawn from the balance.
+      if ((hasCommitment && !requiredWeekdays.has(wd)) || (workWeekdays && !workWeekdays.has(wd))) {
+        result.off_day_details.push({ date: ymd, name: h.name, value: 0, is_work_day: false });
+        continue;
+      }
       // Statutory-holiday days are paid via דמי חגים, not vacation — skip them.
       if (statutory.has(ymd)) continue;
       // Days owned by another mechanism (August bonus window) — see above.
@@ -1095,7 +1108,7 @@ async function getMonth(req, res, next) {
       for (const d of sickDatesForEmp(sickReqByEmp, emp._id, month)) augustExcludedDates.add(d);
       const vacationAutoInfo = computeKindergartenVacationDays(
         kgHolidays, month, commitmentByEmp.get(String(emp._id)), statutoryHolidayDates, workedDates,
-        augustExcludedDates,
+        augustExcludedDates, emp.work_days,
       );
       const empAdjustments = adjByEmp.get(String(emp._id)) || [];
       // Aggregate adjustments
@@ -2137,6 +2150,10 @@ async function getMonth(req, res, next) {
         vacation_days_auto: {
           total_days: vacationAutoInfo.total,
           details: vacationAutoInfo.details,
+          // Closure days that fall on her weekly day off (by commitment or
+          // work_days): shown in the dialog labeled as such — not paid, not
+          // counted in total_days, never drawn from the balance.
+          off_day_details: vacationAutoInfo.off_day_details,
           source: 'kindergarten_holidays',
           // August: calendar days exist but pay nothing until applied by hand.
           pending_manual_apply: vacationAutoGated
@@ -3576,7 +3593,7 @@ async function applyKindergartenVacationDays(req, res, next) {
       for (const d of sickDatesForEmp(sickReqByEmpForVacation, emp._id, month)) excludedForEmp.add(d);
       const info = computeKindergartenVacationDays(
         empHolidays, month, commitmentByEmp.get(String(emp._id)), statutoryHolidayDates,
-        undefined, excludedForEmp.size ? excludedForEmp : undefined,
+        undefined, excludedForEmp.size ? excludedForEmp : undefined, emp.work_days,
       );
       if (info.total <= 0) { noKindergartenHolidays++; continue; }
       const cur = Number(existingByEmp.get(String(emp._id))?.manual?.vacation_days) || 0;
