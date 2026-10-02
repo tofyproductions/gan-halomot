@@ -4751,6 +4751,78 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
     </table>`;
   };
 
+  // ── ריכוז עלויות שכר ──────────────────────────────────────────────────
+  // Aggregates ONLY figures that verifiably entered estimated_total (the +=
+  // sites in getMonth); everything else — base pay, travel, תקן completion,
+  // special days — stays inside the "base" residual line, so the table always
+  // reconciles to the grand total by construction instead of by hope.
+  const costSummary = (() => {
+    const sum = { holiday: 0, vacation: 0, sick: 0, bonus: 0, extra: 0, oneTimeComp: 0, deductions: 0, tekenVac: 0, tekenHol: 0 };
+    for (const r of rows) {
+      const isGlobal = r.salary_type === 'global';
+      const paD = r.partial_absence || {};
+      const dd = r.breakdown?.deductions || {};
+      if (isGlobal) {
+        // Carved out of the teken salary — information, not an addition.
+        sum.tekenVac += Number(r.vacation_pay) || 0;
+        sum.tekenHol += Number(r.holiday_pay_auto?.total_pay) || 0;
+      } else {
+        sum.holiday += (Number(r.manual?.holiday_pay) > 0) ? Number(r.manual.holiday_pay) : (Number(r.holiday_pay_auto?.total_pay) || 0);
+        sum.vacation += Number(r.vacation_pay) || 0;
+        sum.sick += Number(r.sick_info?.pay) || 0;
+      }
+      sum.bonus += (Number(r.bonus?.effective) || 0) + (Number(r.one_time_bonus?.amount) || 0)
+        + (Number(r.breakdown?.components?.closure_completion_bonus) || 0);
+      sum.extra += Number(paD.extra_pay) || 0;
+      sum.oneTimeComp += Number(r.one_time_salary_completion?.amount) || 0;
+      sum.deductions += (Number(dd.loans) || 0) + (Number(dd.absence) || 0) + (Number(paD.deduction) || 0);
+    }
+    const additives = sum.holiday + sum.vacation + sum.sick + sum.bonus + sum.extra + sum.oneTimeComp;
+    const base = grand - additives + sum.deductions;
+    const line = (label, val, opts = {}) => (val || opts.always ? `<tr>
+        <td style="border:1px solid #e2e8f0;padding:4px 8px;font-size:11px;font-weight:${opts.bold ? 800 : 600}">${label}</td>
+        <td style="border:1px solid #e2e8f0;padding:4px 8px;font-size:11px;font-weight:${opts.bold ? 800 : 700};text-align:left;color:${opts.color || '#0f172a'}">${opts.neg ? '−' : ''}${f(val)}</td>
+      </tr>` : '');
+    const branchRows = branchNames.map(name => {
+      const list = byBranch.get(name);
+      const subtotal = list.reduce((s, r) => s + (r.breakdown?.estimated_total || 0), 0);
+      return `<tr>
+        <td style="border:1px solid #e2e8f0;padding:4px 8px;font-size:11px;font-weight:600">${name}</td>
+        <td style="border:1px solid #e2e8f0;padding:4px 8px;font-size:11px;text-align:center">${list.length}</td>
+        <td style="border:1px solid #e2e8f0;padding:4px 8px;font-size:11px;font-weight:700;text-align:left">${f(subtotal)}</td>
+      </tr>`;
+    }).join('');
+    return `<div style="page-break-inside:avoid;border:2px solid #334155;border-radius:6px;padding:8px 10px;margin:0 0 12px;background:#f8fafc">
+      <div style="font-size:13px;font-weight:800;margin-bottom:6px">ריכוז עלויות שכר — ${month}</div>
+      <table style="width:100%;border-collapse:collapse;direction:rtl">
+        <tr style="background:#e2e8f0">
+          <td style="border:1px solid #cbd5e1;padding:4px 8px;font-size:10px;font-weight:800">רכיב</td>
+          <td style="border:1px solid #cbd5e1;padding:4px 8px;font-size:10px;font-weight:800;text-align:left">סכום</td>
+        </tr>
+        ${line('שכר עבודה ותקן (בסיס, שע״נ, נסיעות והשלמות)', base, { always: true })}
+        ${line('דמי חגים (עובדים שעתיים)', sum.holiday)}
+        ${line('תמורת חופשה (עובדים שעתיים)', sum.vacation)}
+        ${line('דמי מחלה (עובדים שעתיים)', sum.sick)}
+        ${line('בונוסים (כולל בונוס אוגוסט)', sum.bonus)}
+        ${line('תוספת שעות מעל התקן', sum.extra)}
+        ${line('השלמות שכר חד-פעמיות', sum.oneTimeComp)}
+        ${line('קיזוזים וניכויים (הלוואות, היעדרויות, חוסרים)', sum.deductions, { neg: true, color: '#b91c1c' })}
+        ${line('סה״כ לתשלום', grand, { bold: true, always: true })}
+      </table>
+      ${(sum.tekenVac || sum.tekenHol) ? `<div style="font-size:9.5px;color:#475569;font-weight:600;margin-top:4px">
+        בתוך שכר התקן (סיווג בלבד, לא תוספת לסכום): תמורת חופשה ${f(sum.tekenVac)} · דמי חגים ${f(sum.tekenHol)}
+      </div>` : ''}
+      <table style="width:100%;border-collapse:collapse;direction:rtl;margin-top:8px">
+        <tr style="background:#e2e8f0">
+          <td style="border:1px solid #cbd5e1;padding:4px 8px;font-size:10px;font-weight:800">סניף</td>
+          <td style="border:1px solid #cbd5e1;padding:4px 8px;font-size:10px;font-weight:800;text-align:center">עובדים</td>
+          <td style="border:1px solid #cbd5e1;padding:4px 8px;font-size:10px;font-weight:800;text-align:left">סה״כ</td>
+        </tr>
+        ${branchRows}
+      </table>
+    </div>`;
+  })();
+
   const sections = branchNames.map(name => {
     const list = byBranch.get(name);
     const m = acctMarker(name);
@@ -4775,6 +4847,7 @@ h1{font-size:17px;text-align:center;margin:0 0 2px}
 <body>
 <h1>כרטיסי שכר עובדים — ${month}</h1>
 <div class="sub">גן החלומות · ${rows.length} עובדים · סה״כ לתשלום ${f(grand)}</div>
+${costSummary}
 ${/-08$/.test(month) ? `<div style="border:2px solid #0e7490;background:#ecfeff;border-radius:6px;padding:6px 10px;margin:0 0 10px;font-size:11.5px;color:#0f172a;font-weight:700">
   🌴 <span style="color:#0e7490;font-weight:800">אוגוסט — חודש תשלום דמי ההבראה השנתי.</span>
   זכאי/ת כל עובד/ת שהשלימ/ה שנת עבודה מלאה, לפי מדרגות הוותק שבצו ההרחבה (5–10 ימים) × תעריף יום × היקף משרה.
