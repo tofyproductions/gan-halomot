@@ -238,11 +238,14 @@ export default function AttendanceMonitor() {
         boxShadow: '-6px 0 6px -6px rgba(0,0,0,0.18)',
         borderLeft: '1px solid', borderColor: 'divider',
         minWidth: 200,
-        cursor: block.employee_id && !block.unlinked ? 'pointer' : 'default',
-        '&:hover': block.employee_id && !block.unlinked ? { bgcolor: rowBg || COLOR.row.hover } : {},
+        // employee_id without !unlinked: an inactive employee's row sits in the
+        // unlinked section but is a real, named employee — her hours dialog
+        // and punch dialog must stay reachable.
+        cursor: block.employee_id ? 'pointer' : 'default',
+        '&:hover': block.employee_id ? { bgcolor: rowBg || COLOR.row.hover } : {},
       }}
       onClick={() => {
-        if (block.employee_id && !block.unlinked) {
+        if (block.employee_id) {
           setHoursDialog({
             open: true,
             employee: { _id: block.employee_id, full_name: block.full_name, israeli_id: block.israeli_id },
@@ -267,7 +270,7 @@ export default function AttendanceMonitor() {
                 sx={{ ml: 0.5, height: 18, fontSize: '0.65rem', bgcolor: COLOR.punch.incomplete.bg, color: COLOR.punch.incomplete.on, fontWeight: 700 }}
               />
             )}
-            {block.israeli_id && !block.unlinked && (
+            {block.israeli_id && (!block.unlinked || block.employee_id) && (
               <Typography variant="caption" display="block" dir="ltr" sx={{ color: 'text.secondary', fontFamily: 'monospace', fontSize: '0.65rem' }}>
                 {block.israeli_id}
               </Typography>
@@ -285,10 +288,13 @@ export default function AttendanceMonitor() {
         const fullDate = d;
         const openCell = () => setDayDialog({
           open: true,
-          employee: block.unlinked ? null : { _id: block.employee_id, full_name: block.full_name, israeli_id: block.israeli_id },
+          // An inactive employee's bucket carries employee_id — open it as a
+          // regular employee dialog (edit, manual add, transfer), not as the
+          // crippled "לא מזוהה" view. Truly unlinked stays employee-less.
+          employee: block.employee_id ? { _id: block.employee_id, full_name: block.full_name, israeli_id: block.israeli_id } : null,
           date: fullDate,
           branchId: selectedBranch && !isAllBranches ? selectedBranch : null,
-          isUnlinked: !!block.unlinked,
+          isUnlinked: !!block.unlinked && !block.employee_id,
           israeliId: block.israeli_id || null,
         });
 

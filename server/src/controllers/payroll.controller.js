@@ -855,8 +855,13 @@ async function attendanceByMonth(req, res, next) {
         .select('_id full_name israeli_id position user_id')
         .sort({ full_name: 1 })
         .lean(),
-      Employee.find({ is_active: true })
-        .select('_id full_name israeli_id branch_id position user_id')
+      // Inactive employees included ON PURPOSE: a punch whose employee_id
+      // points at a deactivated employee used to fall into the "לא מזוהות"
+      // bucket as "(לא מזוהה — ת"ז X)" — identified perfectly well, just not
+      // active — and clicking it answered "already assigned". The lookup now
+      // knows the name; the active/inactive split happens at bucketing time.
+      Employee.find({})
+        .select('_id full_name israeli_id branch_id position user_id is_active inactive_reason')
         .lean(),
       Branch.find({}).select('_id name').lean(),
     ]);
@@ -918,6 +923,29 @@ async function attendanceByMonth(req, res, next) {
       if (empIdStr && homeIdSet.has(empIdStr)) {
         // Home employee, punched at home — normal case.
         const bucket = byEmployee.get(empIdStr);
+        if (!bucket.days[dayKey]) bucket.days[dayKey] = [];
+        bucket.days[dayKey].push(p);
+      } else if (empIdStr && empById.has(empIdStr) && !empById.get(empIdStr).is_active) {
+        // A known but DEACTIVATED employee (e.g. employment ended mid-month).
+        // Shown in the unlinked section — these punches still need eyes — but
+        // under the real name, not "(לא מזוהה)": the punch IS assigned.
+        const emp = empById.get(empIdStr);
+        const k = `inactive:${empIdStr}`;
+        let bucket = unlinkedByIsraeliId.get(k);
+        if (!bucket) {
+          bucket = {
+            employee_id: empIdStr,
+            full_name: `${emp.full_name} (לא פעיל/ה${emp.inactive_reason ? ' — ' + emp.inactive_reason : ''})`,
+            israeli_id: emp.israeli_id || String(p.israeli_id || ''),
+            position: emp.position || '',
+            days: {},
+            month_total_hours: 0,
+            incomplete_days: 0,
+            unlinked: true,
+            inactive_employee: true,
+          };
+          unlinkedByIsraeliId.set(k, bucket);
+        }
         if (!bucket.days[dayKey]) bucket.days[dayKey] = [];
         bucket.days[dayKey].push(p);
       } else if (empIdStr && empById.has(empIdStr)) {

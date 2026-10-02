@@ -95,6 +95,10 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
   const [addDate, setAddDate] = useState(date);   // which date the manual punch is for
   const [addBranch, setAddBranch] = useState(branchId || '');
   const [editing, setEditing] = useState({}); // id → { hhmm, state }
+  // Quick branch transfer: one click writes an OUT at the current branch and
+  // an IN at the target branch at the SAME time — travel time is paid, so the
+  // two timestamps are deliberately identical. 13:00 is the usual switch hour.
+  const [transfer, setTransfer] = useState({ time: '13:00', to_branch: '' });
   const [dirty, setDirty] = useState(false);
   // Notify the parent (e.g. AttendanceMonitor) after every change so its grid
   // and totals refresh immediately — no manual page reload needed.
@@ -138,6 +142,7 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
       setDraft({ in_time: '', out_time: '', note: '' });
       setEditing({}); setDirty(false);
       setAddDate(date); setAddBranch(branchId || '');
+      setTransfer({ time: '13:00', to_branch: '' });
     }
   }, [open, date, branchId]);
 
@@ -244,6 +249,33 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
         toast.success(`נוספה החתמה ל-${useDate}`);
       })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
+  };
+
+  const doTransfer = async () => {
+    if (!employee?._id) return;
+    if (!transfer.to_branch) return toast.error('יש לבחור סניף יעד');
+    if (!transfer.time) return toast.error('יש לבחור שעת מעבר');
+    const useDate = addDate || date;
+    const fromBranch = branchId || undefined; // undefined → home branch on the server
+    if (fromBranch && String(transfer.to_branch) === String(fromBranch)) {
+      return toast.error('סניף היעד זהה לסניף הנוכחי');
+    }
+    const note = 'מעבר בין סניפים — זמן הנסיעה בתשלום';
+    try {
+      await api.post('/payroll/manual-punches', {
+        employee_id: employee._id, date: useDate, branch_id: fromBranch, out_time: transfer.time, note,
+      });
+      await api.post('/payroll/manual-punches', {
+        employee_id: employee._id, date: useDate, branch_id: transfer.to_branch, in_time: transfer.time, note,
+      });
+      if (useDate === date) load();
+      markDirty();
+      toast.success(`נרשם מעבר סניף ב-${transfer.time}: יציאה מהסניף הנוכחי + כניסה לסניף היעד`);
+    } catch (err) {
+      // The first punch may have landed while the second failed — say so, so
+      // the person checks the list instead of clicking again blindly.
+      toast.error((err.response?.data?.error || 'שגיאה') + ' — בדקו ברשימה אם נרשמה יציאה ללא כניסה');
+    }
   };
 
   if (!open) return null;
@@ -404,6 +436,28 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
               <TextField label="הערה" size="small" value={draft.note}
                 onChange={e => setDraft({ ...draft, note: e.target.value })} fullWidth />
               <Button startIcon={<AddIcon />} variant="contained" onClick={add} size="small">הוסף החתמה</Button>
+            </Stack>
+
+            <Divider sx={{ my: 1.5 }} />
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>מעבר סניף מהיר</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              רושם בלחיצה אחת יציאה מהסניף הנוכחי וכניסה לסניף היעד באותה שעה — זמן הנסיעה בתשלום,
+              ולכן שתי ההחתמות זהות. התאריך נלקח משדה התאריך שלמעלה.
+            </Typography>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <TextField type="time" label="שעת מעבר" size="small" value={transfer.time}
+                onChange={e => setTransfer(t => ({ ...t, time: e.target.value }))}
+                InputLabelProps={{ shrink: true }} sx={{ width: 130 }} />
+              <TextField select label="סניף יעד" size="small" value={transfer.to_branch}
+                onChange={e => setTransfer(t => ({ ...t, to_branch: e.target.value }))} fullWidth>
+                {(branches || [])
+                  .filter(b => String(b._id || b.id) !== String(branchId || ''))
+                  .map(b => <MenuItem key={b._id || b.id} value={b._id || b.id}>{b.name}</MenuItem>)}
+              </TextField>
+              <Button variant="contained" color="secondary" size="small" sx={{ whiteSpace: 'nowrap' }}
+                disabled={!transfer.to_branch || !transfer.time} onClick={doTransfer}>
+                בצע מעבר
+              </Button>
             </Stack>
           </>
         )}
