@@ -5688,10 +5688,18 @@ async function splitCrossBranchDay(req, res, next) {
 
     const dayFrom = ilDateTimeOf(date, '00:00');
     const dayTo = new Date(dayFrom.getTime() + 36 * 3600 * 1000);
+    // The 36-hour window is a DST-safe overfetch — it reaches into the next
+    // morning, so without the per-punch day filter below, yesterday's clean
+    // 2-punch cross-branch day "gains" today's clock-in and gets rejected as
+    // not-simple (רותם גרשון 02.09, caught live: her 03.09 07:48 punch made
+    // list.length 3). Same wide-window-then-filter pattern the attendance
+    // grid uses.
+    const ilKey = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date(d));
     const list = (await Punch.find({
       employee_id, timestamp: { $gte: dayFrom, $lt: dayTo }, ignored: { $ne: true },
     }).sort({ timestamp: 1 }).lean())
-      .filter(p => ['auto', 'approved'].includes(p.approval_status || 'auto'));
+      .filter(p => ['auto', 'approved'].includes(p.approval_status || 'auto'))
+      .filter(p => ilKey(p.timestamp) === date);
 
     if (list.length !== 2) {
       return res.status(409).json({ error: 'היום כבר אינו יום דו-סניפי פשוט — יש לטפל בו כיום עם כפילויות' });

@@ -194,6 +194,21 @@ async function main() {
   const propPunches = await Punch.find({ employee_id: emp._id, timestamp_source: 'manual', timestamp: { $gte: il(D3, '00:00'), $lt: il(D3, '23:59') } }).lean();
   ok(propPunches.every(p => p.approval_status === 'pending_accountant'), 'ההחתמות שיצרה ממתינות להנה"ח');
 
+  head('1ד. יום דו-סניפי שאחריו יום עבודה רגיל — עדיין מתפצל (רותם גרשון, 02.10.2026)');
+  // The 36h overfetch window used to swallow the NEXT morning's clock-in,
+  // see 3 punches instead of 2, and reject the day as "not simple" — which
+  // is the normal production state: by the time anyone opens the issues
+  // dialog, the next day's punches already exist.
+  const DPREV = '2026-09-15';
+  await device(kaplan, DPREV, '07:14', 0);
+  await device(herz, DPREV, '16:44', 1);
+  await device(kaplan, '2026-09-16', '07:30', 0); // next morning, inside the 36h window
+  await device(kaplan, '2026-09-16', '16:00', 1);
+  const nextDay = await request({ method: 'POST', path: '/api/payroll-month/2026-09/punch-issues/split-branch', token: adminToken,
+    body: { employee_id: String(emp._id), date: DPREV, out_time: '13:00', in_time: '13:00' } });
+  eq(nextDay.status, 200, 'הפיצול מצליח גם כשקיימות החתמות ביום שאחריו');
+  eq(nextDay.body?.minutes, 570, 'וכל שעות היום נספרות (9.5 שעות, מעבר ישיר)');
+
   /* ---------------------------------------------------------------- */
   head('2. אישור הנה"ח/מנהל מערכת הוא סופי — גם לפני המנהלת');
   const D4 = '2026-09-09';
