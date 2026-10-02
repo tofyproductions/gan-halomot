@@ -231,6 +231,10 @@ function toCanonicalEmployee(row) {
       // employee this month — worth its own note, since `vacation_capped`
       // is now false and would otherwise read as "nothing unusual happened".
       vacation_override_applied: !!vacationUsage.override_applied,
+      // Set when the lift was PARTIAL — accounting approved paying beyond the
+      // balance only up to this many days; the note must not claim "paid in
+      // full" for these.
+      vacation_approved_days_limit: vacationUsage.approved_days_limit ?? null,
       vacation_balance_available: vacationUsage.available,
       holiday_days: num(holidayDays),
       absence_deduct_days: num(row.absence?.deductible_days),

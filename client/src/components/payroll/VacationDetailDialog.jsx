@@ -27,11 +27,18 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
   const [manualDays, setManualDays] = useState(0);
   const [addingDays, setAddingDays] = useState('');
   const [payConfirmed, setPayConfirmed] = useState(false);
+  // Partial accounting approval — pay beyond the balance up to N days.
+  // approvedLimit is the SAVED value; limitInput is what's being typed.
+  const [approvedLimit, setApprovedLimit] = useState(null);
+  const [limitInput, setLimitInput] = useState('');
 
   useEffect(() => {
     if (!open || !row) return;
     setManualDays(Number(row.manual.vacation_days) || 0);
     setPayConfirmed(!!row.manual.vacation_pay_confirmed);
+    const lim = Number(row.manual.vacation_pay_approved_days);
+    setApprovedLimit(Number.isFinite(lim) && lim > 0 ? lim : null);
+    setLimitInput(Number.isFinite(lim) && lim > 0 ? String(lim) : '');
     setLoading(true);
     api.get('/employee-requests/vacation-for-month', { params: { employee_id: row.employee_id, month } })
       .then(res => setRequests(res.data.requests || []))
@@ -63,6 +70,17 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
   const saveManualDays = (next) => {
     api.patch(`/payroll-month/${row.employee_id}`, { manual: { vacation_days: next } }, { params: { month } })
       .then(() => { onSaved && onSaved(); toast.success('עודכן'); })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
+  };
+
+  const saveApprovedLimit = (next) => {
+    api.patch(`/payroll-month/${row.employee_id}`, { manual: { vacation_pay_approved_days: next } }, { params: { month } })
+      .then(() => {
+        setApprovedLimit(next);
+        setLimitInput(next ? String(next) : '');
+        onSaved && onSaved();
+        toast.success(next ? `אושר תשלום עד ${next} ימים מעבר ליתרה` : 'המגבלה בוטלה — חזרה להערה הקבועה');
+      })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
@@ -115,7 +133,7 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
           )}
           {balanceCapped && (
             <Alert severity="warning">
-              נרשמו/התבקשו {daysAsked} ימי חופשה, אך רק {usedDays} מכוסים ביתרה הקיימת — {Math.round((daysAsked - usedDays) * 100) / 100} ימים ללא ניצול/תשלום. לאשר בכל זאת: המתג "אישור הנה״ח" למטה.
+              נרשמו/התבקשו {daysAsked} ימי חופשה, אך רק {usedDays} מכוסים ביתרה הקיימת — {Math.round((daysAsked - usedDays) * 100) / 100} ימים ללא ניצול/תשלום. לאשר בכל זאת: המתג "אישור הנה״ח" למטה, או אישור חלקי עד מגבלת ימים.
             </Alert>
           )}
           {remaining != null && remaining < 0 && (
@@ -235,10 +253,12 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
                   עובד/ת בשכר גלובלי — ימי החופשה יורדים מהיתרה אך אינם מוסיפים תשלום; אין צורך באישור תשלום.
                 </Alert>
               ) : (
-              <Alert severity={payConfirmed ? 'success' : 'warning'} sx={{ borderRadius: 2 }}>
+              <Alert severity={(payConfirmed || approvedLimit > 0) ? 'success' : 'warning'} sx={{ borderRadius: 2 }}>
                 {payConfirmed
                   ? 'הנהלת חשבונות אישרה לשלם את ימי החופשה גם ללא יתרת ימים לניצול — כך יופיע בכרטיס לרו״ח.'
-                  : 'ברירת מחדל: בכרטיס לרו״ח מופיעה הערה קבועה — לשלם רק אם נותרו לעובד/ת ימי חופשה לניצול בתלוש.'}
+                  : approvedLimit > 0
+                    ? `הנהלת חשבונות אישרה לשלם עד ${approvedLimit} ימי חופשה גם מעבר ליתרה — מעבר למגבלה לא ישולם, וכך יופיע בכרטיס לרו״ח.`
+                    : 'ברירת מחדל: בכרטיס לרו״ח מופיעה הערה קבועה — לשלם רק אם נותרו לעובד/ת ימי חופשה לניצול בתלוש.'}
               </Alert>
               )}
               {row.salary_type !== 'global' && (isAdmin || isAccountant) && (
@@ -257,6 +277,45 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
                   }} />}
                   label={<Typography variant="body2" sx={{ fontWeight: 600 }}>אישור הנה״ח: שלם גם ללא יתרת ימים</Typography>}
                 />
+              )}
+              {row.salary_type !== 'global' && (isAdmin || isAccountant) && (
+                <>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <TextField
+                      size="small"
+                      type="number"
+                      label="או אישור חלקי — עד כמה ימים"
+                      value={limitInput}
+                      onChange={e => setLimitInput(e.target.value)}
+                      disabled={payConfirmed}
+                      inputProps={{ step: 0.5, min: 0.5 }}
+                      sx={{ width: 200 }}
+                    />
+                    <Button
+                      variant="outlined" size="small"
+                      disabled={payConfirmed || !limitInput || Number(limitInput) <= 0 || Number(limitInput) === Number(approvedLimit)}
+                      onClick={async () => {
+                        const n = Number(limitInput);
+                        if (!(await confirm({
+                          title: 'אישור תשלום חלקי מעבר ליתרה',
+                          message: `לאשר תשלום של עד ${n} ימי חופשה גם אם היתרה לא מכסה אותם? מעבר למגבלה לא ישולם. האישור יופיע בכרטיס לרו״ח.`,
+                          confirm_label: 'אשר מגבלה',
+                        }))) return;
+                        saveApprovedLimit(n);
+                      }}
+                    >
+                      אשר מגבלה
+                    </Button>
+                    {approvedLimit > 0 && (
+                      <Button variant="outlined" color="error" size="small" disabled={payConfirmed} onClick={() => saveApprovedLimit(null)}>
+                        בטל מגבלה
+                      </Button>
+                    )}
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary">
+                    המגבלה קובעת כמה ימים ישולמו לכל היותר מעבר ליתרה. היא לא מפחיתה ימים שהיתרה כבר מכסה, ולא פעילה כשהמתג "שלם גם ללא יתרת ימים" דולק.
+                  </Typography>
+                </>
               )}
             </>
           )}

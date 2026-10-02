@@ -137,6 +137,82 @@ async function main() {
     ok('the accountant PDF shows the same overridden figure as the row and the שקלולית export — not a second, disagreeing recompute');
   }
 
+  console.log('partial approval: pay beyond the balance only up to an approved day limit (01.10.2026)');
+  {
+    const emp = await Employee.create({
+      full_name: 'עובדת בדיקה (אישור חלקי)', israeli_id: '111333558',
+      branch_id: branch._id, salary_type: 'hourly', hourly_rate: 60, is_active: true,
+      start_date: new Date('2024-01-01'), work_days: [0, 1, 2, 3, 4],
+      amuta_distribution: [{ amuta_id: amuta._id, hourly_rate: 60 }],
+      // 2 days in hand this month.
+      vacation_balance_opening: { days: 2, as_of_month: month },
+      vacation_monthly_accrual: 0,
+      bank_number: '10', bank_branch: '001', bank_account: '444444',
+      employee_number: '78',
+    });
+    await PayrollMonth.create({
+      employee_id: emp._id, branch_id: branch._id, month,
+      // Asked 7, holds 2, accounting approved paying up to 5.
+      manual: { vacation_days: 7, vacation_pay_approved_days: 5 },
+    });
+
+    const data = await fetchMonthData({ month, branch: String(branch._id) }, { role: 'system_admin' });
+    const row = (data.rows || []).find(r => String(r.employee_id) === String(emp._id));
+
+    assert.strictEqual(row.manual.vacation_pay_approved_days, 5, 'the limit round-trips on row.manual for the dialog');
+    assert.strictEqual(row.vacation_usage.paid, 5, 'paid up to the approved limit, not the balance (2) and not the full request (7)');
+    assert.strictEqual(row.vacation_usage.unpaid, 2, 'the 2 days past the limit stay unpaid');
+    assert.strictEqual(row.vacation_usage.capped, true, 'still capped — the limit did not cover the whole request');
+    assert.strictEqual(row.vacation_usage.override_applied, true);
+    assert.strictEqual(row.vacation_usage.approved_days_limit, 5);
+    assert.strictEqual(row.vacation_eff_days, 5, 'the credited/shown day count follows the limit');
+    assert.strictEqual(row.vacation_days_requested, 7, 'the raw request is preserved for audit');
+    ok('partial approval pays min(request, limit): 5 of 7, with 2 unpaid');
+
+    // The שקלולית export reads the same partial figure and files its own note.
+    const source = buildExportSource(month, [row]);
+    const ce = source.ready.find(x => x.employee.employee_number === '78');
+    assert.ok(ce, 'the export employee must exist');
+    assert.strictEqual(ce.quantities.vacation_days, 5, 'שקלולית quantity follows the partial limit');
+    const { notes } = shkulit.buildMovements(source);
+    const note = notes.find(n => n.subject === 'ימי חופשה — אישור הנה״ח חלקי');
+    assert.ok(note, 'the partial approval is filed under its own subject, not the full-approval one');
+    assert.ok(!notes.some(n => n.subject === 'ימי חופשה — אישור הנה״ח' && n.employee_number === '78'),
+      'the full-approval note ("שולמו במלואם") must NOT fire for a partial lift');
+    ok('the שקלולית export files a partial-approval note and not the false "paid in full" one');
+
+    // The accountant PDF names the limit instead of "מוגבל ליתרה".
+    const { buildAccountantHtml } = require('../src/controllers/payrollMonth.controller');
+    const html = buildAccountantHtml(month, [row]);
+    assert.ok(html.includes('אישור הנה״ח חלקי'), 'the accountant PDF carries the partial-approval note');
+    assert.ok(html.includes('אושר עד 5'), 'the vacation cell names the approved limit');
+    ok('the accountant PDF explains the partial approval');
+  }
+
+  console.log('a limit below what the balance already covers is a no-op — it never reduces pay');
+  {
+    const emp = await Employee.create({
+      full_name: 'עובדת בדיקה (מגבלה מתחת ליתרה)', israeli_id: '111333559',
+      branch_id: branch._id, salary_type: 'hourly', hourly_rate: 60, is_active: true,
+      start_date: new Date('2024-01-01'), work_days: [0, 1, 2, 3, 4],
+      amuta_distribution: [{ amuta_id: amuta._id, hourly_rate: 60 }],
+      vacation_balance_opening: { days: 3, as_of_month: month },
+      vacation_monthly_accrual: 0,
+      bank_number: '10', bank_branch: '001', bank_account: '555555',
+    });
+    await PayrollMonth.create({
+      employee_id: emp._id, branch_id: branch._id, month,
+      // Asked 7, holds 3, "approved" only 1 — the balance still pays its 3.
+      manual: { vacation_days: 7, vacation_pay_approved_days: 1 },
+    });
+    const data = await fetchMonthData({ month, branch: String(branch._id) }, { role: 'system_admin' });
+    const row = (data.rows || []).find(r => String(r.employee_id) === String(emp._id));
+    assert.strictEqual(row.vacation_usage.paid, 3, 'the balance-covered 3 days are paid regardless of the lower limit');
+    assert.strictEqual(row.vacation_usage.capped, true);
+    assert.strictEqual(row.vacation_usage.approved_days_limit ?? null, null, 'a no-op limit is not recorded on the row — the accountant card must not name it');
+    ok('a limit under the covered days never cuts pay below what the balance covers');
+  }
+
   console.log('no vacation_balance_opening on file — falls back to the payslip-imported balance instead of leaving the cap inert (שילו בגים, 29.09.2026)');
   {
     const emp = await Employee.create({

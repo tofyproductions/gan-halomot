@@ -547,7 +547,15 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
       });
     }
 
-    if (ce.quantities?.vacation_override_applied) {
+    if (ce.quantities?.vacation_override_applied && Number(ce.quantities?.vacation_approved_days_limit) > 0) {
+      // The lift was PARTIAL — a day limit, not a blank check. "שולמו במלואם"
+      // below would be false whenever the limit is under the recorded days.
+      notes.push({
+        employee_number: empNo, full_name: ce.employee.full_name,
+        subject: 'ימי חופשה — אישור הנה״ח חלקי',
+        text: `הנהלת חשבונות אישרה לשלם עד ${round2(Number(ce.quantities.vacation_approved_days_limit))} ימי חופשה מעבר ליתרה (${round2(Number(ce.quantities.vacation_balance_available) || 0)}) — שולמו ${vacDays} מתוך ${vacTaken} שנרשמו${Number(ce.quantities.vacation_days_unpaid) > 0 ? `; ${round2(ce.quantities.vacation_days_unpaid)} ימים נותרו ללא תשלום` : ''}.`,
+      });
+    } else if (ce.quantities?.vacation_override_applied) {
       // Accounting explicitly lifted the balance cap for THIS employee, this
       // month — vacTaken === vacDays now (nothing capped), so the condition
       // below would stay silent. That silence would read as "nothing unusual

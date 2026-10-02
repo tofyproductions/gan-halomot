@@ -45,6 +45,13 @@ const payrollMonthSchema = new mongoose.Schema({
     // even without balance; that flips the note. Accountant/admin only.
     vacation_pay_confirmed: { type: Boolean, default: false },
 
+    // Partial accounting approval: pay the month's vacation days beyond the
+    // balance, but only up to this many days IN TOTAL. The full approval above
+    // wins when both are set. Never reduces what the balance already covers —
+    // reducing the days themselves is done by editing vacation_days.
+    // Accountant/admin only, same as the full approval.
+    vacation_pay_approved_days: { type: Number, default: null },
+
     // Advance deduction directive — references a saved preset OR free text.
     // The action attached to the preset determines what payroll should do.
     advance_deduction_preset_id: { type: mongoose.Schema.Types.ObjectId, ref: 'PayrollPresetOption', default: null },

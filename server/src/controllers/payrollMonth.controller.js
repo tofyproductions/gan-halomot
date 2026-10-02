@@ -104,7 +104,7 @@ const {
 } = require('../services/tekenCompletionCarve');
 const { applyCibusReport } = require('../services/cibusImport');
 const { computeSickPay, availableBalance, accruedBalance, groupSickSpells } = require('../services/sickPay');
-const { vacationBalance: vacationBalanceFor, vacationUsageForMonth } = require('../services/vacationBalance');
+const { vacationBalance: vacationBalanceFor, vacationUsageForMonth, round3 } = require('../services/vacationBalance');
 const { lookbackMonths, dayRatesFrom, aggregate, paidHours: paidHoursFor } = require('../services/hourlyDayRates');
 const { dispatchEmail } = require('../services/email.service');
 
@@ -1231,6 +1231,27 @@ async function getMonth(req, res, next) {
       const vacationPayConfirmed = !!manual.vacation_pay_confirmed;
       if (!isTeken && vacationPayConfirmed && vacUseRow.capped) {
         vacUseRow = { ...vacUseRow, paid: vacEffDays, unpaid: 0, capped: false, override_applied: true };
+      } else if (!isTeken && vacUseRow.capped
+          && Number.isFinite(Number(manual.vacation_pay_approved_days))
+          && Number(manual.vacation_pay_approved_days) > 0) {
+        // Partial approval: pay beyond the balance, but only up to N days in
+        // TOTAL for the month. Never pays less than the balance already
+        // covers — a limit below the covered days is not a pay cut, it is a
+        // no-op and is not even recorded on the row, so the accountant card
+        // doesn't name a "limit" that changed nothing (cutting the days
+        // themselves is vacation_days' job).
+        const limit = Number(manual.vacation_pay_approved_days);
+        const paid = round3(Math.min(vacEffDays, Math.max(vacUseRow.paid, limit)));
+        if (paid > vacUseRow.paid) {
+          vacUseRow = {
+            ...vacUseRow,
+            paid,
+            unpaid: round3(Math.max(0, vacEffDays - paid)),
+            capped: paid < vacEffDays,
+            override_applied: true,
+            approved_days_limit: limit,
+          };
+        }
       }
       // The days actually CREDITED this month — capped at the balance for an
       // hourly employee (unless just overridden above), always the full
@@ -1930,6 +1951,7 @@ async function getMonth(req, res, next) {
           // switch's state, and that always came back undefined, so the switch
           // looked "off" again after every refetch even when it was saved on.
           vacation_pay_confirmed: manual.vacation_pay_confirmed === true,
+          vacation_pay_approved_days: manual.vacation_pay_approved_days ?? null,
           absence_entries: absenceEntries,
           partial_absence_entries: paEntries,
           partial_extra_entries: paExtraEntries,
@@ -2250,6 +2272,7 @@ async function getMonth(req, res, next) {
           capped: vacUseRow.capped,
           available: vacUseRow.available,
           override_applied: !!vacUseRow.override_applied,
+          approved_days_limit: vacUseRow.approved_days_limit ?? null,
         },
         sick_info: {
           policy: emp.sick_pay_policy || 'statutory',
@@ -2399,7 +2422,7 @@ async function upsertEntry(req, res, next) {
       'travel_override', 'travel_note', 'bonus', 'one_time_bonus', 'one_time_salary_completion', 'notes', 'custom_values',
       'include_salary_completion', 'closure_completion', 'closure_completion_approved_dates',
       'supplement_manager_approved', 'supplement_accounting_approved',
-      'vacation_pay_confirmed',
+      'vacation_pay_confirmed', 'vacation_pay_approved_days',
       'absence_entries', 'partial_absence_entries', 'partial_extra_entries',
       'absence_offset_entries',
     ];
@@ -2457,9 +2480,16 @@ async function upsertEntry(req, res, next) {
         return res.status(403).json({ error: 'רק הנהלת חשבונות יכולה לאשר את חלק ההנה״ח' });
       }
       // Paying vacation without remaining balance is a deliberate accounting
-      // decision — no one else may flip it.
-      if (k === 'vacation_pay_confirmed' && !canSetAccountingApproval) {
+      // decision — no one else may flip it. Same for the partial day limit.
+      if ((k === 'vacation_pay_confirmed' || k === 'vacation_pay_approved_days') && !canSetAccountingApproval) {
         return res.status(403).json({ error: 'רק הנהלת חשבונות יכולה לאשר תשלום חופשה ללא יתרה' });
+      }
+      // The partial limit is a positive day count or nothing — anything else
+      // (0, '', negative, NaN) clears it back to the default note.
+      if (k === 'vacation_pay_approved_days') {
+        const n = Number(body[k]);
+        setObj[`manual.${k}`] = (Number.isFinite(n) && n > 0) ? n : null;
+        continue;
       }
       // The August-bonus approval list is what gets people paid — accept only
       // clean YYYY-MM-DD strings, deduped and sorted, whatever the client sent.
@@ -4608,7 +4638,7 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
       ${completionsRow}
       <tr>
         ${cell('חופשה', vac
-          ? `${n1(vac)} ימים${vacUse.capped ? ` (מתוך ${n1(vacTaken)} — מוגבל ליתרה)` : ''}${vacUse.overdraft ? ` · ${n1(vacUse.overdraft)} מעבר ליתרה` : ''}`
+          ? `${n1(vac)} ימים${vacUse.capped ? ` (מתוך ${n1(vacTaken)} — ${Number(vacUse.approved_days_limit) > 0 ? `אושר עד ${n1(vacUse.approved_days_limit)} ע״י הנה״ח` : 'מוגבל ליתרה'})` : ''}${vacUse.overdraft ? ` · ${n1(vacUse.overdraft)} מעבר ליתרה` : ''}`
             // A תקן employee's leave is paid now (code 8, carved from 47), so
             // the cell names the amount the file will carry.
             + (isGlobal && Number(r.vacation_pay) > 0 ? emphLine(`תמורת חופשה: ${f(r.vacation_pay)}`) : '')
@@ -4657,6 +4687,10 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
         ? `<tr><td colspan="6" style="border:2px solid #16a34a;background:#f0fdf4;padding:5px 9px">
             <span style="font-size:10.5px;color:#15803d;font-weight:800">חופשה — אישור הנה״ח: </span>
             <span style="font-size:12px;color:#111827;font-weight:700">הנהלת חשבונות אישרה לשלם את ימי החופשה גם ללא יתרת ימים לניצול.</span></td></tr>`
+        : (Number(vacUse.approved_days_limit) > 0 && vacUse.override_applied
+        ? `<tr><td colspan="6" style="border:2px solid #16a34a;background:#f0fdf4;padding:5px 9px">
+            <span style="font-size:10.5px;color:#15803d;font-weight:800">חופשה — אישור הנה״ח חלקי: </span>
+            <span style="font-size:12px;color:#111827;font-weight:700">הנהלת חשבונות אישרה לשלם עד ${n1(vacUse.approved_days_limit)} ימי חופשה גם מעבר ליתרה — שולמו ${n1(vac)} מתוך ${n1(vacTaken)} שנרשמו${vacUse.unpaid > 0 ? `; ${n1(vacUse.unpaid)} ימים נותרו ללא תשלום` : ''}.</span></td></tr>`
         : (vacBalanceKnown
           // The balance is on file and the days came out of it — say which
           // number they came out of. This note used to read "לתשלום רק אם
@@ -4669,7 +4703,7 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
             <span style="font-size:12px;color:#111827;font-weight:700">היתרה בתחילת החודש הייתה ${n1(vacUse.available)} ימים ומכסה את ${n1(vac)} הימים ששולמו.</span></td></tr>`
           : `<tr><td colspan="6" style="border:2px solid #b91c1c;background:#fef2f2;padding:5px 9px">
             <span style="font-size:10.5px;color:#b91c1c;font-weight:800">חופשה — יתרה לא רשומה: </span>
-            <span style="font-size:12px;color:#111827;font-weight:700">אין לעובדת יתרת פתיחה במערכת, ולכן ${n1(vac)} ימי החופשה נשלחו לתשלום <u>ללא בדיקת יתרה</u>. לאמת מול היתרה בתלוש לפני תשלום.</span></td></tr>`)) : ''}
+            <span style="font-size:12px;color:#111827;font-weight:700">אין לעובדת יתרת פתיחה במערכת, ולכן ${n1(vac)} ימי החופשה נשלחו לתשלום <u>ללא בדיקת יתרה</u>. לאמת מול היתרה בתלוש לפני תשלום.</span></td></tr>`))) : ''}
       ${unpaidHolidays ? `<tr><td colspan="6" style="border:2px solid #f59e0b;background:#fffbeb;padding:5px 9px">
           <span style="font-size:10.5px;color:#92400e;font-weight:800">דמי חגים — לא שולמו (לבדיקה): </span>
           <span style="font-size:12px;color:#111827;font-weight:700">${unpaidHolidays}</span></td></tr>` : ''}
