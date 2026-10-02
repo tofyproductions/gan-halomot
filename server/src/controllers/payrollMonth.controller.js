@@ -18,6 +18,7 @@ const {
   conflictsForMonth: fixedScheduleConflicts,
   markDayOff: markFixedScheduleDayOff,
   ilDateTime: ilDateTimeOf,
+  ilDayBounds,
   datesInRange,
 } = require('../services/fixedSchedule');
 const {
@@ -5550,8 +5551,9 @@ async function resolveFixedConflict(req, res, next) {
       return res.status(400).json({ error: 'decision חייב להיות clock או fixed' });
     }
 
-    const dayFrom = ilDateTimeOf(date, '00:00');
-    const dayTo = new Date(dayFrom.getTime() + 36 * 3600 * 1000);
+    // Exact day bounds — the old +36h window also marked the NEXT morning's
+    // real clock punches as ignored, silently dropping them from pay.
+    const { from: dayFrom, to: dayTo } = ilDayBounds(date);
 
     if (decision === 'clock') {
       await markFixedScheduleDayOff(employee_id, date, 'הוחלט לפי החתמת השעון');

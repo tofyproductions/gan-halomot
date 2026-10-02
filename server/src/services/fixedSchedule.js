@@ -41,6 +41,19 @@ function ilDateTime(dateStr, hhmm) {
 }
 
 /**
+ * Exact Israel-day bounds [from, to) for one YYYY-MM-DD. DST-safe: ilDateTime
+ * computes the offset per date, so a day that crosses a clock change is still
+ * exactly that day. Use this for day-scoped punch QUERIES AND WRITES instead
+ * of `from + 36h` — the 36-hour shortcut reaches into the next day until noon,
+ * and every write that used it spilled over: deleting one day's generated
+ * punches also deleted the next morning's (אורלי, 02.10.2026).
+ */
+function ilDayBounds(dateStr) {
+  const next = new Date(Date.parse(`${dateStr}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
+  return { from: ilDateTime(dateStr, '00:00'), to: ilDateTime(next, '00:00') };
+}
+
+/**
  * Serial number for a generated punch — negative, and DERIVED from
  * (employee, date, in/out) rather than the clock, for two reasons:
  *
@@ -498,5 +511,6 @@ module.exports = {
   weekdayOf,
   todayIsrael,
   ilDateTime,
+  ilDayBounds,
   ISR_DAY,
 };

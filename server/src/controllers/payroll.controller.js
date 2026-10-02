@@ -2887,9 +2887,9 @@ async function deletePunch(req, res, next) {
     await p.deleteOne();
     if (wasGenerated && empId) {
       // Drop the day's other generated punch (in/out come as a pair) and mark
-      // the date off so it stays deleted.
-      const dayFrom = fixedSchedule.ilDateTime(date, '00:00');
-      const dayTo = new Date(dayFrom.getTime() + 36 * 3600 * 1000);
+      // the date off so it stays deleted. Exact day bounds — the old +36h
+      // window also deleted the NEXT morning's generated punch.
+      const { from: dayFrom, to: dayTo } = fixedSchedule.ilDayBounds(date);
       await Punch.deleteMany({
         employee_id: empId,
         timestamp_source: 'fixed_schedule',
@@ -3068,9 +3068,11 @@ async function setFixedScheduleException(req, res, next) {
     await emp.save();
 
     // Clear that day's generated punches so the new hours take effect. Real
-    // clock punches are left untouched.
-    const dayFrom = fixedSchedule.ilDateTime(date, '00:00');
-    const dayTo = new Date(dayFrom.getTime() + 36 * 3600 * 1000);
+    // clock punches are left untouched. Exact day bounds — the old +36h window
+    // also deleted the NEXT morning's generated punch, and the rematerialize
+    // below then skipped that half-occupied day, leaving it one punch short
+    // (אורלי, caught live 02.10.2026).
+    const { from: dayFrom, to: dayTo } = fixedSchedule.ilDayBounds(date);
     await Punch.deleteMany({
       employee_id: emp._id,
       timestamp_source: 'fixed_schedule',

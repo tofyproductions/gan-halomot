@@ -188,7 +188,8 @@
     "test:expense-search": "node scripts/expense-search.test.js",
     "test:expenses-api-e2e": "node scripts/expenses-api-e2e.test.js",
     "test:income-api-e2e": "node scripts/income-api-e2e.test.js",
-    "test:gan-icount-client": "node scripts/gan-icount-client.test.js"
+    "test:gan-icount-client": "node scripts/gan-icount-client.test.js",
+    "test:day-bounds": "node scripts/fixed-schedule-day-bounds.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
