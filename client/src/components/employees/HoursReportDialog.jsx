@@ -84,16 +84,17 @@ export default function HoursReportDialog({ open, employee, onClose, initialMont
 
   const exportCSV = () => {
     if (!report) return;
-    const header = ['תאריך', 'סניף', 'כניסה', 'יציאה', 'שעות', 'הערה'];
+    const header = ['תאריך', 'יום', 'סניף', 'כניסה', 'יציאה', 'שעות', 'הערה'];
     const rows = report.days.map(d => [
       formatDate(d.date),
+      dayOfWeekHebrew(d.date),
       d.branch_label || '',
       d.first_in || '',
       d.last_out || '',
       d.total_hours || 0,
       d.incomplete ? 'חסרה החתמה' : '',
     ]);
-    rows.push(['', '', '', 'סה״כ', report.totals.total_hours, `${report.totals.days_worked} ימים`]);
+    rows.push(['', '', '', '', 'סה״כ', report.totals.total_hours, `${report.totals.days_worked} ימים`]);
     const csv = '\uFEFF' + [header, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -449,7 +450,12 @@ ${hasCommit ? `<div class="legend">
                     const bg = approvedAbs ? COLOR.hours.row.incomplete.bg : (LEAVE_BG[d.leave_type] || COLOR.hours.row.deducted.bg);
                     return (
                       <TableRow key={d.date} hover sx={{ bgcolor: bg }}>
-                        <TableCell sx={{ fontWeight: 600 }}>{formatDate(d.date)}</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>
+                          {formatDate(d.date)}
+                          <Typography component="span" variant="caption" color="text.secondary" sx={{ mr: 0.75 }}>
+                            {dayOfWeekHebrew(d.date)}
+                          </Typography>
+                        </TableCell>
                         <TableCell colSpan={5} align="center" sx={{ color: 'text.disabled' }}>—</TableCell>
                         <TableCell colSpan={2} align="center">
                           <Chip size="small" color={color} label={d.note}
@@ -468,7 +474,12 @@ ${hasCommit ? `<div class="legend">
                     : d.cross_branch_names?.length > 0 ? COLOR.hours.row.pending.bg : undefined;
                   return (
                   <TableRow key={d.date} hover sx={rowBg ? { bgcolor: rowBg } : undefined}>
-                    <TableCell sx={{ fontWeight: 600 }}>{formatDate(d.date)}</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>
+                      {formatDate(d.date)}
+                      <Typography component="span" variant="caption" color="text.secondary" sx={{ mr: 0.75 }}>
+                        {dayOfWeekHebrew(d.date)}
+                      </Typography>
+                    </TableCell>
                     <TableCell sx={{ fontWeight: 600, color: d.cross_branch_names?.length > 0 ? COLOR.hours.row.pending.on : 'text.primary' }}>
                       {d.branch_label || '—'}
                     </TableCell>
