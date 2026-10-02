@@ -1203,6 +1203,11 @@ async function computeHoursReportData(employeeId, month, user, opts = {}) {
           }
           return out;
         };
+        // Statutory Israeli-holiday dates — paid as דמי חגים in payroll, unlike
+        // ordinary gan closures, which draw vacation days. The report must not
+        // count the two under one label.
+        const { getHolidaysInMonth } = require('../services/israeliHolidays');
+        const statutoryDates = new Set(getHolidaysInMonth(ymPrefix).map(h => h.date));
         // Kindergarten closures (holidays) → name.
         const holidayName = new Map();
         // Short days are excluded: the gan was open and she was there, so
@@ -1238,11 +1243,17 @@ async function computeHoursReportData(employeeId, month, user, opts = {}) {
           else if (entry && entry.category === 'approved') { approved = true; reason = entry.note || ''; }
           else if (leave) { type = leave.type; reason = leave.reason || ''; }
           else if (holidayName.has(date)) { type = 'holiday'; reason = holidayName.get(date); }
-          const label = (type === 'absence' && approved) ? 'היעדרות (אושרה)' : LEAVE_LABEL[type];
+          const label = (type === 'absence' && approved) ? 'היעדרות (אושרה)'
+            : (type === 'holiday')
+              ? (statutoryDates.has(date) ? 'חג (דמי חגים)' : 'סגירת גן (חופשה)')
+              : LEAVE_LABEL[type];
           dayRows.push({
             date,
             is_absence: true,
             leave_type: type,
+            // Only meaningful for leave_type 'holiday': true → a statutory
+            // holiday (דמי חגים), false → a gan closure drawn from vacation.
+            statutory_holiday: type === 'holiday' ? statutoryDates.has(date) : undefined,
             absence_approved: approved,
             note: label + (reason ? ` — ${reason}` : ''),
             sessions: [], total_minutes: 0, total_hours: 0,

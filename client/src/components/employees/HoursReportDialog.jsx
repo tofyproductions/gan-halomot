@@ -116,14 +116,19 @@ export default function HoursReportDialog({ open, employee, onClose, initialMont
     // per hour worked even if a schedule exists, so never show them.
     const hasCommit = !!pa && report.employee?.salary_type === 'global';
     let totals = { regular: 0, ot125: 0, ot150: 0, total: 0, committed: 0, shortfall: 0, extra: 0, days: 0 };
-    const tally = { sick: 0, vacation: 0, miluim: 0, holiday: 0, absence: 0 };
+    // 'holiday' rows are split: statutory holidays are paid as דמי חגים, while
+    // ordinary gan closures draw vacation days — one label for both read as if
+    // every closure day were paid holiday pay.
+    const tally = { sick: 0, vacation: 0, miluim: 0, holiday_statutory: 0, holiday_closure: 0, absence: 0 };
     const colCount = hasCommit ? 11 : 8;
     const EXTRA_KIND = { overage: 'מעבר להתחייבות', offday: 'עבודה ביום חופש' };
     const tbodyHtml = report.days.map(d => {
       // Absence / leave day — no punch. Render a full row with the note, and do
       // NOT count it toward worked-day totals (return before the tallies below).
       if (d.is_absence) {
-        if (tally[d.leave_type] != null) tally[d.leave_type]++;
+        if (d.leave_type === 'holiday') {
+          if (d.statutory_holiday) tally.holiday_statutory++; else tally.holiday_closure++;
+        } else if (tally[d.leave_type] != null) tally[d.leave_type]++;
         const dn = dayOfWeekHebrew(d.date);
         // Hard (unexcused) absence → red tint; approved absence / leave → amber.
         const cls = (d.leave_type === 'absence' && !d.absence_approved) ? 'r-ded' : 'r-exc';
@@ -334,7 +339,8 @@ ${hasCommit ? `<div class="legend">
       ['ימי מחלה', tally.sick],
       ['ימי היעדרות', tally.absence],
       ['ימי חופשה', tally.vacation],
-      ['דמי חגים (ימים)', tally.holiday],
+      ['דמי חגים (ימים)', tally.holiday_statutory],
+      ['ימי סגירת גן (חופשה)', tally.holiday_closure],
       ['מילואים', tally.miluim],
     ];
     return `<div class="box">
