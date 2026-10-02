@@ -42,6 +42,7 @@ import {
   BRANCH_PALETTE as SHARED_BRANCH_PALETTE,
   BRANCH_COLOR_NAMES,
 } from '../../utils/branchColors';
+import { hebDayName } from '../../utils/hebrewDate';
 import SalaryAdjustmentDialog from './SalaryAdjustmentDialog';
 import VacationDetailDialog from './VacationDetailDialog';
 import SickDetailDialog from './SickDetailDialog';
@@ -4220,7 +4221,7 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
   const cands = pa.candidates || [];
   const extras = pa.extra_candidates || [];
   const hv = pa.hourly_value || 0;
-  const fmtDate = (ymd) => { const [y, m, d] = ymd.split('-'); return `${d}/${m}/${y}`; };
+  const fmtDate = (ymd) => { const [y, m, d] = ymd.split('-'); return `${d}/${m}/${y} · ${hebDayName(ymd)}`; };
   // Approved extra (over-commitment / off-day) hours are PAID — computed LIVE
   // from the current selections.
   const extraApprovedHours = Math.round(extras.filter(c => extraAppr[c.date]).reduce((s, c) => s + c.hours, 0) * 100) / 100;
@@ -4514,7 +4515,10 @@ function AbsenceDialog({ open, row, disabled, canManager, canAccounting, onClose
               if (source !== 'unknown') {
                 return (
                   <Paper key={d} variant="outlined" sx={{ p: 1, borderRadius: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Typography sx={{ fontWeight: 700, minWidth: 90 }}>{d}</Typography>
+                    <Typography sx={{ fontWeight: 700, minWidth: 140 }}>
+                      {d}
+                      <Typography component="span" variant="caption" color="text.secondary" sx={{ mr: 0.75 }}>{hebDayName(d)}</Typography>
+                    </Typography>
                     <Chip size="small" color={src.color} variant="outlined" label={src.label} />
                     <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>בתשלום (מוצדק)</Typography>
                   </Paper>
@@ -4527,7 +4531,10 @@ function AbsenceDialog({ open, row, disabled, canManager, canAccounting, onClose
               return (
                 <Paper key={d} variant="outlined" sx={{ p: 1, borderRadius: 2, borderColor: handled ? 'success.light' : 'warning.light', bgcolor: handled ? '#f6fdf9' : undefined }}>
                   <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                    <Typography sx={{ fontWeight: 700, minWidth: 90 }}>{d}</Typography>
+                    <Typography sx={{ fontWeight: 700, minWidth: 140 }}>
+                      {d}
+                      <Typography component="span" variant="caption" color="text.secondary" sx={{ mr: 0.75 }}>{hebDayName(d)}</Typography>
+                    </Typography>
                     <Chip size="small" color={handled ? 'success' : 'warning'} variant={handled ? 'filled' : 'outlined'} label={handled ? '✓ טופל' : 'ללא סיבה'} sx={{ height: 18, fontWeight: 700 }} />
                     <TextField select size="small" label="סיבה" value={e.category || 'unpaid'} disabled={disabled}
                       onChange={ev => update(d, { category: ev.target.value })} sx={{ minWidth: 160 }}>
@@ -4566,7 +4573,7 @@ function AbsenceDialog({ open, row, disabled, canManager, canAccounting, onClose
                           onChange={e => toggleOffset(s, e.target.checked)} />
                         <Box sx={{ flex: 1 }}>
                           <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                            היעדרות {s.absence_date} ({s.committed_h} ש׳) ↔ תוספת {s.extra_date} ({s.extra_h} ש׳)
+                            היעדרות {s.absence_date} ({hebDayName(s.absence_date)}, {s.committed_h} ש׳) ↔ תוספת {s.extra_date} ({hebDayName(s.extra_date)}, {s.extra_h} ש׳)
                           </Typography>
                           <Typography variant="caption" color="text.secondary">
                             סיבה אוטומטית: "הושלם ע״י תוספת שעות ב-{s.extra_date}"

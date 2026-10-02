@@ -9,6 +9,7 @@ import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useConfirm } from '../shared/ConfirmProvider';
 import { useAuth } from '../../hooks/useAuth';
+import { hebDayName } from '../../utils/hebrewDate';
 
 /**
  * Shows the vacation balance for an employee in a given month:
@@ -181,7 +182,10 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
                     .sort((a, b) => a.date.localeCompare(b.date))
                     .map((d, i) => (
                     <TableRow key={i} sx={d.is_work_day ? undefined : { opacity: 0.55 }}>
-                      <TableCell>{d.date}</TableCell>
+                      <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                        {d.date}
+                        <Typography component="span" variant="caption" color="text.secondary" sx={{ mr: 0.75 }}>{hebDayName(d.date)}</Typography>
+                      </TableCell>
                       <TableCell>{d.name}</TableCell>
                       <TableCell align="center">
                         {d.is_work_day
@@ -286,8 +290,14 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
               <TableBody>
                 {requests.map(r => (
                   <TableRow key={r.id}>
-                    <TableCell>{r.from_date}</TableCell>
-                    <TableCell>{r.to_date}</TableCell>
+                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                      {r.from_date}
+                      <Typography component="span" variant="caption" color="text.secondary" sx={{ mr: 0.75 }}>{hebDayName(r.from_date)}</Typography>
+                    </TableCell>
+                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                      {r.to_date}
+                      <Typography component="span" variant="caption" color="text.secondary" sx={{ mr: 0.75 }}>{hebDayName(r.to_date)}</Typography>
+                    </TableCell>
                     <TableCell align="center"><Chip label={r.days} size="small" color="primary" /></TableCell>
                     <TableCell>{r.reason || '—'}</TableCell>
                   </TableRow>
