@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Stack,
   Typography, Chip, Alert, Divider, ToggleButton, ToggleButtonGroup, Paper,
-  Tabs, Tab, TextField, CircularProgress, Badge, FormControlLabel, Switch, Link,
+  Tabs, Tab, TextField, CircularProgress, Badge, FormControlLabel, Switch, Link, Tooltip,
 } from '@mui/material';
 import ReportProblemIcon from '@mui/icons-material/ReportProblem';
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
@@ -113,9 +113,11 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה')));
 
   /** Split a day opened at one branch and closed at another. */
-  const splitBranchDay = (day) => {
+  // `forced` lets the quick "מעבר ב-13:00" button split without touching the
+  // time fields — the usual switch hour, travel time paid, so out === in.
+  const splitBranchDay = (day, forced) => {
     const k = keyOf(day);
-    const t = transfer[k] || {};
+    const t = forced || transfer[k] || {};
     const out = (t.out || '').trim();
     // Arrived-at defaults to left-at: one drive-free transfer is the common
     // case and a single typed time must keep working.
@@ -750,6 +752,14 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
                             onClick={() => splitBranchDay(item)}>
                             {canRemind ? 'פצל את היום' : 'שלח לאישור הנה״ח'}
                           </BusyButton>
+                          <Tooltip title={`מעבר ישיר בשעת המעבר הרגילה: יציאה מ${item.in_branch_name} וכניסה ל${item.out_branch_name} ב-13:00 — זמן הנסיעה בתשלום`}>
+                            <span>
+                              <BusyButton size="small" variant="outlined" color="error" loading={!!busy[k]}
+                                onClick={() => splitBranchDay(item, { out: '13:00', in: '13:00' })}>
+                                מעבר ב-13:00
+                              </BusyButton>
+                            </span>
+                          </Tooltip>
                         </Stack>
                       )}
                     </Paper>
