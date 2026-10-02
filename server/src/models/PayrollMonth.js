@@ -52,6 +52,11 @@ const payrollMonthSchema = new mongoose.Schema({
     // Accountant/admin only, same as the full approval.
     vacation_pay_approved_days: { type: Number, default: null },
 
+    // Per-day payment approval for calendar vacation days: dates the office
+    // UNCHECKED in the dialog. Stored as the exclusion list so the default
+    // (empty) keeps paying everything, exactly as before the feature existed.
+    vacation_unapproved_dates: { type: [String], default: [] },
+
     // Advance deduction directive — references a saved preset OR free text.
     // The action attached to the preset determines what payroll should do.
     advance_deduction_preset_id: { type: mongoose.Schema.Types.ObjectId, ref: 'PayrollPresetOption', default: null },

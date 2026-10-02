@@ -1194,9 +1194,27 @@ async function getMonth(req, res, next) {
       // the auto fallback keeps paying as it always has. augWindow is non-null
       // only in August.
       const vacationAutoGated = !!augWindow;
-      const vacEffDays = (Number(manual.vacation_days) > 0)
-        ? Number(manual.vacation_days)
-        : (vacationAutoGated ? 0 : (vacationAutoInfo.total || 0));
+      // Per-day payment approval (hourly only): calendar days the office
+      // UNCHECKED in the dialog are excluded from pay and from the balance
+      // draw. The list stores exclusions, so the default (empty) approves
+      // everything and no existing month changes behavior.
+      const vacUnapproved = (!isTeken
+          && Array.isArray(manual.vacation_unapproved_dates)
+          && manual.vacation_unapproved_dates.length)
+        ? new Set(manual.vacation_unapproved_dates) : null;
+      const vacAutoApprovedTotal = vacUnapproved
+        ? round3((vacationAutoInfo.details || []).reduce(
+            (s, d) => s + (vacUnapproved.has(d.date) ? 0 : (Number(d.value) || 0)), 0))
+        : (vacationAutoInfo.total || 0);
+      const manualVacDays = Number(manual.vacation_days) || 0;
+      // A manual count equal to the FULL calendar total means "the calendar
+      // was applied" (August's apply button writes exactly that), so the
+      // per-day approvals still carry dates for it. Any other hand-typed
+      // count has no dates behind it and wins as-is, untouched.
+      const vacEffDays = manualVacDays > 0
+        ? ((vacUnapproved && Math.abs(manualVacDays - (vacationAutoInfo.total || 0)) < 0.01)
+          ? vacAutoApprovedTotal : manualVacDays)
+        : (vacationAutoGated ? 0 : vacAutoApprovedTotal);
 
       // Days in hand BEFORE this month is charged — what the export cap reads.
       // Null when no opening balance is on file, and null means "do not cap":
@@ -1965,6 +1983,7 @@ async function getMonth(req, res, next) {
           // looked "off" again after every refetch even when it was saved on.
           vacation_pay_confirmed: manual.vacation_pay_confirmed === true,
           vacation_pay_approved_days: manual.vacation_pay_approved_days ?? null,
+          vacation_unapproved_dates: manual.vacation_unapproved_dates || [],
           absence_entries: absenceEntries,
           partial_absence_entries: paEntries,
           partial_extra_entries: paExtraEntries,
@@ -2439,7 +2458,7 @@ async function upsertEntry(req, res, next) {
       'travel_override', 'travel_note', 'bonus', 'one_time_bonus', 'one_time_salary_completion', 'notes', 'custom_values',
       'include_salary_completion', 'closure_completion', 'closure_completion_approved_dates',
       'supplement_manager_approved', 'supplement_accounting_approved',
-      'vacation_pay_confirmed', 'vacation_pay_approved_days',
+      'vacation_pay_confirmed', 'vacation_pay_approved_days', 'vacation_unapproved_dates',
       'absence_entries', 'partial_absence_entries', 'partial_extra_entries',
       'absence_offset_entries',
     ];
@@ -2510,7 +2529,8 @@ async function upsertEntry(req, res, next) {
       }
       // The August-bonus approval list is what gets people paid — accept only
       // clean YYYY-MM-DD strings, deduped and sorted, whatever the client sent.
-      if (k === 'closure_completion_approved_dates') {
+      // Same for the per-day vacation payment exclusions.
+      if (k === 'closure_completion_approved_dates' || k === 'vacation_unapproved_dates') {
         setObj[`manual.${k}`] = sanitizeApprovedDates(body[k]);
         continue;
       }

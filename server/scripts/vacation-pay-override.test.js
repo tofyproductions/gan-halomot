@@ -32,7 +32,7 @@ async function main() {
   const mongoose = require('mongoose');
   await mongoose.connect(process.env.MONGODB_URI);
 
-  const { Branch, Amuta, Employee, PayrollMonth } = require('../src/models');
+  const { Branch, Amuta, Employee, PayrollMonth, Holiday } = require('../src/models');
   const { fetchMonthData } = require('../src/controllers/payrollMonth.controller');
   const { buildExportSource } = require('../src/services/payrollExport/sourceLayer');
   const shkulit = require('../src/services/payrollExport/shkulitAdapter');
@@ -239,6 +239,66 @@ async function main() {
     assert.strictEqual(row.vacation_days_requested, 5);
     assert.strictEqual(row.vacation_info.balance.available, 3, 'the dialog\'s own balance breakdown also reflects the payslip fallback');
     ok('an employee with no opening balance configured is capped by her payslip-imported balance instead of not being capped at all');
+  }
+
+  console.log('per-day payment approval: unchecked calendar days are not paid and not drawn (01.10.2026)');
+  {
+    // A separate branch so the closure does not retro-affect earlier blocks.
+    const branch2 = await Branch.create({ name: 'סניף בדיקה ב', address: 'כתובת' });
+    // Gan closure Sun 06.09 – Thu 10.09 → 5 work days for a Sun–Thu employee.
+    await Holiday.create({
+      branch_id: branch2._id, academic_year: '2026-2027', name: 'סגירה לבדיקה',
+      start_date: new Date('2026-09-06'), end_date: new Date('2026-09-10'), kind: 'closure',
+    });
+    const mkEmp2 = (name, idNum, acct) => Employee.create({
+      full_name: name, israeli_id: idNum, branch_id: branch2._id,
+      salary_type: 'hourly', hourly_rate: 60, is_active: true,
+      start_date: new Date('2024-01-01'), work_days: [0, 1, 2, 3, 4],
+      amuta_distribution: [{ amuta_id: amuta._id, hourly_rate: 60 }],
+      vacation_balance_opening: { days: 10, as_of_month: month },
+      vacation_monthly_accrual: 0,
+      bank_number: '10', bank_branch: '001', bank_account: acct,
+    });
+
+    // No exclusions — all 5 calendar days pay, as always.
+    const empAll = await mkEmp2('עובדת בדיקה (הכל מאושר)', '111333560', '666666');
+    // Two days unchecked — only 3 pay, and only 3 draw from the balance.
+    const empPart = await mkEmp2('עובדת בדיקה (אישור יומי)', '111333561', '777777');
+    await PayrollMonth.create({
+      employee_id: empPart._id, branch_id: branch2._id, month,
+      manual: { vacation_unapproved_dates: ['2026-09-07', '2026-09-08'] },
+    });
+
+    const data = await fetchMonthData({ month, branch: String(branch2._id) }, { role: 'system_admin' });
+    const rowAll = (data.rows || []).find(r => String(r.employee_id) === String(empAll._id));
+    const rowPart = (data.rows || []).find(r => String(r.employee_id) === String(empPart._id));
+
+    assert.strictEqual(rowAll.vacation_days_auto.total_days, 5, 'the closure yields 5 calendar work days');
+    assert.strictEqual(rowAll.vacation_eff_days, 5, 'with no exclusions all 5 pay — existing behavior, unchanged');
+
+    assert.deepStrictEqual(rowPart.manual.vacation_unapproved_dates, ['2026-09-07', '2026-09-08'],
+      'the exclusion list round-trips on row.manual for the dialog');
+    assert.strictEqual(rowPart.vacation_days_auto.total_days, 5, 'the table still shows all 5 days');
+    assert.strictEqual(rowPart.vacation_eff_days, 3, 'only the 3 approved days are credited');
+    assert.strictEqual(rowPart.vacation_usage.paid, 3, 'and only they are paid');
+    assert.strictEqual(rowPart.vacation_info.balance.days_this_month, 3, 'and only they draw from the balance');
+    assert.ok(rowPart.vacation_pay < rowAll.vacation_pay, 'the excluded days are really not in the money');
+    ok('unchecking days removes them from pay and from the balance draw; default stays pay-everything');
+
+    // The August "apply" flow writes manual.vacation_days = the calendar total;
+    // per-day approvals must still bite through that equal manual count.
+    await PayrollMonth.updateOne({ employee_id: empPart._id, month },
+      { $set: { 'manual.vacation_days': 5 } });
+    const data2 = await fetchMonthData({ month, branch: String(branch2._id) }, { role: 'system_admin' });
+    const rowApplied = (data2.rows || []).find(r => String(r.employee_id) === String(empPart._id));
+    assert.strictEqual(rowApplied.vacation_eff_days, 3, 'a manual count equal to the calendar still honors the per-day approvals');
+    // A hand-typed count that does NOT match the calendar wins untouched.
+    await PayrollMonth.updateOne({ employee_id: empPart._id, month },
+      { $set: { 'manual.vacation_days': 2 } });
+    const data3 = await fetchMonthData({ month, branch: String(branch2._id) }, { role: 'system_admin' });
+    const rowTyped = (data3.rows || []).find(r => String(r.employee_id) === String(empPart._id));
+    assert.strictEqual(rowTyped.vacation_eff_days, 2, 'a hand-typed count with no dates behind it is used as-is');
+    ok('the applied-calendar manual count honors approvals; a free-typed count is untouched');
   }
 
   await mongoose.disconnect();

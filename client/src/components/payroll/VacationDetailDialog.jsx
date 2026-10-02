@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Stack,
   Typography, Chip, TextField, Divider, Alert, CircularProgress, Table,
-  TableHead, TableBody, TableRow, TableCell, Switch, FormControlLabel,
+  TableHead, TableBody, TableRow, TableCell, Switch, FormControlLabel, Checkbox,
 } from '@mui/material';
 import BeachAccessIcon from '@mui/icons-material/BeachAccess';
 import { toast } from 'react-toastify';
@@ -31,6 +31,9 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
   // approvedLimit is the SAVED value; limitInput is what's being typed.
   const [approvedLimit, setApprovedLimit] = useState(null);
   const [limitInput, setLimitInput] = useState('');
+  // Per-day payment approval: the EXCLUSION list (unchecked days). Empty =
+  // everything approved, which is the default behavior.
+  const [unapprovedDates, setUnapprovedDates] = useState([]);
 
   useEffect(() => {
     if (!open || !row) return;
@@ -39,6 +42,7 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
     const lim = Number(row.manual.vacation_pay_approved_days);
     setApprovedLimit(Number.isFinite(lim) && lim > 0 ? lim : null);
     setLimitInput(Number.isFinite(lim) && lim > 0 ? String(lim) : '');
+    setUnapprovedDates(Array.isArray(row.manual.vacation_unapproved_dates) ? row.manual.vacation_unapproved_dates : []);
     setLoading(true);
     api.get('/employee-requests/vacation-for-month', { params: { employee_id: row.employee_id, month } })
       .then(res => setRequests(res.data.requests || []))
@@ -70,6 +74,16 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
   const saveManualDays = (next) => {
     api.patch(`/payroll-month/${row.employee_id}`, { manual: { vacation_days: next } }, { params: { month } })
       .then(() => { onSaved && onSaved(); toast.success('עודכן'); })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
+  };
+
+  const saveUnapprovedDates = (dates) => {
+    api.patch(`/payroll-month/${row.employee_id}`, { manual: { vacation_unapproved_dates: dates } }, { params: { month } })
+      .then(() => {
+        setUnapprovedDates(dates);
+        onSaved && onSaved();
+        toast.success(dates.length ? 'עודכן — ימים שלא אושרו לא ישולמו' : 'כל הימים אושרו לתשלום');
+      })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
@@ -158,6 +172,7 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
                     <TableCell>חופשה/חג</TableCell>
                     <TableCell align="center">יום עבודה?</TableCell>
                     <TableCell align="center">ערך</TableCell>
+                    {!isGlobal && <TableCell align="center">מאושר לתשלום?</TableCell>}
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -178,10 +193,36 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
                           ? <Chip size="small" label={d.value === 0.5 ? '½' : d.value} color="primary" />
                           : <Chip size="small" label="—" />}
                       </TableCell>
+                      {!isGlobal && (
+                        <TableCell align="center">
+                          {d.is_work_day ? (
+                            <Checkbox
+                              size="small"
+                              checked={!unapprovedDates.includes(d.date)}
+                              onChange={(e) => {
+                                const next = e.target.checked
+                                  ? unapprovedDates.filter(x => x !== d.date)
+                                  : [...unapprovedDates, d.date];
+                                saveUnapprovedDates(next);
+                              }}
+                            />
+                          ) : '—'}
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
+              {!isGlobal && unapprovedDates.length > 0 && (
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Alert severity="warning" sx={{ flex: 1, borderRadius: 2, py: 0 }}>
+                    {unapprovedDates.length} ימים לא מאושרים לתשלום — לא ישולמו ולא יירדו מהיתרה.
+                  </Alert>
+                  <Button variant="outlined" size="small" onClick={() => saveUnapprovedDates([])}>
+                    אשר את כולם לתשלום
+                  </Button>
+                </Stack>
+              )}
               {(row.vacation_days_auto.off_day_details || []).length > 0 && (
                 <Typography variant="caption" color="text.secondary">
                   ימים שנופלים על היום החופשי של העובדת אינם נספרים, אינם משולמים ואינם יורדים מהיתרה — גם לא באישור הנה״ח.
