@@ -53,7 +53,10 @@ async function throws(fn, status, message, label) {
   await throws(() => svc.createConstraint({ employee: dana, body: { type: 'partial', date: '2026-10-13', from_hhmm: '12:00', to_hhmm: '10:00', details: 'רופא' }, files: [], now: NOW }), 400, 'שעת הסיום חייבת להיות אחרי שעת ההתחלה', 'טווח שעות הפוך — חסום');
   await throws(() => svc.createConstraint({ employee: dana, body: { type: 'move_day', date: '2026-10-13' }, files: [], now: NOW }), 400, 'חסר היום שבו תעבדי במקום', 'העברת יום בלי יום יעד — חסום');
   const withFile = await svc.createConstraint({ employee: dana, body: { type: 'sick_expected', date: '2026-10-21', details: 'ניתוח' }, files: [{ originalname: 'a.pdf', mimetype: 'application/pdf', size: 3, buffer: Buffer.from('abc') }], now: LATE });
-  eq([withFile.files.length, withFile.files[0].name, !!withFile.files[0].file_data], [1, 'a.pdf', true], 'מסמך נשמר; שבוע רחוק פתוח גם אחרי חמישי');
+  const storedFile = (await M.ShiftConstraint.findById(withFile._id).lean()).files[0];
+  eq([withFile.files.length, withFile.files[0].name, !!storedFile.file_data], [1, 'a.pdf', true], 'מסמך נשמר; שבוע רחוק פתוח גם אחרי חמישי');
+  eq([withFile.files[0].file_data, withFile.files[0].storage_key], [undefined, undefined], 'ההחזרה למגישה בלי תוכן הקובץ');
+  await throws(() => svc.createConstraint({ employee: dana, body: { type: 'day_off', date: 'abc', details: 'x' }, files: [], now: NOW }), 400, 'תאריך לא תקין', 'תאריך לא תקין');
   await throws(() => svc.createConstraint({ employee: dana, body: { type: 'other', date: '2026-10-21', details: 'x' }, files: [{ originalname: 'a.exe', mimetype: 'application/x-msdownload', size: 3, buffer: Buffer.from('a') }], now: NOW }), 400, 'אפשר לצרף רק PDF או תמונה (JPG/PNG)', 'סוג קובץ לא מורשה');
 
   console.log('\nהחלפה עם עובדת שנבחרה');
@@ -64,6 +67,7 @@ async function throws(fn, status, message, label) {
   await throws(() => svc.respondColleague({ employee: noa, id: String(sw._id), accept: true }), 403, 'הבקשה לא מיועדת לך', 'עובדת אחרת לא יכולה לענות');
   const swOpen = await svc.respondColleague({ employee: ruth, id: String(sw._id), accept: true });
   eq(swOpen.status, 'open', 'רות הסכימה — עובר למנהלת');
+  eq((swOpen.files || []).some(f => f.file_data || f.storage_key), false, 'תשובת העובדת השנייה בלי תוכן קבצים');
 
   console.log('\nהצעה לכל הסניף');
   const bc = await svc.createConstraint({ employee: dana, body: { type: 'swap', swap_mode: 'handover', date: '2026-10-15', broadcast: true }, files: [], now: NOW });
@@ -91,6 +95,7 @@ async function throws(fn, status, message, label) {
   await throws(() => svc.decide({ user: manager, id: String(withFile._id), accept: true, now: NOW }), 409, 'אילוץ לשבוע רחוק — יש לאשר שהפעולה סופית', 'שבוע רחוק בלי אישור סופי');
   const accFar = await svc.decide({ user: manager, id: String(withFile._id), accept: true, confirmFar: true, now: NOW });
   eq((await M.EmployeeRequest.findById(accFar.employee_request_id).lean()).type, 'sick', 'מחלה צפויה → בקשת מחלה');
+  eq([accFar.files.length, accFar.files.some(f => f.file_data || f.storage_key)], [1, false], 'החלטת מנהלת — בלי תוכן קבצים');
   await throws(() => svc.decide({ user: manager, id: String(c1._id), accept: false, reason: 'x', now: NOW }), 409, 'האילוץ כבר טופל', 'החלטה כפולה');
 
   console.log('\nביטול');
@@ -103,6 +108,12 @@ async function throws(fn, status, message, label) {
   const late = await svc.cancelConstraint({ employee: dana, id: String(swOpen._id) });
   eq([late.after_publish, late.constraint.cancelled_after_publish], [true, true], 'ביטול אחרי פרסום — מסומן');
   eq(await M.NotificationEvent.countDocuments({ type: 'constraint_cancelled', recipient_id: mgrUser._id }), 1, 'המנהלת קיבלה התראה');
+
+  const bc2 = await svc.createConstraint({ employee: dana, body: { type: 'swap', swap_mode: 'handover', date: '2026-10-16', broadcast: true }, files: [], now: NOW });
+  await svc.approveBroadcast({ user: manager, id: String(bc2._id) });
+  await svc.volunteer({ employee: ruth, id: String(bc2._id) });
+  const bc2c = await svc.cancelConstraint({ employee: dana, id: String(bc2._id) });
+  eq(['volunteers' in bc2c.constraint, bc2c.constraint.volunteer_count], [false, 1], 'ביטול אחרי התנדבות — בלי רשימת מתנדבות, עם ספירה');
 
   console.log('\nקבצים והרשאות צפייה');
   const file = await svc.readFile({ employee: dana, id: String(withFile._id), index: 0 });

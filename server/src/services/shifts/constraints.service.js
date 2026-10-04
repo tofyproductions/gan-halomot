@@ -12,7 +12,7 @@ const notificationService = require('../notification.service');
 const { branchManagerFilter } = require('../branch-recipients.service');
 const storage = require('../storage.service');
 const { weekStart } = require('../parentVisibility');
-const { ShiftError, canView, canEdit, assertEdit } = require('./access');
+const { ShiftError, canView, assertEdit } = require('./access');
 const { TYPES, FINAL, ACTIONABLE, addDays, ilNow, submissionWindow, isFarFuture, respected } = require('./constraintRules');
 
 const MAX_FILES = 3;
@@ -60,6 +60,15 @@ async function storeFiles(files) {
   return out;
 }
 
+/** Manager-facing: volunteers stay, file bytes never travel. */
+function withoutFileBytes(c) {
+  const o = c.toObject ? c.toObject() : { ...c };
+  o.files = (o.files || []).map(f => ({ name: f.name, mimetype: f.mimetype, size: f.size }));
+  return o;
+}
+
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+
 async function createConstraint({ employee, body, files, now = new Date() }) {
   const b = body || {};
   if (!TYPES.includes(b.type)) throw new ShiftError(400, 'סוג אילוץ לא תקין');
@@ -68,6 +77,7 @@ async function createConstraint({ employee, body, files, now = new Date() }) {
     employee_id: employee._id, employee_name: employee.full_name, branch_id: employee.branch_id,
     type: b.type, date: String(b.date || ''), details, status: 'open',
   };
+  if (!YMD.test(doc.date)) throw new ShiftError(400, 'תאריך לא תקין');
   const dates = [doc.date];
   if (['day_off', 'partial', 'sick_expected', 'other'].includes(b.type) && !details) throw new ShiftError(400, 'יש לכתוב סיבה או פירוט');
   if (b.type === 'partial') {
@@ -76,6 +86,7 @@ async function createConstraint({ employee, body, files, now = new Date() }) {
   }
   if (b.type === 'move_day' || (b.type === 'swap' && b.swap_mode === 'mutual')) {
     if (!b.target_date) throw new ShiftError(400, 'חסר היום שבו תעבדי במקום');
+    if (!YMD.test(String(b.target_date))) throw new ShiftError(400, 'תאריך לא תקין');
     doc.target_date = String(b.target_date);
     dates.push(doc.target_date);
   }
@@ -104,7 +115,7 @@ async function createConstraint({ employee, body, files, now = new Date() }) {
       url: '/my-shifts?tab=constraints',
     });
   }
-  return c;
+  return publicView(c, employee._id);
 }
 
 /** What the employee may see: her own, requests addressed to her, open offers in her branch. */
@@ -148,7 +159,7 @@ async function respondColleague({ employee, id, accept }) {
     title: accept ? `${employee.full_name} הסכימה להחלפה` : `${employee.full_name} לא יכולה להחליף`,
     body: accept ? 'הבקשה עברה למנהלת הסניף' : `ב-${label(c.date)}`, url: '/my-shifts?tab=constraints',
   });
-  return c;
+  return publicView(c, employee._id);
 }
 
 async function volunteer({ employee, id }) {
@@ -185,7 +196,7 @@ async function cancelConstraint({ employee, id }) {
       }).catch(err => console.error('[constraints] notify failed:', err.message));
     }
   }
-  return { constraint: c, after_publish: afterPublish };
+  return { constraint: publicView(c, employee._id), after_publish: afterPublish };
 }
 
 /** Accept: the EmployeeRequest that carries a day off or a sick day on to accounting. */
@@ -222,12 +233,12 @@ async function decide({ user, id, accept, reason, confirmFar, now = new Date() }
       type: 'constraint_decision', ref_collection: 'ShiftConstraint', ref_id: c._id,
       title: 'האילוץ שלך לא התקבל', body: c.reject_reason, url: '/my-shifts?tab=constraints',
     });
-    return c;
+    return withoutFileBytes(c);
   }
   if (c.status !== 'open') throw new ShiftError(409, 'בהחלפה פתוחה לכל הסניף יש לבחור מתנדבת');
   if (isFarFuture(c.date, now) && !confirmFar) throw new ShiftError(409, 'אילוץ לשבוע רחוק — יש לאשר שהפעולה סופית', { needs_confirm: true });
   await acceptInto(c, user, false);
-  return c;
+  return withoutFileBytes(c);
 }
 
 async function approveBroadcast({ user, id }) {
@@ -241,7 +252,7 @@ async function approveBroadcast({ user, id }) {
     type: 'swap_offer', ref_collection: 'ShiftConstraint', ref_id: c._id, recipient_id: s.user_id,
     title: 'מישהי יכולה להחליף?', body: `נדרשת החלפה ב-${label(c.date)}`, url: '/my-shifts?tab=constraints',
   }).catch(err => console.error('[constraints] notify failed:', err.message))));
-  return c;
+  return withoutFileBytes(c);
 }
 
 async function pickVolunteer({ user, id, employeeId }) {
@@ -255,7 +266,7 @@ async function pickVolunteer({ user, id, employeeId }) {
     type: 'swap_picked', ref_collection: 'ShiftConstraint', ref_id: c._id,
     title: 'נבחרת להחלפה', body: `ב-${label(c.date)} במקום ${c.employee_name}`, url: '/my-shifts',
   });
-  return c;
+  return withoutFileBytes(c);
 }
 
 /** The week's live constraints for the board, volunteers spelled out for the manager. */

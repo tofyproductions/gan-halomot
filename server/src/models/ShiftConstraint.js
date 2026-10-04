@@ -19,7 +19,7 @@ const fileSchema = new mongoose.Schema({
 const shiftConstraintSchema = new mongoose.Schema({
   employee_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: true, index: true },
   employee_name: { type: String, default: '' },
-  branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true, index: true },
+  branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true },
   type: { type: String, enum: ['day_off', 'partial', 'sick_expected', 'other', 'move_day', 'swap'], required: true },
   date: { type: String, required: true },
   target_date: { type: String, default: null },
