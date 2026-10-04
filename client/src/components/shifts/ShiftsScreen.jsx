@@ -205,7 +205,9 @@ export default function ShiftsScreen() {
     const emp = board.employees.find(e => e._id === p.employee_id) || {};
     return { ...emp, ...p };
   }) : []), [board]);
-  const placementItems = useMemo(() => (board ? board.employees.filter(e => !e.foreign).map(e => ({ ...e, employee_id: e._id })) : []), [board]);
+  // "אין צורך בשעות התחייבות ושיבוץ" (set on the commitments screen) — off the rota entirely.
+  const rotaEmployees = useMemo(() => (board ? board.employees.filter(e => e.shift_area !== 'none') : []), [board]);
+  const placementItems = useMemo(() => rotaEmployees.filter(e => !e.foreign).map(e => ({ ...e, employee_id: e._id })), [rotaEmployees]);
   const unassignedCount = (board?.week?.entries || []).filter(e => e.area === 'unassigned').length;
   const autoPlace = async () => {
     try {
@@ -236,7 +238,7 @@ export default function ShiftsScreen() {
           : board.can_request ? { label: 'שליחת בקשת שינוי למנהלת', onClick: sendRequest, disabled: !dirty } : undefined}
         actions={[
           ...(board?.can_edit ? [{ label: 'כיתות קבועות', onClick: () => setPlacementOpen(true) }] : []),
-          ...(board?.can_edit && board.week && unassignedCount ? [{ label: `שיבוץ לפי הכרטיסים (${unassignedCount} ללא כיתה)`, onClick: autoPlace }] : []),
+          ...(board?.can_edit && board.week ? [{ label: unassignedCount ? `שיבוץ לפי הכרטיסים (${unassignedCount} ללא כיתה)` : 'שיבוץ לפי הכרטיסים', onClick: autoPlace }] : []),
           ...(board?.can_edit ? [{ label: 'הגדרות', onClick: () => setSettingsOpen(true) }] : []),
           { label: 'אילוצים עתידיים', onClick: () => setFutureOpen(true) },
           { label: 'דוח נוכחות אתמול', onClick: () => setReportDate(yesterdayYmd()) },
@@ -281,7 +283,7 @@ export default function ShiftsScreen() {
         <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 1.5, alignItems: { md: 'flex-start' }, minWidth: 0 }}>
           {editable && (
             <Box sx={{ width: { xs: '100%', md: 220 }, flexShrink: 0, minWidth: 0 }}>
-              <EmployeeSidebar employees={board.employees} entries={shown} dates={board.dates}
+              <EmployeeSidebar employees={rotaEmployees} entries={shown} dates={board.dates}
                 onRequestRate={board.can_edit ? () => { setRateEmployeeId(null); setRateOpen(true); } : undefined} />
             </Box>
           )}
@@ -298,7 +300,7 @@ export default function ShiftsScreen() {
       )}
 
       <EntryDialog open={dlg.open} onClose={closeDlg}
-        entry={dlg.entry} defaults={dlg.defaults || NO_DEFAULTS} employees={board?.employees || []} rows={rows}
+        entry={dlg.entry} defaults={dlg.defaults || NO_DEFAULTS} employees={rotaEmployees} rows={rows}
         onSave={saveEntry} onDelete={deleteEntry}
         onRequestRate={board?.can_edit ? () => { closeDlg(); setRateEmployeeId(null); setRateOpen(true); } : undefined} />
       <RateRequestDialog open={rateOpen} onClose={() => setRateOpen(false)} candidates={board?.foreign_candidates}

@@ -93,12 +93,45 @@ async function upsert(req, res, next) {
       alternating_day: alternating_day ?? null,
       alternating_per_month: is_alternating_off ? (alternating_per_month ?? null) : null,
     };
+    // A commitment means she is on the rota again, even if she was marked
+    // "אין צורך בשעות התחייבות ושיבוץ" before.
+    await Employee.updateOne({ _id: employee_id, shift_area: 'none' }, { $set: { shift_area: null } });
     const c = await EmployeeCommitment.findOneAndUpdate(
       { employee_id },
       { $set: set },
       { new: true, upsert: true }
     );
     res.json({ commitment: { ...c.toObject(), id: String(c._id) } });
+  } catch (err) { next(err); }
+}
+
+/**
+ * "אין צורך בשעות התחייבות ושיבוץ": an active employee with no commitment who
+ * is paid some other way. Marked on her card (shift_area 'none') so she stops
+ * counting as "ללא התחייבות" and is off the weekly rota, including the weeks
+ * already opened. `exempt: false` puts her back.
+ */
+async function setExempt(req, res, next) {
+  try {
+    const { employee_id, exempt } = req.body || {};
+    const emp = await Employee.findById(employee_id);
+    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+    if (req.user.role === 'branch_manager') {
+      const managed = (req.user.managed_branch_ids || []).map(String);
+      const allowed = managed.length ? managed : [String(req.user.branch_id || '')];
+      if (!allowed.includes(String(emp.branch_id))) return res.status(403).json({ error: 'העובדת לא בסניף שלך' });
+    }
+    let removed = 0;
+    if (exempt) {
+      emp.shift_area = 'none';
+      emp.shift_day_classrooms = [];
+      await emp.save();
+      removed = await require('../services/shifts/shiftWeek.service').removeFromOpenWeeks(emp);
+    } else if (emp.shift_area === 'none') {
+      emp.shift_area = null;
+      await emp.save();
+    }
+    res.json({ ok: true, removed });
   } catch (err) { next(err); }
 }
 
@@ -244,6 +277,9 @@ async function linkUnmatched(req, res, next) {
     const emp = await Employee.findById(employee_id).select('branch_id').lean();
     if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
 
+    // A commitment means she is on the rota again, even if she was marked
+    // "אין צורך בשעות התחייבות ושיבוץ" before.
+    await Employee.updateOne({ _id: employee_id, shift_area: 'none' }, { $set: { shift_area: null } });
     const c = await EmployeeCommitment.findOneAndUpdate(
       { employee_id },
       {
@@ -263,4 +299,5 @@ async function linkUnmatched(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { list, upsert, remove, importCsv, linkUnmatched };
+module.exports = {
+  setExempt, list, upsert, remove, importCsv, linkUnmatched };

@@ -54,6 +54,10 @@ function draftFromCommitment(c) {
 
 function CommitmentEditor({ open, initial, employees, commitments = [], onClose, onSaved }) {
   const [draft, setDraft] = useState({ employee_id: '', classroom: '', days: emptyDays() });
+  const [classrooms, setClassrooms] = useState([]);
+  useEffect(() => {
+    if (open) api.get('/classrooms').then(r => setClassrooms(r.data.classrooms || [])).catch(() => setClassrooms([]));
+  }, [open]);
 
   useEffect(() => {
     if (open) {
@@ -103,8 +107,24 @@ function CommitmentEditor({ open, initial, employees, commitments = [], onClose,
             onChange={(_, v) => onPickEmployee(v)}
             renderInput={(params) => <TextField {...params} label="עובד" size="small" />}
           />
-          <TextField label="כיתה" size="small" value={draft.classroom || ''}
-            onChange={e => setDraft(d => ({ ...d, classroom: e.target.value }))} />
+          {(() => {
+            // Picked from the employee's branch, never typed: one wrong letter
+            // and the rota cannot match the name to a class.
+            const emp = employees.find(e => e._id === draft.employee_id);
+            const branchId = String(emp?.branch_id?._id || emp?.branch_id || '');
+            const names = classrooms.filter(c => String(c.branch_id?._id || c.branch_id) === branchId).map(c => c.name);
+            const options = [...new Set([...names, 'מטבח', 'מחליפה'])];
+            const legacy = draft.classroom && !options.includes(draft.classroom);
+            return (
+              <TextField select label="כיתה" size="small" value={draft.classroom || ''} disabled={!draft.employee_id}
+                helperText={!draft.employee_id ? 'בחרו קודם עובד' : legacy ? 'הערך הישן לא תואם כיתה בסניף — בחרו כיתה מהרשימה' : ''}
+                onChange={e => setDraft(d => ({ ...d, classroom: e.target.value }))}>
+                <MenuItem value="">ללא</MenuItem>
+                {legacy && <MenuItem value={draft.classroom}>{draft.classroom} (ישן)</MenuItem>}
+                {options.map(n => <MenuItem key={n} value={n}>{n}</MenuItem>)}
+              </TextField>
+            );
+          })()}
 
           <Box>
             <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>לוח שבועי</Typography>
@@ -336,10 +356,22 @@ export default function CommitmentsManager() {
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
-  const employeesWithoutCommitment = useMemo(() => {
-    const set = new Set(commitments.map(c => String(c.employee_id?._id || c.employee_id)));
-    return employees.filter(e => !set.has(String(e._id)));
-  }, [employees, commitments]);
+  const [missingOpen, setMissingOpen] = useState(false);
+  const withCommitment = useMemo(() => new Set(commitments.map(c => String(c.employee_id?._id || c.employee_id))), [commitments]);
+  // Marked "אין צורך בשעות התחייבות ושיבוץ" — not missing anything.
+  const employeesWithoutCommitment = useMemo(
+    () => employees.filter(e => !withCommitment.has(String(e._id)) && e.shift_area !== 'none'),
+    [employees, withCommitment]);
+  const exemptEmployees = useMemo(
+    () => employees.filter(e => !withCommitment.has(String(e._id)) && e.shift_area === 'none'),
+    [employees, withCommitment]);
+  const setExempt = async (emp, exempt) => {
+    try {
+      const { data } = await api.put('/payroll/commitments/exempt', { employee_id: emp._id, exempt });
+      toast.success(exempt ? `${emp.full_name} לא תופיע בסידור${data.removed ? ` (${data.removed} משמרות הוסרו)` : ''}` : `${emp.full_name} חזרה לרשימת החסרות`);
+      load();
+    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה'); }
+  };
 
   // Filter by search, then group by branch (sorted), employees sorted by name.
   const branchGroups = useMemo(() => {
@@ -377,12 +409,20 @@ export default function CommitmentsManager() {
           />
           <Chip label={`${search ? `${filteredCount}/` : ''}${commitments.length} עובדות`} color="primary" variant="outlined" />
           {employeesWithoutCommitment.length > 0 && (
-            <Chip label={`${employeesWithoutCommitment.length} ללא התחייבות`} color="warning" variant="outlined" />
+            <Chip label={`${employeesWithoutCommitment.length} ללא התחייבות`} color="warning" variant="outlined" onClick={() => setMissingOpen(true)} />
           )}
           <Button startIcon={<UploadFileIcon />} variant="outlined" onClick={() => setImportOpen(true)}>ייבא מ-CSV</Button>
           <Button variant="contained" onClick={() => setEditor({ open: true, initial: null })}>הוסף התחייבות</Button>
         </Stack>
       </Paper>
+
+      {employeesWithoutCommitment.length > 0 && (
+        <Alert severity="warning" sx={{ mb: 1.5 }}
+          action={<Button color="inherit" size="small" onClick={() => setMissingOpen(true)}>טיפול</Button>}>
+          {employeesWithoutCommitment.length} עובדות פעילות בלי שעות התחייבות — הן לא ייכנסו לסידור העבודה:
+          {' '}{employeesWithoutCommitment.map(e => e.full_name).join(', ')}
+        </Alert>
+      )}
 
       <Paper sx={{ borderRadius: 3, overflow: 'auto' }}>
         <Table size="small">
@@ -479,6 +519,38 @@ export default function CommitmentsManager() {
         onClose={() => setEditor({ open: false, initial: null })}
         onSaved={() => load()}
       />
+      <Dialog open={missingOpen} onClose={() => setMissingOpen(false)} maxWidth="sm" fullWidth dir="rtl">
+        <DialogTitle>עובדות בלי שעות התחייבות</DialogTitle>
+        <DialogContent>
+          <Alert severity="info" sx={{ mb: 2 }}>
+            לכל עובדת: מוסיפים התחייבות, או מסמנים שאין צורך — היא עובדת בשיטה אחרת ולא תופיע בסידור העבודה בכלל.
+          </Alert>
+          {!employeesWithoutCommitment.length && <Typography color="text.secondary">אין עובדות חסרות 🎉</Typography>}
+          <Stack spacing={1} divider={<Divider flexItem />}>
+            {employeesWithoutCommitment.map(e => (
+              <Stack key={e._id} direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
+                <Typography sx={{ flex: 1 }}>{e.full_name}{e.branch_id?.name ? ` · ${e.branch_id.name}` : ''}</Typography>
+                <Button size="small" variant="contained" onClick={() => { setMissingOpen(false); setEditor({ open: true, initial: { employee_id: e._id, classroom: '' } }); }}>הוספת התחייבות</Button>
+                <Button size="small" variant="outlined" color="inherit" onClick={() => setExempt(e, true)}>אין צורך בשעות התחייבות ושיבוץ</Button>
+              </Stack>
+            ))}
+          </Stack>
+          {exemptEmployees.length > 0 && (
+            <>
+              <Typography variant="subtitle2" sx={{ mt: 3, mb: 1, fontWeight: 700 }}>לא בסידור העבודה</Typography>
+              <Stack spacing={1}>
+                {exemptEmployees.map(e => (
+                  <Stack key={e._id} direction="row" spacing={1} alignItems="center">
+                    <Typography sx={{ flex: 1 }} color="text.secondary">{e.full_name}</Typography>
+                    <Button size="small" onClick={() => setExempt(e, false)}>החזרה</Button>
+                  </Stack>
+                ))}
+              </Stack>
+            </>
+          )}
+        </DialogContent>
+        <DialogActions><Button onClick={() => setMissingOpen(false)}>סגירה</Button></DialogActions>
+      </Dialog>
       <ImportDialog
         open={importOpen}
         onClose={() => setImportOpen(false)}

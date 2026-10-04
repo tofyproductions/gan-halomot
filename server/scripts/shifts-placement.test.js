@@ -124,6 +124,45 @@ function schoolYear(ymd) {
   const r3 = await svc.autoPlaceWeek({ user: manager, weekId: String(w2._id) });
   eq(r3.placed, 15, 'כל 15 המשמרות שובצו מחדש');
 
+  console.log('\nשינוי כרטיס מזיז משמרות שהמערכת שיבצה (לימור, 10.2026)');
+  {
+    // single: primary infants, already placed there all week (WEEK). The manager
+    // moved Thursday to the kitchen by hand.
+    const wk = await M.ShiftWeek.findById(week._id);
+    wk.entries.find(e => String(e.employee_id) === String(single._id) && e.date === board.dates[4]).area = 'kitchen';
+    wk.entries.find(e => String(e.employee_id) === String(single._id) && e.date === board.dates[4]).classroom_id = null;
+    await wk.save();
+    const r = await svc.setShiftPlacement({
+      user: manager, employeeId: String(single._id), area: 'class',
+      classroomId: String(infants._id), secondClassroomId: String(older._id),
+      dayClassrooms: { 0: String(infants._id), 1: String(infants._id), 2: String(older._id), 3: String(infants._id), 4: String(older._id) },
+    });
+    eq(r.placed, 3, 'שלישי (וחמישי בשבוע הבא) עברו לכיתה השנייה — חמישי הידני לא זז');
+    const w = await M.ShiftWeek.findById(week._id).lean();
+    const mine = w.entries.filter(e => String(e.employee_id) === String(single._id)).sort((a, b) => a.date.localeCompare(b.date));
+    eq(mine.map(e => e.area === 'class' ? String(e.classroom_id) : e.area),
+      [String(infants._id), String(infants._id), String(older._id), String(infants._id), 'kitchen'], 'לפי המפה, והמטבח הידני נשאר');
+    // The week of W2 was seeded before the map: the button fixes it.
+    await M.ShiftWeek.updateOne({ _id: w2._id }, { $set: { 'entries.$[e].area': 'class', 'entries.$[e].classroom_id': infants._id } }, { arrayFilters: [{ 'e.employee_id': single._id }] });
+    const b = await svc.autoPlaceWeek({ user: manager, weekId: String(w2._id) });
+    eq(b.placed, 2, 'הכפתור מעביר ימים שבכיתה הלא נכונה מבין שתי הכיתות שלה');
+  }
+
+  console.log('\nלא בסידור');
+  {
+    const extra = await M.Employee.create({ full_name: 'בלי התחייבות', israeli_id: '444444444', branch_id: branch._id, is_active: true });
+    let bd = await svc.getBoard({ user: manager, branchId: String(branch._id), weekStart: WEEK });
+    eq(bd.employees.find(e => e._id === String(extra._id)).has_commitment, false, 'הלוח יודע שאין לה התחייבות');
+    const r = await svc.setShiftPlacement({ user: manager, employeeId: String(cook._id), area: 'none' });
+    eq(r.removed, 10, 'הוצאה מכל השבועות הפתוחים');
+    bd = await svc.getBoard({ user: manager, branchId: String(branch._id), weekStart: WEEK });
+    eq(bd.employees.find(e => e._id === String(cook._id)).shift_area, 'none', 'מסומנת "לא בסידור"');
+    eq(bd.pending_primary.some(p => p.employee_id === String(cook._id)), false, 'לא נשאלת על כיתה');
+    const n = new Date(`${WEEK2}T12:00:00Z`); n.setUTCDate(n.getUTCDate() + 7);
+    const w3 = await svc.createWeek({ user: manager, branchId: String(branch._id), weekStart: n.toISOString().slice(0, 10) });
+    eq(w3.entries.some(e => String(e.employee_id) === String(cook._id)), false, 'ולא נפתחת בשבוע חדש');
+  }
+
   console.log('\nבדיקות קלט');
   await throwsStatus(() => svc.setShiftPlacement({ user: manager, employeeId: String(single._id), area: 'class', classroomId: String(foreignRoom._id) }), 400, 'כיתה מסניף אחר נדחית');
   await throwsStatus(() => svc.setShiftPlacement({ user: manager, employeeId: String(single._id), area: 'class', classroomId: String(infants._id), secondClassroomId: String(infants._id) }), 400, 'כיתה שנייה זהה נדחית');

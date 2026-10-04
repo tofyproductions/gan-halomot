@@ -2,6 +2,8 @@
  * A new week, before the manager touches it: each employee where her
  * commitment says she works, for the hours it says.
  *
+ * An employee whose card says 'none' is not on the rota at all.
+ *
  * Area assignment precedence, per weekday: (1) the card says she is a
  * kitchen worker / floater (`shift_area`); (2) the card maps this weekday to
  * one of her two classes (`shift_day_classrooms`, active only); (3) her
@@ -36,7 +38,7 @@ function buildSeedEntries({ dates, employees, commitments, activeClassroomIds, c
   const out = [];
   for (const emp of employees) {
     const c = byEmployee.get(String(emp._id));
-    if (!c) continue;
+    if (!c || emp.shift_area === 'none') continue;
     const days = [...(c.days || [])].sort((a, b) => a.day - b.day);
     const usual = days.find(d => !d.is_off && padHHMM(d.start_hhmm));
     for (const d of days) {

@@ -394,16 +394,19 @@ async function publishWeek({ user, weekId, now = new Date() }) {
  * Where her card places her on the rota, set once by the manager:
  *   area 'kitchen' / 'floater' — the cook / floater row, every day;
  *   area 'class' — her primary class, optionally a second one with a weekday
- *   map (`dayClassrooms` { weekday: classroomId }, only her two classes).
- * Then every open week from this one on that still holds her as "ללא כיתה"
- * is placed by the new card — the manager's own placements are left alone.
+ *   map (`dayClassrooms` { weekday: classroomId }, only her two classes);
+ *   area 'none' — not on the rota at all (paid some other way, no commitment).
+ * Then the open weeks from this one on follow the new card: her "ללא כיתה"
+ * shifts and the ones still where the OLD card put them move; a shift the
+ * manager placed by hand stays. 'none' takes her off those weeks.
  */
 async function setShiftPlacement({ user, employeeId, area = 'class', classroomId, secondClassroomId, dayClassrooms }) {
   if (!mongoose.isValidObjectId(employeeId)) throw new ShiftError(404, 'עובדת לא נמצאה');
-  if (!['class', 'kitchen', 'floater'].includes(area)) throw new ShiftError(400, 'שיבוץ לא מוכר');
+  if (!['class', 'kitchen', 'floater', 'none'].includes(area)) throw new ShiftError(400, 'שיבוץ לא מוכר');
   const emp = await Employee.findById(employeeId);
   if (!emp) throw new ShiftError(404, 'עובדת לא נמצאה');
   assertEdit(user, emp.branch_id);
+  const before = cardOf(emp);
   if (area === 'class') {
     const activeRoom = async (id) => {
       if (!mongoose.isValidObjectId(id)) throw new ShiftError(404, 'כיתה לא נמצאה');
@@ -436,19 +439,50 @@ async function setShiftPlacement({ user, employeeId, area = 'class', classroomId
     emp.shift_day_classrooms = [];
   }
   await emp.save();
-  const placed = await placeUnassigned({ branchId: emp.branch_id, employeeIds: [String(emp._id)] });
-  return { employee: emp, placed };
+  if (area === 'none') {
+    const removed = await removeFromOpenWeeks(emp);
+    return { employee: emp, placed: 0, removed };
+  }
+  const placed = await placeByCards({ branchId: emp.branch_id, employeeIds: [String(emp._id)], previous: new Map([[String(emp._id), before]]) });
+  return { employee: emp, placed, removed: 0 };
+}
+
+/** The placement fields of a card, detached — "where the old card put her". */
+function cardOf(emp) {
+  return {
+    primary_classroom_id: emp.primary_classroom_id ? String(emp.primary_classroom_id) : null,
+    shift_area: emp.shift_area || null,
+    shift_day_classrooms: (emp.shift_day_classrooms || []).map(m => ({ day: m.day, classroom_id: String(m.classroom_id) })),
+  };
+}
+
+async function removeFromOpenWeeks(emp) {
+  const weeks = await ShiftWeek.find({ branch_id: emp.branch_id, week_start: { $gte: sundayOfYmd(todayIsrael()) }, 'entries.employee_id': emp._id });
+  let removed = 0;
+  for (const week of weeks) {
+    const keep = week.entries.filter(e => String(e.employee_id) !== String(emp._id));
+    removed += week.entries.length - keep.length;
+    week.entries = keep;
+    await week.save();
+  }
+  return removed;
 }
 
 /**
- * "ללא כיתה" entries of open weeks (this week on, or one given week) placed
- * by the employees' cards. Only unassigned entries move. Returns how many.
+ * Entries of open weeks (this week on, or one given week) moved to where the
+ * employees' cards put them. Which entries may move:
+ *   - "ללא כיתה" ones, always;
+ *   - with `previous` (a card was just changed): those still exactly where
+ *     the previous card put them — anything else the manager placed by hand;
+ *   - without it (the board's button): those in one of her own card classes
+ *     on a day the card gives the other one.
+ * Returns how many moved.
  */
-async function placeUnassigned({ branchId, employeeIds = null, weekId = null }) {
+async function placeByCards({ branchId, employeeIds = null, weekId = null, previous = null }) {
   const filter = weekId ? { _id: weekId } : { branch_id: branchId, week_start: { $gte: sundayOfYmd(todayIsrael()) } };
   const weeks = await ShiftWeek.find(filter);
   if (!weeks.length) return 0;
-  const ids = employeeIds || [...new Set(weeks.flatMap(w => w.entries.filter(e => e.area === 'unassigned').map(e => String(e.employee_id))))];
+  const ids = employeeIds || [...new Set(weeks.flatMap(w => w.entries.filter(e => !e.cross_branch).map(e => String(e.employee_id))))];
   if (!ids.length) return 0;
   const [emps, commitments] = await Promise.all([
     Employee.find({ _id: { $in: ids } }).select('primary_classroom_id shift_area shift_day_classrooms').lean(),
@@ -456,18 +490,32 @@ async function placeUnassigned({ branchId, employeeIds = null, weekId = null }) 
   ]);
   const empOf = new Map(emps.map(e => [String(e._id), e]));
   const textOf = new Map(commitments.map(c => [String(c.employee_id), c.classroom]));
+  const cardClasses = (emp) => new Set([emp.primary_classroom_id, ...(emp.shift_day_classrooms || []).map(m => m.classroom_id)].filter(Boolean).map(String));
   let placed = 0;
   for (const week of weeks) {
     const rooms = await Classroom.find({ branch_id: week.branch_id, is_active: true, academic_year: schoolYearOf(week.week_start) }).select('_id').lean();
     const active = new Set(rooms.map(r => String(r._id)));
     let changed = false;
     for (const e of week.entries) {
-      if (e.area !== 'unassigned' || e.cross_branch) continue;
-      const emp = empOf.get(String(e.employee_id));
-      if (!emp) continue;
+      if (e.cross_branch) continue;
+      const id = String(e.employee_id);
+      const emp = empOf.get(id);
+      if (!emp || emp.shift_area === 'none') continue;
       const weekday = new Date(`${e.date}T12:00:00Z`).getUTCDay();
-      const p = placementFor(emp, weekday, textOf.get(String(e.employee_id)), active);
+      const text = textOf.get(id);
+      const p = placementFor(emp, weekday, text, active);
       if (p.area === 'unassigned') continue;
+      const cls = e.classroom_id ? String(e.classroom_id) : null;
+      if (e.area === p.area && cls === p.classroom_id) continue;
+      let movable = e.area === 'unassigned';
+      if (!movable && previous && previous.has(id)) {
+        const old = placementFor(previous.get(id), weekday, text, active);
+        movable = e.area === old.area && cls === old.classroom_id;
+      } else if (!movable && !previous) {
+        const mine = cardClasses(emp);
+        movable = e.area === 'class' && p.area === 'class' && mine.has(cls);
+      }
+      if (!movable) continue;
       e.area = p.area;
       e.classroom_id = p.classroom_id;
       e.new_class = false;
@@ -479,13 +527,13 @@ async function placeUnassigned({ branchId, employeeIds = null, weekId = null }) 
   return placed;
 }
 
-/** The board's "שיבוץ לפי הכרטיסים" — every unassigned entry of one week. */
+/** The board's "שיבוץ לפי הכרטיסים" — one week, every employee. */
 async function autoPlaceWeek({ user, weekId }) {
   if (!mongoose.isValidObjectId(weekId)) throw new ShiftError(404, 'סידור לא נמצא');
   const week = await ShiftWeek.findById(weekId).select('branch_id').lean();
   if (!week) throw new ShiftError(404, 'סידור לא נמצא');
   assertEdit(user, week.branch_id);
-  return { placed: await placeUnassigned({ branchId: week.branch_id, weekId }) };
+  return { placed: await placeByCards({ branchId: week.branch_id, weekId }) };
 }
 
 function sundayOfYmd(ymd) {
@@ -612,6 +660,6 @@ async function myShifts({ employee, weekStart }) {
 module.exports = {
   ShiftError, canView, canEdit, getBoard, createWeek, saveEntries, setClosedDay, publishWeek,
   setShiftPlacement, setPrimaryClassroom: (args) => setShiftPlacement({ ...args, area: 'class' }),
-  placeUnassigned, autoPlaceWeek, closeClassroom, reopenClassroom, setRatios,
+  placeByCards, autoPlaceWeek, removeFromOpenWeeks, closeClassroom, reopenClassroom, setRatios,
   createEditRequest, decideEditRequest, myShifts,
 };

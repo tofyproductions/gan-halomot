@@ -81,6 +81,7 @@ router.delete('/fixed-schedules/:employeeId/exception/:date',  requireRole('syst
 // Employee commitments (weekly schedules)
 const commitments = require('../controllers/commitments.controller');
 router.get('/commitments',                     commitments.list);
+router.put('/commitments/exempt',              requireRole('system_admin', 'branch_manager', 'accountant'), commitments.setExempt);
 router.put('/commitments',                     requireRole('system_admin', 'branch_manager', 'accountant'), commitments.upsert);
 router.delete('/commitments/:id',              requireRole('system_admin', 'branch_manager', 'accountant'), commitments.remove);
 router.post('/commitments/import',             requireRole('system_admin', 'accountant'), commitments.importCsv);

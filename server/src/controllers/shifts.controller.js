@@ -43,12 +43,12 @@ module.exports = {
   }),
   primaryClass: handle(async (req, res) => {
     const b = req.body || {};
-    const { placed } = await svc.setShiftPlacement({
+    const { placed, removed } = await svc.setShiftPlacement({
       user: req.user, employeeId: String(b.employee_id || ''), area: b.area || 'class',
       classroomId: String(b.classroom_id || ''), secondClassroomId: b.second_classroom_id ? String(b.second_classroom_id) : null,
       dayClassrooms: b.day_classrooms && typeof b.day_classrooms === 'object' ? b.day_classrooms : {},
     });
-    res.json({ ok: true, placed });
+    res.json({ ok: true, placed, removed });
   }),
   autoPlace: handle(async (req, res) => { res.json(await svc.autoPlaceWeek({ user: req.user, weekId: req.params.id })); }),
   closeClassroom: handle(async (req, res) => { await svc.closeClassroom({ user: req.user, classroomId: req.params.id }); res.json({ ok: true }); }),
