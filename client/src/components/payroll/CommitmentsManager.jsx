@@ -86,7 +86,7 @@ function CommitmentEditor({ open, initial, employees, commitments = [], onClose,
   const save = () => {
     if (!draft.employee_id) return toast.error('יש לבחור עובד');
     api.put('/payroll/commitments', draft)
-      .then(res => { onSaved(res.data.commitment); onClose(); toast.success('נשמר'); })
+      .then(res => { onSaved(res.data.commitment); onClose(); toast.success(res.data.rota_added ? `נשמר — נוספו ${res.data.rota_added} משמרות לסידור שכבר נפתח` : 'נשמר'); })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 

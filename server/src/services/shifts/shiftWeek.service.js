@@ -527,13 +527,39 @@ async function placeByCards({ branchId, employeeIds = null, weekId = null, previ
   return placed;
 }
 
-/** The board's "שיבוץ לפי הכרטיסים" — one week, every employee. */
+/**
+ * Employees with a commitment but not a single shift in an open week — her
+ * commitment (or her card) came after the week was opened — get the week's
+ * seed for her, like a fresh week would. `employeeIds` narrows who; without
+ * it every such employee of the branch. Returns how many shifts were added.
+ */
+async function seedMissing({ branchId, weekId = null, employeeIds = null }) {
+  const filter = weekId ? { _id: weekId } : { branch_id: branchId, week_start: { $gte: sundayOfYmd(todayIsrael()) } };
+  const weeks = await ShiftWeek.find(filter);
+  let added = 0;
+  for (const week of weeks) {
+    const present = new Set(week.entries.map(e => String(e.employee_id)));
+    const dates = weekDays(week.week_start);
+    const closed = await closedDatesFor(week.branch_id, dates, week);
+    const seeded = (await seedRespectingConstraints(week.branch_id, dates, closed))
+      .filter(e => !present.has(String(e.employee_id)) && (!employeeIds || employeeIds.includes(String(e.employee_id))));
+    if (!seeded.length) continue;
+    week.entries.push(...seeded);
+    await week.save();
+    added += seeded.length;
+  }
+  return added;
+}
+
+/** The board's "שיבוץ לפי הכרטיסים" — one week, every employee: missing ones added, then placed. */
 async function autoPlaceWeek({ user, weekId }) {
   if (!mongoose.isValidObjectId(weekId)) throw new ShiftError(404, 'סידור לא נמצא');
   const week = await ShiftWeek.findById(weekId).select('branch_id').lean();
   if (!week) throw new ShiftError(404, 'סידור לא נמצא');
   assertEdit(user, week.branch_id);
-  return { placed: await placeByCards({ branchId: week.branch_id, weekId }) };
+  const added = await seedMissing({ branchId: week.branch_id, weekId });
+  const placed = await placeByCards({ branchId: week.branch_id, weekId });
+  return { placed: placed + added, added };
 }
 
 function sundayOfYmd(ymd) {
@@ -660,6 +686,6 @@ async function myShifts({ employee, weekStart }) {
 module.exports = {
   ShiftError, canView, canEdit, getBoard, createWeek, saveEntries, setClosedDay, publishWeek,
   setShiftPlacement, setPrimaryClassroom: (args) => setShiftPlacement({ ...args, area: 'class' }),
-  placeByCards, autoPlaceWeek, removeFromOpenWeeks, closeClassroom, reopenClassroom, setRatios,
+  placeByCards, autoPlaceWeek, removeFromOpenWeeks, seedMissing, closeClassroom, reopenClassroom, setRatios,
   createEditRequest, decideEditRequest, myShifts,
 };

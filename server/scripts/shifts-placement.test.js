@@ -163,6 +163,24 @@ function schoolYear(ymd) {
     eq(w3.entries.some(e => String(e.employee_id) === String(cook._id)), false, 'ולא נפתחת בשבוע חדש');
   }
 
+  console.log('\nהתחייבות שנוספה אחרי פתיחת השבוע (ליאל, 10.2026)');
+  {
+    const late = await M.Employee.create({ full_name: 'מאוחרת', israeli_id: '555555555', branch_id: branch._id, is_active: true, primary_classroom_id: older._id });
+    await M.EmployeeCommitment.create({ employee_id: late._id, branch_id: branch._id, classroom: '', days: [{ day: 0, start_hhmm: '07:00', end_hhmm: '17:00' }, { day: 2, is_off: true }, { day: 3, start_hhmm: '07:00', end_hhmm: '17:00' }] });
+    const r = await svc.autoPlaceWeek({ user: manager, weekId: String(week._id) });
+    eq(r.added, 2, 'הכפתור מוסיף אותה לשבוע לפי ההתחייבות');
+    const w = await M.ShiftWeek.findById(week._id).lean();
+    const mine = w.entries.filter(e => String(e.employee_id) === String(late._id));
+    eq(mine.every(e => e.area === 'class' && String(e.classroom_id) === String(older._id)), true, 'ובכיתה שלה');
+    eq(w.entries.some(e => String(e.employee_id) === String(cook._id)), false, 'מי שסומנה "לא בסידור" לא חוזרת');
+    const again = await svc.autoPlaceWeek({ user: manager, weekId: String(week._id) });
+    eq(again.added, 0, 'לחיצה שנייה לא מכפילה');
+    const late2 = await M.Employee.create({ full_name: 'מאוחרת 2', israeli_id: '666666666', branch_id: branch._id, is_active: true });
+    await M.EmployeeCommitment.create({ employee_id: late2._id, branch_id: branch._id, classroom: 'מטבח', days: [{ day: 1, start_hhmm: '07:00', end_hhmm: '13:00' }] });
+    const n = await svc.seedMissing({ branchId: branch._id, employeeIds: [String(late2._id)] });
+    eq(n >= 1, true, 'שמירת התחייבות מוסיפה אותה לשבועות הפתוחים');
+  }
+
   console.log('\nבדיקות קלט');
   await throwsStatus(() => svc.setShiftPlacement({ user: manager, employeeId: String(single._id), area: 'class', classroomId: String(foreignRoom._id) }), 400, 'כיתה מסניף אחר נדחית');
   await throwsStatus(() => svc.setShiftPlacement({ user: manager, employeeId: String(single._id), area: 'class', classroomId: String(infants._id), secondClassroomId: String(infants._id) }), 400, 'כיתה שנייה זהה נדחית');

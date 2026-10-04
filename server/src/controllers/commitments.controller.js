@@ -101,7 +101,15 @@ async function upsert(req, res, next) {
       { $set: set },
       { new: true, upsert: true }
     );
-    res.json({ commitment: { ...c.toObject(), id: String(c._id) } });
+    // A rota week opened before this commitment existed has no shift for her:
+    // add her there now, as a fresh week would have.
+    let added = 0;
+    if (c.branch_id) {
+      added = await require('../services/shifts/shiftWeek.service')
+        .seedMissing({ branchId: c.branch_id, employeeIds: [String(employee_id)] })
+        .catch((err) => { console.error('[commitments] rota seed failed:', err.message); return 0; });
+    }
+    res.json({ commitment: { ...c.toObject(), id: String(c._id) }, rota_added: added });
   } catch (err) { next(err); }
 }
 
