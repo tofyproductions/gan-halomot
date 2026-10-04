@@ -82,6 +82,7 @@ async function seedFor(branchId, dates, closedDates) {
 }
 
 async function getBoard({ user, branchId, weekStart }) {
+  if (!mongoose.isValidObjectId(branchId)) throw new ShiftError(404, 'סניף לא נמצא');
   if (!isSunday(weekStart)) throw new ShiftError(400, 'שבוע מתחיל ביום ראשון');
   assertView(user, branchId);
   const branch = await Branch.findById(branchId).lean();
@@ -164,10 +165,13 @@ function normalizeEntries(raw, dates, closed) {
 }
 
 /**
- * The shared write behind a manager's save and an approved office request:
- * validate, flag and record new classes, store.
+ * Validate a proposed week against the database, without writing anything:
+ * overlaps, branch boundary (employees and classes must belong to the week's
+ * branch), and the fields the server owns — the name is always the employee's
+ * real one, and new_class is derived here, never taken from the client.
+ * Returns the clean entries and the classes to record on each employee card.
  */
-async function applyEntries(week, raw) {
+async function prepareEntries(week, raw) {
   const dates = weekDays(week.week_start);
   const closed = await closedDatesFor(week.branch_id, dates, week);
   const entries = normalizeEntries(raw, dates, closed);
@@ -177,22 +181,38 @@ async function applyEntries(week, raw) {
     throw new ShiftError(400, `${first.employee_name || 'עובדת'} משובצת בשעות חופפות ב-${first.date}`, { overlaps });
   }
   const employees = await Employee.find({ _id: { $in: [...new Set(entries.map(e => String(e.employee_id)))] } })
-    .select('full_name primary_classroom_id extra_classroom_ids');
+    .select('full_name branch_id primary_classroom_id extra_classroom_ids');
   const byId = new Map(employees.map(e => [String(e._id), e]));
+  const roomIds = [...new Set(entries.filter(e => e.area === 'class').map(e => String(e.classroom_id)))];
+  const rooms = roomIds.length ? await Classroom.find({ _id: { $in: roomIds }, branch_id: week.branch_id }).select('_id').lean() : [];
+  const branchRooms = new Set(rooms.map(r => String(r._id)));
+  // A placement already flagged in the stored week stays flagged until it is moved.
+  const flagged = new Set(week.entries.filter(e => e.new_class).map(e => `${e.employee_id}|${e.classroom_id}`));
   const additions = new Map();
   for (const e of entries) {
     const emp = byId.get(String(e.employee_id));
     if (!emp) throw new ShiftError(400, 'עובדת לא נמצאה');
-    if (!e.employee_name) e.employee_name = emp.full_name;
+    if (String(emp.branch_id) !== String(week.branch_id)) throw new ShiftError(400, `${emp.full_name} לא שייכת לסניף הזה`);
+    if (e.area === 'class' && !branchRooms.has(String(e.classroom_id))) throw new ShiftError(400, 'הכיתה לא שייכת לסניף');
+    e.employee_name = emp.full_name;
+    e.new_class = false;
     if (e.area !== 'class') continue;
     const known = [emp.primary_classroom_id, ...(emp.extra_classroom_ids || [])].filter(Boolean).map(String);
-    const added = additions.get(String(emp._id)) || new Set();
-    if (!known.includes(String(e.classroom_id)) || added.has(String(e.classroom_id))) {
-      e.new_class = true;
+    if (!known.includes(String(e.classroom_id))) {
+      const added = additions.get(String(emp._id)) || new Set();
       added.add(String(e.classroom_id));
       additions.set(String(emp._id), added);
+      e.new_class = true;
+    } else if (flagged.has(`${e.employee_id}|${e.classroom_id}`)) {
+      e.new_class = true;
     }
   }
+  return { entries, additions };
+}
+
+/** The shared write behind a manager's save and an approved office request. */
+async function applyEntries(week, raw) {
+  const { entries, additions } = await prepareEntries(week, raw);
   for (const [empId, rooms] of additions) {
     await Employee.updateOne({ _id: empId }, { $addToSet: { extra_classroom_ids: { $each: [...rooms] } } });
   }
@@ -248,6 +268,8 @@ async function publishWeek({ user, weekId }) {
 }
 
 async function setPrimaryClassroom({ user, employeeId, classroomId }) {
+  if (!mongoose.isValidObjectId(employeeId)) throw new ShiftError(404, 'עובדת לא נמצאה');
+  if (!mongoose.isValidObjectId(classroomId)) throw new ShiftError(404, 'כיתה לא נמצאה');
   const emp = await Employee.findById(employeeId);
   if (!emp) throw new ShiftError(404, 'עובדת לא נמצאה');
   assertEdit(user, emp.branch_id);
@@ -260,6 +282,7 @@ async function setPrimaryClassroom({ user, employeeId, classroomId }) {
 }
 
 async function closeClassroom({ user, classroomId }) {
+  if (!mongoose.isValidObjectId(classroomId)) throw new ShiftError(404, 'כיתה לא נמצאה');
   const room = await Classroom.findById(classroomId);
   if (!room) throw new ShiftError(404, 'כיתה לא נמצאה');
   assertEdit(user, room.branch_id);
@@ -271,6 +294,7 @@ async function closeClassroom({ user, classroomId }) {
 }
 
 async function reopenClassroom({ user, classroomId }) {
+  if (!mongoose.isValidObjectId(classroomId)) throw new ShiftError(404, 'כיתה לא נמצאה');
   const room = await Classroom.findById(classroomId);
   if (!room) throw new ShiftError(404, 'כיתה לא נמצאה');
   assertEdit(user, room.branch_id);
@@ -280,6 +304,7 @@ async function reopenClassroom({ user, classroomId }) {
 }
 
 async function setRatios({ user, branchId, ratios }) {
+  if (!mongoose.isValidObjectId(branchId)) throw new ShiftError(404, 'סניף לא נמצא');
   if (!(canEdit(user, branchId) || user.role === 'system_admin')) throw new ShiftError(403, 'אין הרשאה');
   const clean = {};
   for (const key of ['infants', 'young', 'older']) {
@@ -292,11 +317,7 @@ async function setRatios({ user, branchId, ratios }) {
 async function createEditRequest({ user, weekId, entries }) {
   if (!OFFICE.includes(user.role)) throw new ShiftError(403, 'רק המשרד מגיש בקשת שינוי');
   const week = await loadWeekOr404(weekId);
-  const dates = weekDays(week.week_start);
-  const closed = await closedDatesFor(week.branch_id, dates, week);
-  const clean = normalizeEntries(entries, dates, closed);
-  const overlaps = findOverlaps(clean);
-  if (overlaps.length) throw new ShiftError(400, `${overlaps[0].employee_name || 'עובדת'} משובצת בשעות חופפות ב-${overlaps[0].date}`, { overlaps });
+  const { entries: clean } = await prepareEntries(week, entries);
   const doc = await ShiftEditRequest.create({
     shift_week_id: week._id, branch_id: week.branch_id, entries: clean,
     requested_by: user.id, requested_by_name: user.full_name || '',
@@ -311,6 +332,7 @@ async function createEditRequest({ user, weekId, entries }) {
 }
 
 async function decideEditRequest({ user, requestId, approve, reason }) {
+  if (!mongoose.isValidObjectId(requestId)) throw new ShiftError(404, 'בקשה לא נמצאה');
   const doc = await ShiftEditRequest.findById(requestId);
   if (!doc) throw new ShiftError(404, 'בקשה לא נמצאה');
   assertEdit(user, doc.branch_id);

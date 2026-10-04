@@ -133,6 +133,38 @@ async function throwsStatus(fn, status, label) {
   board = await svc.getBoard({ user: manager, branchId: String(branch._id), weekStart: WEEK });
   eq(board.ratios, { infants: 4, young: 7, older: 10 }, 'יחס סניף גובר, ריק חוזר לברירת מחדל');
 
+  console.log('\nגבול סניף ושדות שהשרת קובע');
+  const foreignEmp = await M.Employee.create({ full_name: 'זרה', israeli_id: '333333333', branch_id: other._id, is_active: true });
+  const foreignRoom = await M.Classroom.create({ name: 'אחר', category: 'צעירים', academic_year: '2026-2027', branch_id: other._id });
+  const WEEK2 = '2026-10-25';
+  const w2 = await svc.createWeek({ user: manager, branchId: String(branch._id), weekStart: WEEK2 });
+  const base2 = () => w2.entries.map(e => e.toObject());
+  const foreignEntry = { employee_id: foreignEmp._id, date: '2026-10-26', area: 'floater', start_hhmm: '08:00', end_hhmm: '12:00' };
+  await throwsStatus(() => svc.saveEntries({ user: manager, weekId: String(w2._id), entries: [...base2(), foreignEntry] }), 400, 'עובדת מסניף אחר נדחית');
+  eq((await M.Employee.findById(foreignEmp._id)).extra_classroom_ids.length, 0, 'ולא נכתב דבר לכרטיס שלה');
+  const danaE = base2().find(e => String(e.employee_id) === String(dana._id));
+  await throwsStatus(() => svc.saveEntries({ user: manager, weekId: String(w2._id), entries: [...base2().filter(e => e !== danaE), { ...danaE, area: 'class', classroom_id: foreignRoom._id }] }), 400, 'כיתה מסניף אחר נדחית');
+  await throwsStatus(() => svc.createEditRequest({ user: admin, weekId: String(w2._id), entries: [...base2(), foreignEntry] }), 400, 'בקשת משרד עם עובדת זרה נדחית');
+
+  const spoof = base2().map(e => (e === danaE ? { ...e, employee_name: 'מזויף' } : e));
+  let s2 = await svc.saveEntries({ user: manager, weekId: String(w2._id), entries: spoof });
+  eq(s2.entries.find(e => String(e.employee_id) === String(dana._id)).employee_name, 'דנה', 'שם מזויף מוחלף בשם האמיתי');
+
+  const moveDana = (room) => s2.entries.map(e => e.toObject()).map(e => (String(e.employee_id) === String(dana._id) && e.date === danaE.date ? { ...e, area: 'class', classroom_id: room._id, new_class: false } : e));
+  const danaOn = (w) => w.entries.find(e => String(e.employee_id) === String(dana._id) && e.date === danaE.date);
+  s2 = await svc.saveEntries({ user: manager, weekId: String(w2._id), entries: moveDana(young) });
+  eq(danaOn(s2).new_class, true, 'כיתה חדשה מסומנת בשרת');
+  s2 = await svc.saveEntries({ user: manager, weekId: String(w2._id), entries: moveDana(young) });
+  eq(danaOn(s2).new_class, true, 'ונשארת מסומנת בשמירה שנייה');
+  s2 = await svc.saveEntries({ user: manager, weekId: String(w2._id), entries: moveDana(infants) });
+  eq(danaOn(s2).new_class, false, 'וחוזרת לריקה אחרי חזרה לכיתה הראשית');
+
+  const rej = await svc.createEditRequest({ user: admin, weekId: String(w2._id), entries: s2.entries.map(e => e.toObject()) });
+  const rejected = await svc.decideEditRequest({ user: manager, requestId: String(rej._id), approve: false, reason: 'לא מתאים' });
+  eq([rejected.status, rejected.reject_reason], ['rejected', 'לא מתאים'], 'דחייה עם סיבה נשמרת');
+  await throwsStatus(() => svc.decideEditRequest({ user: manager, requestId: String(rej._id), approve: true }), 409, 'החלטה שנייה נדחית');
+  await throwsStatus(() => svc.getBoard({ user: manager, branchId: 'bad', weekStart: WEEK }), 404, 'מזהה סניף לא תקין — 404');
+
   await mongoose.disconnect();
   await mongod.stop();
   console.log(failures ? `\n${failures} FAILED` : '\nכל הבדיקות עברו');
