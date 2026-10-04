@@ -29,7 +29,7 @@ export default function MyShifts() {
     return (data.classrooms || []).filter(c => used.has(c._id));
   }, [data]);
   const rows = useMemo(() => {
-    const base = data?.entries ? buildRows({ entries: data.entries, classrooms }) : [];
+    const base = data?.published && data?.entries ? buildRows({ entries: data.entries, classrooms }) : [];
     // Her own shifts in other branches — read-only, as in her home rota.
     return data?.away?.length ? [...base, buildAwayRow(data.away)] : base;
   }, [data, classrooms]);
@@ -52,7 +52,7 @@ export default function MyShifts() {
           {data?.reason === 'no_employee' && <Alert severity="warning">לא נמצא כרטיס עובדת מקושר למשתמש שלך. פני למשרד.</Alert>}
           {data?.error && <Alert severity="error">לא הצלחנו לטעון את הסידור</Alert>}
           {data && data.published === false && <Alert severity="info">הסידור לשבוע {fmtDate(week)} עוד לא פורסם.</Alert>}
-          {data?.published && (
+          {data && (data.published || (data.away && data.away.length)) && (
             <Stack spacing={1}>
               <Typography color="text.secondary">{data.branch_name} · המשמרות שלך מודגשות</Typography>
               <ShiftGrid dates={data.dates} rows={rows} closedDates={new Set()} switched={switched} editable={false}
