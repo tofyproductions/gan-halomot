@@ -11,14 +11,17 @@ const CANCELLABLE = new Set(['pending_colleague', 'pending_broadcast', 'broadcas
 export default function MyConstraints() {
   const [data, setData] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
   const load = useCallback(() => {
     api.get('/shifts/constraints/mine').then(r => setData(r.data)).catch(() => setData({ error: true }));
   }, []);
   useEffect(() => { load(); }, [load]);
 
   const act = async (url, body, ok) => {
+    setBusy(true);
     try { const r = await api.post(url, body); toast.success(ok(r.data)); load(); }
     catch (err) { toast.error(err.response?.data?.error || 'הפעולה נכשלה'); }
+    finally { setBusy(false); }
   };
   const cancel = (c) => {
     if (!window.confirm('לבטל את האילוץ?')) return;
@@ -39,8 +42,8 @@ export default function MyConstraints() {
           {data.incoming.map(c => (
             <Alert key={c._id} severity="info" action={
               <Stack direction="row" spacing={1}>
-                <Button size="small" onClick={() => act(`/shifts/constraints/${c._id}/colleague-response`, { accept: true }, () => 'אישרת — הבקשה עברה למנהלת')}>מסכימה</Button>
-                <Button size="small" color="inherit" onClick={() => act(`/shifts/constraints/${c._id}/colleague-response`, { accept: false }, () => 'סירבת')}>לא יכולה</Button>
+                <Button size="small" disabled={busy} onClick={() => act(`/shifts/constraints/${c._id}/colleague-response`, { accept: true }, () => 'אישרת — הבקשה עברה למנהלת')}>מסכימה</Button>
+                <Button size="small" color="inherit" disabled={busy} onClick={() => act(`/shifts/constraints/${c._id}/colleague-response`, { accept: false }, () => 'סירבת')}>לא יכולה</Button>
               </Stack>
             }>{c.employee_name} מבקשת: {describe(c)}</Alert>
           ))}
@@ -48,7 +51,7 @@ export default function MyConstraints() {
             <Alert key={c._id} severity="info" action={
               c.i_volunteered
                 ? <Chip size="small" color="success" label="סימנת שאת יכולה" />
-                : <Button size="small" onClick={() => act(`/shifts/constraints/${c._id}/volunteer`, {}, () => 'תודה! המנהלת תחליט')}>אני יכולה</Button>
+                : <Button size="small" disabled={busy} onClick={() => act(`/shifts/constraints/${c._id}/volunteer`, {}, () => 'תודה! המנהלת תחליט')}>אני יכולה</Button>
             }>מחפשים מחליפה ב-{fmtDate(c.date)}</Alert>
           ))}
         </Stack>
@@ -68,8 +71,8 @@ export default function MyConstraints() {
               {c.status === 'rejected' && c.reject_reason && <Typography variant="body2" color="error.main">סיבה: {c.reject_reason}</Typography>}
               {c.status === 'broadcast' && <Typography variant="body2">{c.volunteer_count ? `${c.volunteer_count} עובדות הסכימו להחלפה` : 'עוד אף אחת לא הסכימה'}</Typography>}
               <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
-                {c.files.map((file, i) => <Link key={i} component="button" variant="caption" onClick={() => openConstraintFile(c._id, i)}>{file.name}</Link>)}
-                {CANCELLABLE.has(c.status) && <Button size="small" color="inherit" onClick={() => cancel(c)} sx={{ mr: 'auto' }}>ביטול</Button>}
+                {c.files.map((file, i) => <Link key={i} component="button" variant="caption" onClick={() => openConstraintFile(c._id, i, file.name)}>{file.name}</Link>)}
+                {CANCELLABLE.has(c.status) && <Button size="small" color="inherit" disabled={busy} onClick={() => cancel(c)} sx={{ mr: 'auto' }}>ביטול</Button>}
               </Stack>
             </CardContent>
           </Card>

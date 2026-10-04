@@ -89,7 +89,7 @@ export default function ConstraintForm({ open, onClose, onSaved }) {
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>ביטול</Button>
-        <Button variant="contained" onClick={submit} disabled={saving || !f.date || (needsDetails && !f.details.trim())}>שליחה</Button>
+        <Button variant="contained" onClick={submit} disabled={saving || !f.date || (needsDetails && !f.details.trim()) || (needsTarget && !f.target_date) || (f.type === 'swap' && f.target === 'colleague' && !f.colleague_id)}>שליחה</Button>
       </DialogActions>
     </Dialog>
   );
