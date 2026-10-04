@@ -341,6 +341,22 @@ const employeeSchema = new mongoose.Schema({
    */
   primary_classroom_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Classroom', default: null, index: true },
   extra_classroom_ids: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Classroom' }], default: [] },
+  /*
+   * Where the weekly rota seeds her, set once from the rota board.
+   * `shift_area` — a cook (מטבח) or floater (מחליפה) is seeded in that row,
+   * not in a class. `shift_day_classrooms` — a worker split between two
+   * classes: which class on which weekday (0 = Sunday … 5 = Friday); a day
+   * not listed falls back to the primary class.
+   */
+  shift_area: { type: String, enum: ['kitchen', 'floater', null], default: null },
+  shift_day_classrooms: {
+    type: [{
+      _id: false,
+      day: { type: Number, min: 0, max: 5, required: true },
+      classroom_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Classroom', required: true },
+    }],
+    default: [],
+  },
   start_date: { type: Date, default: null },
 
   // Salary configuration

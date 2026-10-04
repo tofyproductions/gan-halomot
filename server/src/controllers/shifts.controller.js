@@ -42,9 +42,15 @@ module.exports = {
     res.json({ request: await svc.decideEditRequest({ user: req.user, requestId: req.params.id, approve: req.body.approve === true, reason: req.body.reason }) });
   }),
   primaryClass: handle(async (req, res) => {
-    await svc.setPrimaryClassroom({ user: req.user, employeeId: String(req.body.employee_id || ''), classroomId: String(req.body.classroom_id || '') });
-    res.json({ ok: true });
+    const b = req.body || {};
+    const { placed } = await svc.setShiftPlacement({
+      user: req.user, employeeId: String(b.employee_id || ''), area: b.area || 'class',
+      classroomId: String(b.classroom_id || ''), secondClassroomId: b.second_classroom_id ? String(b.second_classroom_id) : null,
+      dayClassrooms: b.day_classrooms && typeof b.day_classrooms === 'object' ? b.day_classrooms : {},
+    });
+    res.json({ ok: true, placed });
   }),
+  autoPlace: handle(async (req, res) => { res.json(await svc.autoPlaceWeek({ user: req.user, weekId: req.params.id })); }),
   closeClassroom: handle(async (req, res) => { await svc.closeClassroom({ user: req.user, classroomId: req.params.id }); res.json({ ok: true }); }),
   reopenClassroom: handle(async (req, res) => { await svc.reopenClassroom({ user: req.user, classroomId: req.params.id }); res.json({ ok: true }); }),
   ratios: handle(async (req, res) => { await svc.setRatios({ user: req.user, branchId: req.params.branchId, ratios: req.body }); res.json({ ok: true }); }),

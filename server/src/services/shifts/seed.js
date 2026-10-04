@@ -2,17 +2,30 @@
  * A new week, before the manager touches it: each employee where her
  * commitment says she works, for the hours it says.
  *
- * Area assignment precedence: (1) employee's active primary classroom (if set
- * and active); (2) the commitment's free-text `classroom` interpreted for
- * kitchen/floater (תינוקייה / מטבח / מחליפה …) only if no primary class is
- * active; (3) "unassigned" if neither applies, waiting for the manager to
- * place her.
+ * Area assignment precedence, per weekday: (1) the card says she is a
+ * kitchen worker / floater (`shift_area`); (2) the card maps this weekday to
+ * one of her two classes (`shift_day_classrooms`, active only); (3) her
+ * active primary classroom; (4) the commitment's free-text `classroom` read
+ * for kitchen/floater; (5) "unassigned", waiting for the manager to place her.
  */
 function areaFromCommitmentText(text) {
   const t = String(text || '');
   if (/מטבח/.test(t)) return 'kitchen';
   if (/מחליפ/.test(t)) return 'floater';
   return null;
+}
+
+/** Where her card puts her on this weekday: { area, classroom_id }. */
+function placementFor(emp, weekday, commitmentText, activeClassroomIds) {
+  if (emp.shift_area === 'kitchen' || emp.shift_area === 'floater') return { area: emp.shift_area, classroom_id: null };
+  const mapped = (emp.shift_day_classrooms || []).find(m => m.day === weekday);
+  if (mapped && mapped.classroom_id && activeClassroomIds.has(String(mapped.classroom_id))) {
+    return { area: 'class', classroom_id: String(mapped.classroom_id) };
+  }
+  if (emp.primary_classroom_id && activeClassroomIds.has(String(emp.primary_classroom_id))) {
+    return { area: 'class', classroom_id: String(emp.primary_classroom_id) };
+  }
+  return { area: areaFromCommitmentText(commitmentText) || 'unassigned', classroom_id: null };
 }
 
 function buildSeedEntries({ dates, employees, commitments, activeClassroomIds, closedDates }) {
@@ -24,10 +37,6 @@ function buildSeedEntries({ dates, employees, commitments, activeClassroomIds, c
   for (const emp of employees) {
     const c = byEmployee.get(String(emp._id));
     if (!c) continue;
-    const textArea = areaFromCommitmentText(c.classroom);
-    const primary = emp.primary_classroom_id && activeClassroomIds.has(String(emp.primary_classroom_id))
-      ? String(emp.primary_classroom_id) : null;
-    const area = primary ? 'class' : (textArea || 'unassigned');
     const days = [...(c.days || [])].sort((a, b) => a.day - b.day);
     const usual = days.find(d => !d.is_off && padHHMM(d.start_hhmm));
     for (const d of days) {
@@ -43,12 +52,13 @@ function buildSeedEntries({ dates, employees, commitments, activeClassroomIds, c
         start = padHHMM(usual.start_hhmm);
         end = padHHMM(usual.end_hhmm);
       }
+      const { area, classroom_id } = placementFor(emp, d.day, c.classroom, activeClassroomIds);
       out.push({
         employee_id: String(emp._id),
         employee_name: emp.full_name,
         date,
         area,
-        classroom_id: area === 'class' ? primary : null,
+        classroom_id,
         start_hhmm: start,
         end_hhmm: end,
         alternating,
@@ -59,4 +69,4 @@ function buildSeedEntries({ dates, employees, commitments, activeClassroomIds, c
   return out;
 }
 
-module.exports = { areaFromCommitmentText, buildSeedEntries };
+module.exports = { areaFromCommitmentText, placementFor, buildSeedEntries };

@@ -28,6 +28,7 @@ router.post('/weeks/:id/publish', board, c.publish);
 router.post('/weeks/:id/edit-requests', board, c.createEditRequest);
 router.post('/edit-requests/:id/decide', board, c.decideEditRequest);
 router.post('/primary-class', board, c.primaryClass);
+router.post('/weeks/:id/auto-place', board, c.autoPlace);
 router.post('/classrooms/:id/close', board, c.closeClassroom);
 router.post('/classrooms/:id/reopen', board, c.reopenClassroom);
 router.put('/ratios/:branchId', board, c.ratios);

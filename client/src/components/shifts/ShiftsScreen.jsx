@@ -78,6 +78,7 @@ export default function ShiftsScreen() {
   const [draft, setDraft] = useState(null);          // working entries while editing
   const [dlg, setDlg] = useState({ open: false, entry: null, defaults: null });
   const [primaryOpen, setPrimaryOpen] = useState(false);
+  const [placementOpen, setPlacementOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [futureOpen, setFutureOpen] = useState(false);
   const [rateOpen, setRateOpen] = useState(false);
@@ -199,6 +200,20 @@ export default function ShiftsScreen() {
       load();
     } catch (err) { toast.error(err.response?.data?.error || 'הפעולה נכשלה'); }
   };
+  // Pending prompt rows carry the suggestion; the card fields come from the employee list.
+  const pendingItems = useMemo(() => (board ? board.pending_primary.map(p => {
+    const emp = board.employees.find(e => e._id === p.employee_id) || {};
+    return { ...emp, ...p };
+  }) : []), [board]);
+  const placementItems = useMemo(() => (board ? board.employees.filter(e => !e.foreign).map(e => ({ ...e, employee_id: e._id })) : []), [board]);
+  const unassignedCount = (board?.week?.entries || []).filter(e => e.area === 'unassigned').length;
+  const autoPlace = async () => {
+    try {
+      const { data } = await api.post(`/shifts/weeks/${board.week._id}/auto-place`);
+      toast[data.placed ? 'success' : 'info'](data.placed ? `${data.placed} משמרות שובצו לפי הכרטיסים` : 'אין למי לשבץ — קבעו כיתות קבועות קודם');
+      load();
+    } catch (err) { toast.error(err.response?.data?.error || 'הפעולה נכשלה'); }
+  };
   const sendRequest = async () => {
     try { await api.post(`/shifts/weeks/${board.week._id}/edit-requests`, { entries: clean(draft) }); toast.success('הבקשה נשלחה למנהלת הסניף'); load(); }
     catch (err) { toast.error(err.response?.data?.error || 'שליחה נכשלה'); }
@@ -220,6 +235,8 @@ export default function ShiftsScreen() {
           : board.can_edit ? { label: board.week.published_at ? 'סגירת סידור (פרסום שינויים)' : 'סגירת סידור ופרסום', onClick: publish, disabled: !board.has_unpublished_changes }
           : board.can_request ? { label: 'שליחת בקשת שינוי למנהלת', onClick: sendRequest, disabled: !dirty } : undefined}
         actions={[
+          ...(board?.can_edit ? [{ label: 'כיתות קבועות', onClick: () => setPlacementOpen(true) }] : []),
+          ...(board?.can_edit && board.week && unassignedCount ? [{ label: `שיבוץ לפי הכרטיסים (${unassignedCount} ללא כיתה)`, onClick: autoPlace }] : []),
           ...(board?.can_edit ? [{ label: 'הגדרות', onClick: () => setSettingsOpen(true) }] : []),
           { label: 'אילוצים עתידיים', onClick: () => setFutureOpen(true) },
           { label: 'דוח נוכחות אתמול', onClick: () => setReportDate(yesterdayYmd()) },
@@ -290,8 +307,11 @@ export default function ShiftsScreen() {
       <AttendanceReportDialog open={!!reportDate} onClose={() => setReportDate(null)} branchId={board?.branch_id} date={reportDate} />
       {board && <PrimaryClassDialog open={primaryOpen}
         onClose={() => { primaryDismissed.current.add(selectedBranch); setPrimaryOpen(false); }}
-        pending={board.pending_primary} classrooms={board.classrooms}
+        items={pendingItems} classrooms={board.classrooms}
         onDone={() => { primaryDismissed.current.add(selectedBranch); setPrimaryOpen(false); load(); }} />}
+      {board && <PrimaryClassDialog manage open={placementOpen} onClose={() => setPlacementOpen(false)}
+        items={placementItems} classrooms={board.classrooms}
+        onDone={() => { setPlacementOpen(false); load(); }} />}
       <FutureConstraintsDialog open={futureOpen} onClose={() => setFutureOpen(false)} branchId={board?.branch_id} canEdit={!!board?.can_edit} />
       <ShiftSettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} board={board} onChanged={load} />
     </Box>

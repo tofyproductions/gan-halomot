@@ -15,7 +15,7 @@ const { branchManagerFilter } = require('../branch-recipients.service');
 const { closureDateSet, todayIsrael } = require('../fixedSchedule');
 const rotaPay = require('./rotaPay.service');
 const { effectiveRatios, ratioWarnings } = require('./ratio');
-const { buildSeedEntries } = require('./seed');
+const { buildSeedEntries, placementFor } = require('./seed');
 const constraints = require('./constraints.service');
 const cross = require('./crossBranch.service');
 const rateRequests = require('./rateRequests.service');
@@ -57,7 +57,7 @@ async function classroomsWithCounts(branchId, schoolYear) {
 
 async function seedFor(branchId, dates, closedDates) {
   const [employees, commitments, rooms] = await Promise.all([
-    Employee.find({ branch_id: branchId, is_active: true }).select('full_name primary_classroom_id').lean(),
+    Employee.find({ branch_id: branchId, is_active: true }).select('full_name primary_classroom_id shift_area shift_day_classrooms').lean(),
     EmployeeCommitment.find({ branch_id: branchId }).lean(),
     Classroom.find({ branch_id: branchId, is_active: true, academic_year: schoolYearOf(dates[0]) }).select('_id').lean(),
   ]);
@@ -106,7 +106,7 @@ async function getBoard({ user, branchId, weekStart }) {
   const entries = week ? week.entries.map(e => e.toObject()) : preview;
 
   const [employees, commitments, inactive, editRequests] = await Promise.all([
-    Employee.find({ branch_id: branchId, is_active: true }).select('full_name primary_classroom_id extra_classroom_ids').sort({ full_name: 1 }).lean(),
+    Employee.find({ branch_id: branchId, is_active: true }).select('full_name primary_classroom_id extra_classroom_ids shift_area shift_day_classrooms').sort({ full_name: 1 }).lean(),
     EmployeeCommitment.find({ branch_id: branchId }).lean(),
     Classroom.find({ branch_id: branchId, is_active: false, academic_year: schoolYearOf(weekStart) }).select('name academic_year').sort({ academic_year: -1, name: 1 }).lean(),
     week ? ShiftEditRequest.find({ shift_week_id: week._id, status: 'pending' }).sort({ created_at: -1 }).lean() : [],
@@ -138,7 +138,16 @@ async function getBoard({ user, branchId, weekStart }) {
     closed_dates: [...closed],
     classrooms,
     inactive_classrooms: inactive.map(r => ({ _id: String(r._id), name: r.name, academic_year: r.academic_year })),
-    employees: employees.map(e => ({ _id: String(e._id), full_name: e.full_name, primary_classroom_id: e.primary_classroom_id ? String(e.primary_classroom_id) : null, extra_classroom_ids: (e.extra_classroom_ids || []).map(String), commitment: commitmentHours(commitmentOf.get(String(e._id))) }))
+    employees: employees.map(e => ({
+      _id: String(e._id), full_name: e.full_name,
+      primary_classroom_id: e.primary_classroom_id ? String(e.primary_classroom_id) : null,
+      extra_classroom_ids: (e.extra_classroom_ids || []).map(String),
+      shift_area: e.shift_area || null,
+      shift_day_classrooms: (e.shift_day_classrooms || []).map(m => ({ day: m.day, classroom_id: String(m.classroom_id) })),
+      has_commitment: commitmentOf.has(String(e._id)),
+      commitment_text: (commitmentOf.get(String(e._id)) || {}).classroom || '',
+      commitment: commitmentHours(commitmentOf.get(String(e._id))),
+    }))
       .concat(foreignCandidates.filter(c => c.has_rate).map(c => ({ _id: String(c._id), full_name: `${c.full_name} (${c.branch_name})`, primary_classroom_id: null, extra_classroom_ids: [], foreign: true, commitment: {} }))),
     ratios,
     // What the branch itself set, blank where it follows the city default —
@@ -381,18 +390,108 @@ async function publishWeek({ user, weekId, now = new Date() }) {
   return { week, notified: recipients.length, auto_accepted: autoAccepted };
 }
 
-async function setPrimaryClassroom({ user, employeeId, classroomId }) {
+/**
+ * Where her card places her on the rota, set once by the manager:
+ *   area 'kitchen' / 'floater' — the cook / floater row, every day;
+ *   area 'class' — her primary class, optionally a second one with a weekday
+ *   map (`dayClassrooms` { weekday: classroomId }, only her two classes).
+ * Then every open week from this one on that still holds her as "ללא כיתה"
+ * is placed by the new card — the manager's own placements are left alone.
+ */
+async function setShiftPlacement({ user, employeeId, area = 'class', classroomId, secondClassroomId, dayClassrooms }) {
   if (!mongoose.isValidObjectId(employeeId)) throw new ShiftError(404, 'עובדת לא נמצאה');
-  if (!mongoose.isValidObjectId(classroomId)) throw new ShiftError(404, 'כיתה לא נמצאה');
+  if (!['class', 'kitchen', 'floater'].includes(area)) throw new ShiftError(400, 'שיבוץ לא מוכר');
   const emp = await Employee.findById(employeeId);
   if (!emp) throw new ShiftError(404, 'עובדת לא נמצאה');
   assertEdit(user, emp.branch_id);
-  const room = await Classroom.findOne({ _id: classroomId, branch_id: emp.branch_id, is_active: true });
-  if (!room) throw new ShiftError(400, 'הכיתה לא שייכת לסניף');
-  emp.primary_classroom_id = room._id;
-  emp.extra_classroom_ids = (emp.extra_classroom_ids || []).filter(id => String(id) !== String(room._id));
+  if (area === 'class') {
+    const activeRoom = async (id) => {
+      if (!mongoose.isValidObjectId(id)) throw new ShiftError(404, 'כיתה לא נמצאה');
+      const room = await Classroom.findOne({ _id: id, branch_id: emp.branch_id, is_active: true });
+      if (!room) throw new ShiftError(400, 'הכיתה לא שייכת לסניף');
+      return room;
+    };
+    const room = await activeRoom(classroomId);
+    const second = secondClassroomId ? await activeRoom(secondClassroomId) : null;
+    if (second && String(second._id) === String(room._id)) throw new ShiftError(400, 'הכיתה השנייה זהה לראשית');
+    const allowed = new Set([String(room._id), second && String(second._id)].filter(Boolean));
+    const map = [];
+    if (second) {
+      for (const [day, id] of Object.entries(dayClassrooms || {})) {
+        const d = Number(day);
+        if (!Number.isInteger(d) || d < 0 || d > 5) throw new ShiftError(400, 'יום לא תקין');
+        if (!id) continue;
+        if (!allowed.has(String(id))) throw new ShiftError(400, 'בחירה לפי יום רק מבין שתי הכיתות');
+        map.push({ day: d, classroom_id: id });
+      }
+    }
+    emp.primary_classroom_id = room._id;
+    const extra = (emp.extra_classroom_ids || []).filter(id => String(id) !== String(room._id));
+    if (second && !extra.some(id => String(id) === String(second._id))) extra.push(second._id);
+    emp.extra_classroom_ids = extra;
+    emp.shift_area = null;
+    emp.shift_day_classrooms = map;
+  } else {
+    emp.shift_area = area;
+    emp.shift_day_classrooms = [];
+  }
   await emp.save();
-  return emp;
+  const placed = await placeUnassigned({ branchId: emp.branch_id, employeeIds: [String(emp._id)] });
+  return { employee: emp, placed };
+}
+
+/**
+ * "ללא כיתה" entries of open weeks (this week on, or one given week) placed
+ * by the employees' cards. Only unassigned entries move. Returns how many.
+ */
+async function placeUnassigned({ branchId, employeeIds = null, weekId = null }) {
+  const filter = weekId ? { _id: weekId } : { branch_id: branchId, week_start: { $gte: sundayOfYmd(todayIsrael()) } };
+  const weeks = await ShiftWeek.find(filter);
+  if (!weeks.length) return 0;
+  const ids = employeeIds || [...new Set(weeks.flatMap(w => w.entries.filter(e => e.area === 'unassigned').map(e => String(e.employee_id))))];
+  if (!ids.length) return 0;
+  const [emps, commitments] = await Promise.all([
+    Employee.find({ _id: { $in: ids } }).select('primary_classroom_id shift_area shift_day_classrooms').lean(),
+    EmployeeCommitment.find({ employee_id: { $in: ids } }).select('employee_id classroom').lean(),
+  ]);
+  const empOf = new Map(emps.map(e => [String(e._id), e]));
+  const textOf = new Map(commitments.map(c => [String(c.employee_id), c.classroom]));
+  let placed = 0;
+  for (const week of weeks) {
+    const rooms = await Classroom.find({ branch_id: week.branch_id, is_active: true, academic_year: schoolYearOf(week.week_start) }).select('_id').lean();
+    const active = new Set(rooms.map(r => String(r._id)));
+    let changed = false;
+    for (const e of week.entries) {
+      if (e.area !== 'unassigned' || e.cross_branch) continue;
+      const emp = empOf.get(String(e.employee_id));
+      if (!emp) continue;
+      const weekday = new Date(`${e.date}T12:00:00Z`).getUTCDay();
+      const p = placementFor(emp, weekday, textOf.get(String(e.employee_id)), active);
+      if (p.area === 'unassigned') continue;
+      e.area = p.area;
+      e.classroom_id = p.classroom_id;
+      e.new_class = false;
+      changed = true;
+      placed += 1;
+    }
+    if (changed) await week.save();
+  }
+  return placed;
+}
+
+/** The board's "שיבוץ לפי הכרטיסים" — every unassigned entry of one week. */
+async function autoPlaceWeek({ user, weekId }) {
+  if (!mongoose.isValidObjectId(weekId)) throw new ShiftError(404, 'סידור לא נמצא');
+  const week = await ShiftWeek.findById(weekId).select('branch_id').lean();
+  if (!week) throw new ShiftError(404, 'סידור לא נמצא');
+  assertEdit(user, week.branch_id);
+  return { placed: await placeUnassigned({ branchId: week.branch_id, weekId }) };
+}
+
+function sundayOfYmd(ymd) {
+  const d = new Date(`${ymd}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - d.getUTCDay());
+  return d.toISOString().slice(0, 10);
 }
 
 async function closeClassroom({ user, classroomId }) {
@@ -512,6 +611,7 @@ async function myShifts({ employee, weekStart }) {
 
 module.exports = {
   ShiftError, canView, canEdit, getBoard, createWeek, saveEntries, setClosedDay, publishWeek,
-  setPrimaryClassroom, closeClassroom, reopenClassroom, setRatios,
+  setShiftPlacement, setPrimaryClassroom: (args) => setShiftPlacement({ ...args, area: 'class' }),
+  placeUnassigned, autoPlaceWeek, closeClassroom, reopenClassroom, setRatios,
   createEditRequest, decideEditRequest, myShifts,
 };

@@ -102,7 +102,7 @@ function suggestPrimary({ commitmentText, classrooms }) {
 
 /** A class employee with a commitment and no primary class. Kitchen and floaters have no class to ask about. */
 function needsPrimaryPrompt(employee, commitment) {
-  if (!commitment || employee.primary_classroom_id) return false;
+  if (!commitment || employee.primary_classroom_id || employee.shift_area) return false;
   return areaFromCommitmentText(commitment.classroom) === null;
 }
 
