@@ -38,6 +38,11 @@ const notificationEventSchema = new mongoose.Schema({
       'contact_request_new', 'contact_request_reply',
       // Finance part 1: the bank-pi agent stopped delivering the gan's account.
       'bank_feed_stale',
+      // סידור עבודה (docs/superpowers/specs/2026-10-04-shifts-phase1-design.md):
+      // published / changed for the employee, Friday reminder and the office's
+      // edit request for the manager, the decision back to the office.
+      'shift_published', 'shift_changed', 'shift_close_reminder',
+      'shift_edit_request', 'shift_edit_decision',
     ],
     required: true,
   },

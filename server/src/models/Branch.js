@@ -45,6 +45,14 @@ const branchSchema = new mongoose.Schema({
    * say so rather than quietly average them.
    */
   licensed_capacity: { type: Number, default: null },
+  // Staff-to-children ratio per age group, for the rota's warnings. null =
+  // the city default (services/shifts/ratio.js) — set only where a branch
+  // differs, so a change in the regulation is one edit, not one per branch.
+  staff_ratios: {
+    infants: { type: Number, default: null },
+    young: { type: Number, default: null },
+    older: { type: Number, default: null },
+  },
 
   // Attendance / TIMEDOX replacement — per-branch clock integration
   clock_ip: { type: String, default: '' },           // e.g. "10.0.0.3"
