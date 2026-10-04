@@ -611,6 +611,15 @@ connectDB().then(() => {
       setInterval(runShiftReminder, 60 * 60 * 1000);
     }
 
+    // נוכחות מול סידור: 07:00, על אתמול — למנהלות הסניפים ולמשרד, לידיעה.
+    const attendanceReport = require('./services/shiftAttendanceReportJob');
+    const runAttendanceReport = () => withJobLock('shift-attendance-report', 20 * 60 * 1000, () => attendanceReport.tick())
+      .catch(err => console.error('[attendance-report] failed:', err.message));
+    if (!platformMode) {
+      setTimeout(runAttendanceReport, 120 * 1000);
+      setInterval(runAttendanceReport, 60 * 60 * 1000);
+    }
+
     // התראות פוש: כל 5 דקות, כל מה שממתין ועבר עליו שעה מהשליחה הקודמת
     // נשלח שוב. יצירת אירוע חדש שולחת מיד בעצמה (notification.service.js);
     // ה-job הזה הוא רק החזרה החוזרת עד שמישהו מטפל.

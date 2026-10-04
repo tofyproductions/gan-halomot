@@ -16,6 +16,7 @@
     "test:cross-rules": "node scripts/cross-rules.test.js",
     "test:cross-branch-service": "node scripts/cross-branch-service.test.js",
     "test:rota-pay": "node scripts/rota-pay.test.js",
+    "test:attendance-report": "node scripts/attendance-report.test.js",
     "test:finance-ingest": "node scripts/finance-ingest.test.js",
     "test:card-settlement": "node scripts/card-settlement.test.js",
     "test:terms": "node scripts/employment-terms.test.js",
