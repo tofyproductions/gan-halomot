@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Stack, Button, IconButton, Typography, Alert, CircularProgress } from '@mui/material';
+import { Link as RouterLink } from 'react-router-dom';
+import { Box, Stack, Button, IconButton, Typography, Alert, CircularProgress, Chip, ToggleButton, ToggleButtonGroup } from '@mui/material';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import { toast } from 'react-toastify';
@@ -87,6 +88,9 @@ export default function ShiftsScreen() {
       .catch(() => { if (on) setActual({}); });
     return () => { on = false; };
   }, [board, week]);
+
+  // בוקר / צהריים — dims shifts outside the window; 13:00 is the cut.
+  const [shiftView, setShiftView] = useState('all');
 
   const [draft, setDraft] = useState(null);          // working entries while editing
   const [dlg, setDlg] = useState({ open: false, entry: null, defaults: null });
@@ -307,6 +311,21 @@ export default function ShiftsScreen() {
       {board && <ConstraintsPanel constraints={board.constraints} canEdit={!!board.can_edit} onChanged={load} />}
       {board && <OvertimeStrip employees={board.employees} entries={shown} dates={board.dates} />}
       {board && <FillSuggestions board={board} entries={shown} closed={closed} onAdd={addSuggested} />}
+      {board?.can_edit && (() => {
+        const missing = board.employees.filter(e => !e.foreign && !e.has_commitment && e.shift_area !== 'none');
+        if (!missing.length) return null;
+        return (
+          <Alert severity="info" sx={{ mb: 1, alignItems: 'center' }}>
+            <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+              <span>ללא התחייבות שעות (לא ייכנסו לסידור עד שתוגדר, או שיסומנו "לא בסידור"):</span>
+              {missing.map(e => (
+                <Chip key={e._id} size="small" clickable component={RouterLink}
+                  to={`/payroll?tab=commitments&employee=${e._id}`} label={e.full_name} />
+              ))}
+            </Stack>
+          </Alert>
+        );
+      })()}
       {board && (
         <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 1.5, alignItems: { md: 'flex-start' }, minWidth: 0 }}>
           {editable && (
@@ -316,9 +335,15 @@ export default function ShiftsScreen() {
             </Box>
           )}
           <Box sx={{ flex: 1, minWidth: 0 }}>
+            <ToggleButtonGroup size="small" exclusive value={shiftView} sx={{ mb: 0.5 }}
+              onChange={(_, v) => setShiftView(v || 'all')}>
+              <ToggleButton value="all">הכל</ToggleButton>
+              <ToggleButton value="am">בוקר (עד 13:00)</ToggleButton>
+              <ToggleButton value="pm">צהריים (מ־13:00)</ToggleButton>
+            </ToggleButtonGroup>
             <ShiftGrid
               dates={board.dates} rows={gridRows} closedDates={closed} warnings={board.warnings}
-              switched={switched} editable={editable} alerts={alerts} actual={actual}
+              switched={switched} editable={editable} alerts={alerts} actual={actual} shiftFilter={shiftView}
               onCellClick={(row, date) => setDlg({ open: true, entry: null, defaults: { date, area: row.area, classroom_id: row.classroom_id } })}
               onEntryClick={(entry) => setDlg({ open: true, entry, defaults: null })}
               onDropToCell={onDropToCell}

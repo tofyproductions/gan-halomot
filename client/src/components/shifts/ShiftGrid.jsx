@@ -14,6 +14,15 @@ const chipColors = (employeeId) => {
 
 const todayYmd = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 
+// בוקר/צהריים — the day splits at 13:00. A shift belongs to a window when it overlaps it.
+const NOON = 13 * 60;
+const inWindow = (e, win) => {
+  if (win === 'all') return true;
+  const a = toMin(e.start_hhmm); const b = toMin(e.end_hhmm);
+  if (a == null || b == null) return true; // no hours — never hide
+  return win === 'am' ? a < NOON : b > NOON;
+};
+
 const DND_TYPE = 'application/x-shift';
 // What is being dragged right now. Some browsers refuse getData() during
 // dragover, so the drop reads this first and falls back to the dataTransfer.
@@ -37,7 +46,7 @@ function readDrag(ev) {
  * scrolling sideways inside its own box — the page itself never widens (see
  * PageHeader for what a wide page does to sticky cells on iOS).
  */
-export default function ShiftGrid({ dates, rows, closedDates, warnings = [], switched, editable, onCellClick, onEntryClick, onDropToCell, highlightEmployeeId, alerts, actual = {} }) {
+export default function ShiftGrid({ dates, rows, closedDates, warnings = [], switched, editable, onCellClick, onEntryClick, onDropToCell, highlightEmployeeId, alerts, actual = {}, shiftFilter = 'all' }) {
   const warnOf = (row, date) => warnings.find(w => w.date === date && String(w.classroom_id) === String(row.classroom_id));
   const [over, setOver] = useState(null); // `${row.key}|${date}` under the dragged item
   const canDrop = !!(editable && onDropToCell);
@@ -191,6 +200,7 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                           onClick={editable && row.area !== 'away' ? (ev) => { ev.stopPropagation(); onEntryClick(e); } : undefined}
                           sx={{
                             cursor: draggable ? 'grab' : undefined,
+                            opacity: inWindow(e, shiftFilter) ? 1 : 0.22,
                             mb: 0.5, px: 0.75, py: 0.25, borderRadius: 1,
                             bgcolor: colors.bgcolor,
                             borderInlineStart: '3px solid', borderInlineStartColor: colors.accent,
@@ -249,7 +259,8 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                 {dates.map(d => {
                   const closed = closedDates.has(d);
                   const warn = warnOf(row, d);
-                  const count = new Set((row.cells[d] || []).map(e => String(e.employee_id))).size;
+                  const list = row.cells[d] || [];
+                  const uniq = (win) => new Set(list.filter(e => inWindow(e, win)).map(e => String(e.employee_id))).size;
                   return (
                     <TableCell key={d} align="center" sx={{
                       py: 0.25, px: 0.5, bgcolor: closed ? 'action.disabledBackground' : 'background.sunken',
@@ -257,7 +268,7 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                     }}>
                       {!closed && (
                         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, fontSize: '0.7rem', color: 'text.secondary' }}>
-                          <span>{count} שובצו</span>
+                          <span>{uniq('all')} שובצו · ☀️ {uniq('am')} · 🌙 {uniq('pm')}</span>
                           {warn && (
                             <Tooltip title={`${warn.enrolled} ילדים — צריך ${warn.needed} עובדות, משובצות ${warn.staff}`}>
                               <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25, color: 'warning.softOn', fontWeight: 700 }}>

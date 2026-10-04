@@ -349,6 +349,18 @@ export default function CommitmentsManager() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Deep link from the rota — /payroll?tab=commitments&employee=<id> opens
+  // her editor straight away (her existing hours if she has any).
+  const [deepLinked, setDeepLinked] = useState(false);
+  useEffect(() => {
+    if (deepLinked || loading) return;
+    const id = new URLSearchParams(window.location.search).get('employee');
+    if (!id) return;
+    setDeepLinked(true);
+    const existing = commitments.find(c => String(c.employee_id?._id || c.employee_id) === String(id));
+    setEditor({ open: true, initial: existing ? draftFromCommitment(existing) : { employee_id: id, classroom: '' } });
+  }, [deepLinked, loading, commitments]);
+
   const remove = async (id) => {
     if (!(await confirm({ title: 'הסרת התחייבות', message: 'להסיר התחייבות זו?', danger: true }))) return;
     api.delete(`/payroll/commitments/${id}`)

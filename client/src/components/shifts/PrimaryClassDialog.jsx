@@ -32,7 +32,7 @@ export default function PrimaryClassDialog({ open, onClose, items, classrooms, o
   }, [open, items]);
   const nameOf = (id) => classrooms.find(c => c._id === id)?.name || id;
   const set = (id, patch) => setChoice(c => ({ ...c, [id]: { ...c[id], ...patch } }));
-  const isClass = (v) => v && v !== 'kitchen' && v !== 'floater';
+  const isClass = (v) => v && !['kitchen', 'floater', 'none'].includes(v);
   // The card as it is now (a suggestion is not saved yet, so it counts as a change).
   const changed = (p) => JSON.stringify(choice[p.employee_id]) !== JSON.stringify(initialChoice({ ...p, suggestion: '' }));
 
@@ -78,6 +78,7 @@ export default function PrimaryClassDialog({ open, onClose, items, classrooms, o
                     {options.map(id => <MenuItem key={id} value={id}>{nameOf(id)}</MenuItem>)}
                     <MenuItem value="kitchen">עובדת מטבח</MenuItem>
                     <MenuItem value="floater">מחליפה</MenuItem>
+                    <MenuItem value="none">לא בסידור — תפקיד אחר (הנה״ח, אב בית, בק אופיס)</MenuItem>
                   </TextField>
                   {isClass(ch.main) && (
                     <TextField select size="small" sx={{ minWidth: 150 }} label="כיתה שנייה" value={ch.second}
