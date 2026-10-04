@@ -181,6 +181,29 @@ function schoolYear(ymd) {
     eq(n >= 1, true, 'שמירת התחייבות מוסיפה אותה לשבועות הפתוחים');
   }
 
+  console.log('\nהתחייבות שנושאת סניף ישן (ליאל, 10.2026)');
+  {
+    // Her card moved branch but the commitment row still carries the old one —
+    // the rota goes by the employee's branch, so she is seeded anyway.
+    const moved = await M.Employee.create({ full_name: 'שעברה סניף', israeli_id: '777777777', branch_id: branch._id, is_active: true, primary_classroom_id: older._id });
+    await M.EmployeeCommitment.create({ employee_id: moved._id, branch_id: other._id, classroom: '', days: [{ day: 1, start_hhmm: '07:00', end_hhmm: '15:00' }] });
+    const n = await svc.seedMissing({ branchId: branch._id, employeeIds: [String(moved._id)] });
+    eq(n >= 1, true, 'נזרעת לפי הסניף של העובדת גם כשההתחייבות נושאת סניף אחר');
+    const bd = await svc.getBoard({ user: manager, branchId: String(branch._id), weekStart: WEEK });
+    eq(bd.employees.find(e => e._id === String(moved._id)).has_commitment, true, 'והלוח רואה את ההתחייבות שלה');
+  }
+
+  console.log('\nיום מיוחד מלוח החופשות סוגר את היום בסידור');
+  {
+    const n = new Date(`${WEEK}T12:00:00Z`); n.setUTCDate(n.getUTCDate() + 21);
+    const WEEK4 = n.toISOString().slice(0, 10); // Sunday of a week not opened yet
+    await M.SpecialDay.create({ name: 'יום צוות', date: WEEK4, branch_id: null });
+    const w = await svc.createWeek({ user: manager, branchId: String(branch._id), weekStart: WEEK4 });
+    eq(w.entries.some(e => e.date === WEEK4), false, 'אין שיבוץ ביום הסגור');
+    const bd = await svc.getBoard({ user: manager, branchId: String(branch._id), weekStart: WEEK4 });
+    eq(bd.closed_dates.includes(WEEK4), true, 'הלוח מסמן את היום סגור');
+  }
+
   console.log('\nבדיקות קלט');
   await throwsStatus(() => svc.setShiftPlacement({ user: manager, employeeId: String(single._id), area: 'class', classroomId: String(foreignRoom._id) }), 400, 'כיתה מסניף אחר נדחית');
   await throwsStatus(() => svc.setShiftPlacement({ user: manager, employeeId: String(single._id), area: 'class', classroomId: String(infants._id), secondClassroomId: String(infants._id) }), 400, 'כיתה שנייה זהה נדחית');

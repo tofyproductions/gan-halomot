@@ -270,7 +270,7 @@ export default function ShiftsScreen() {
             return (
               <Button key={d} size="small" variant={manual ? 'contained' : 'outlined'} color="inherit" disabled={holiday}
                 onClick={() => toggleClosed(d, manual)}>
-                {holiday ? `${fmtDate(d)} — חג` : manual ? `${fmtDate(d)} — סגור (פתיחה)` : `סגירת ${fmtDate(d)}`}
+                {holiday ? `${fmtDate(d)} — לוח חופשות` : manual ? `${fmtDate(d)} — סגור (פתיחה)` : `סגירת ${fmtDate(d)}`}
               </Button>
             );
           })}

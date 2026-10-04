@@ -85,7 +85,9 @@ async function upsert(req, res, next) {
 
     const set = {
       employee_id,
-      branch_id: branch_id || emp.branch_id,
+      // The employee's branch wins — a stale branch sent by the client used to
+      // orphan the commitment from the rota of her real branch.
+      branch_id: emp.branch_id || branch_id,
       classroom: classroom || '',
       days: Array.isArray(days) ? days : [],
       notes: notes || '',
@@ -104,9 +106,10 @@ async function upsert(req, res, next) {
     // A rota week opened before this commitment existed has no shift for her:
     // add her there now, as a fresh week would have.
     let added = 0;
-    if (c.branch_id) {
+    const rotaBranch = emp.branch_id || c.branch_id;
+    if (rotaBranch) {
       added = await require('../services/shifts/shiftWeek.service')
-        .seedMissing({ branchId: c.branch_id, employeeIds: [String(employee_id)] })
+        .seedMissing({ branchId: rotaBranch, employeeIds: [String(employee_id)] })
         .catch((err) => { console.error('[commitments] rota seed failed:', err.message); return 0; });
     }
     res.json({ commitment: { ...c.toObject(), id: String(c._id) }, rota_added: added });

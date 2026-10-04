@@ -8,7 +8,7 @@
 const mongoose = require('mongoose');
 const {
   ShiftWeek, ShiftEditRequest, Branch, Classroom, Child, Employee,
-  EmployeeCommitment, Holiday, User,
+  EmployeeCommitment, Holiday, SpecialDay, User,
 } = require('../../models');
 const notificationService = require('../notification.service');
 const { branchManagerFilter } = require('../branch-recipients.service');
@@ -33,14 +33,24 @@ async function loadWeekOr404(weekId) {
   return week;
 }
 
-/** Holiday closures of the branch inside these dates, plus the week's own closed days. */
+/**
+ * Days the gan does not run inside these dates: holiday closures, employer
+ * shut days (SpecialDay — יום צוות, מסיבת סיום), plus the week's own closed days.
+ */
 async function closedDatesFor(branchId, dates, week) {
-  const holidays = await Holiday.find({
-    branch_id: branchId, kind: 'closure',
-    start_date: { $lte: new Date(`${dates[dates.length - 1]}T23:59:59+03:00`) },
-    end_date: { $gte: new Date(`${dates[0]}T00:00:00+03:00`) },
-  }).lean();
+  const [holidays, specials] = await Promise.all([
+    Holiday.find({
+      branch_id: branchId, kind: 'closure',
+      start_date: { $lte: new Date(`${dates[dates.length - 1]}T23:59:59+03:00`) },
+      end_date: { $gte: new Date(`${dates[0]}T00:00:00+03:00`) },
+    }).lean(),
+    SpecialDay.find({
+      date: { $in: dates },
+      $or: [{ branch_id: branchId }, { branch_id: null }],
+    }).select('date').lean(),
+  ]);
   const set = closureDateSet(holidays, branchId);
+  for (const s of specials) set.add(s.date);
   for (const d of (week && week.closed_days) || []) set.add(d);
   return new Set(dates.filter(d => set.has(d)));
 }
@@ -56,9 +66,11 @@ async function classroomsWithCounts(branchId, schoolYear) {
 }
 
 async function seedFor(branchId, dates, closedDates) {
-  const [employees, commitments, rooms] = await Promise.all([
-    Employee.find({ branch_id: branchId, is_active: true }).select('full_name primary_classroom_id shift_area shift_day_classrooms').lean(),
-    EmployeeCommitment.find({ branch_id: branchId }).lean(),
+  const employees = await Employee.find({ branch_id: branchId, is_active: true }).select('full_name primary_classroom_id shift_area shift_day_classrooms').lean();
+  // Commitments by employee, not by the commitment's own branch_id copy — a
+  // stale branch on the commitment row must not drop her from the seed.
+  const [commitments, rooms] = await Promise.all([
+    EmployeeCommitment.find({ employee_id: { $in: employees.map(e => e._id) } }).lean(),
     Classroom.find({ branch_id: branchId, is_active: true, academic_year: schoolYearOf(dates[0]) }).select('_id').lean(),
   ]);
   return buildSeedEntries({
@@ -105,9 +117,10 @@ async function getBoard({ user, branchId, weekStart }) {
   const preview = week ? null : await seedRespectingConstraints(branchId, dates, closed);
   const entries = week ? week.entries.map(e => e.toObject()) : preview;
 
-  const [employees, commitments, inactive, editRequests] = await Promise.all([
-    Employee.find({ branch_id: branchId, is_active: true }).select('full_name primary_classroom_id extra_classroom_ids shift_area shift_day_classrooms').sort({ full_name: 1 }).lean(),
-    EmployeeCommitment.find({ branch_id: branchId }).lean(),
+  const employees = await Employee.find({ branch_id: branchId, is_active: true }).select('full_name primary_classroom_id extra_classroom_ids shift_area shift_day_classrooms').sort({ full_name: 1 }).lean();
+  const [commitments, inactive, editRequests] = await Promise.all([
+    // By employee, like seedFor — see the comment there.
+    EmployeeCommitment.find({ employee_id: { $in: employees.map(e => e._id) } }).lean(),
     Classroom.find({ branch_id: branchId, is_active: false, academic_year: schoolYearOf(weekStart) }).select('name academic_year').sort({ academic_year: -1, name: 1 }).lean(),
     week ? ShiftEditRequest.find({ shift_week_id: week._id, status: 'pending' }).sort({ created_at: -1 }).lean() : [],
   ]);

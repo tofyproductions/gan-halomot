@@ -10,8 +10,11 @@ function initialChoice(item) {
   if (item.shift_area) return { main: item.shift_area, second: '', days: {} };
   const main = item.primary_classroom_id || item.suggestion || '';
   const map = item.shift_day_classrooms || [];
-  const second = map.find(m => m.classroom_id !== item.primary_classroom_id)?.classroom_id || '';
-  return { main, second, days: second ? Object.fromEntries(map.map(m => [m.day, m.classroom_id])) : {} };
+  // The second class may live only on the HR card (extra_classroom_ids) with
+  // no weekday split yet — surface it so the manager can set her days.
+  const second = map.find(m => m.classroom_id !== item.primary_classroom_id)?.classroom_id
+    || (item.extra_classroom_ids || []).find(id => id !== main) || '';
+  return { main, second, days: map.length ? Object.fromEntries(map.map(m => [m.day, m.classroom_id])) : {} };
 }
 
 /**

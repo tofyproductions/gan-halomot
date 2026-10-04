@@ -14,18 +14,27 @@
  * punch is never deleted, and an exception a person set (or the office removed)
  * is never overwritten.
  */
-const { Employee, ShiftWeek, Punch, Holiday } = require('../../models');
+const { Employee, ShiftWeek, Punch, Holiday, SpecialDay } = require('../../models');
 const { weekDays } = require('./rules');
 const { rotaDay } = require('./crossRules');
 const { ilDayBounds, closureDateSet } = require('../fixedSchedule');
 
 async function homeClosures(branchId, dates, weekRow) {
-  const holidays = await Holiday.find({
-    branch_id: branchId, kind: 'closure',
-    start_date: { $lte: new Date(`${dates[dates.length - 1]}T23:59:59+03:00`) },
-    end_date: { $gte: new Date(`${dates[0]}T00:00:00+03:00`) },
-  }).lean();
+  const [holidays, specials] = await Promise.all([
+    Holiday.find({
+      branch_id: branchId, kind: 'closure',
+      start_date: { $lte: new Date(`${dates[dates.length - 1]}T23:59:59+03:00`) },
+      end_date: { $gte: new Date(`${dates[0]}T00:00:00+03:00`) },
+    }).lean(),
+    // Employer shut days close the gan too; payroll pays them its own way,
+    // so the rota must not turn them into "לא משובצת" days off.
+    SpecialDay.find({
+      date: { $in: dates },
+      $or: [{ branch_id: branchId }, { branch_id: null }],
+    }).select('date').lean(),
+  ]);
   const set = closureDateSet(holidays, branchId);
+  for (const s of specials) set.add(s.date);
   for (const d of (weekRow && weekRow.closed_days) || []) set.add(d);
   return set;
 }
