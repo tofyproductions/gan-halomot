@@ -88,7 +88,7 @@ export function overtimeOf({ entries, employees, dates }) {
 
 export function buildRows({ entries, classrooms }) {
   const rows = [
-    ...classrooms.map(c => ({ key: `class:${c._id}`, label: c.name, enrolled: c.enrolled, area: 'class', classroom_id: String(c._id), cells: {} })),
+    ...classrooms.map(c => ({ key: `class:${c._id}`, label: c.name, enrolled: c.enrolled, category: c.category, area: 'class', classroom_id: String(c._id), cells: {} })),
     ...AREA_ROWS.map(a => ({ key: a.key, label: a.label, area: a.key, classroom_id: null, cells: {} })),
   ];
   const byKey = new Map(rows.map(r => [r.key, r]));

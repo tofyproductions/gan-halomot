@@ -46,7 +46,27 @@ function readDrag(ev) {
  * scrolling sideways inside its own box — the page itself never widens (see
  * PageHeader for what a wide page does to sticky cells on iOS).
  */
-export default function ShiftGrid({ dates, rows, closedDates, warnings = [], switched, editable, onCellClick, onEntryClick, onDropToCell, highlightEmployeeId, alerts, actual = {}, shiftFilter = 'all' }) {
+const CATEGORY_KEY = { 'תינוקייה': 'infants', 'צעירים': 'young', 'בוגרים': 'older' };
+
+/** ☀️ 5/4 — placed vs the licence minimum for one window, colored by the gap. */
+function StaffPill({ icon, label, staff, needed }) {
+  const diff = staff - needed;
+  const tone = diff < 0 ? 'warning' : diff > 0 ? 'info' : 'success';
+  const text = diff < 0 ? `חסרות ${-diff}` : diff > 0 ? `עודף ${diff}` : 'לפי התקן';
+  return (
+    <Tooltip title={`${label}: משובצות ${staff}, תקן ${needed} — ${text}`}>
+      <Box component="span" sx={{
+        display: 'inline-flex', alignItems: 'center', gap: 0.25,
+        px: 0.6, py: 0.1, borderRadius: 2, fontSize: '0.68rem', fontWeight: 700,
+        bgcolor: `${tone}.soft`, color: `${tone}.softOn`,
+      }}>
+        {icon} {staff}/{needed}{diff !== 0 ? ` · ${diff > 0 ? `עודף ${diff}` : `חסרות ${-diff}`}` : ''}
+      </Box>
+    </Tooltip>
+  );
+}
+
+export default function ShiftGrid({ dates, rows, closedDates, warnings = [], switched, editable, onCellClick, onEntryClick, onDropToCell, highlightEmployeeId, alerts, actual = {}, shiftFilter = 'all', ratios = null }) {
   const warnOf = (row, date) => warnings.find(w => w.date === date && String(w.classroom_id) === String(row.classroom_id));
   const [over, setOver] = useState(null); // `${row.key}|${date}` under the dragged item
   const canDrop = !!(editable && onDropToCell);
@@ -261,15 +281,22 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                   const warn = warnOf(row, d);
                   const list = row.cells[d] || [];
                   const uniq = (win) => new Set(list.filter(e => inWindow(e, win)).map(e => String(e.employee_id))).size;
+                  const catKey = CATEGORY_KEY[row.category];
+                  const needed = ratios && catKey && row.enrolled > 0 ? Math.ceil(row.enrolled / ratios[catKey]) : null;
                   return (
                     <TableCell key={d} align="center" sx={{
                       py: 0.25, px: 0.5, bgcolor: closed ? 'action.disabledBackground' : 'background.sunken',
                       borderBottom: '3px solid', borderBottomColor: 'divider',
                     }}>
                       {!closed && (
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, fontSize: '0.7rem', color: 'text.secondary' }}>
-                          <span>{uniq('all')} שובצו · ☀️ {uniq('am')} · 🌙 {uniq('pm')}</span>
-                          {warn && (
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, fontSize: '0.7rem', color: 'text.secondary', flexWrap: 'wrap' }}>
+                          <span>{uniq('all')} שובצו</span>
+                          {needed != null ? (
+                            <>
+                              <StaffPill icon="☀️" label="בוקר" staff={uniq('am')} needed={needed} />
+                              <StaffPill icon="🌙" label="צהריים" staff={uniq('pm')} needed={needed} />
+                            </>
+                          ) : warn && (
                             <Tooltip title={`${warn.enrolled} ילדים — צריך ${warn.needed} עובדות, משובצות ${warn.staff}`}>
                               <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25, color: 'warning.softOn', fontWeight: 700 }}>
                                 <WarningAmberIcon sx={{ fontSize: 13 }} /> חסרות {warn.needed - warn.staff}
