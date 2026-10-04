@@ -60,6 +60,16 @@ const shkulitMovementSnapshotSchema = new mongoose.Schema({
         }],
         default: [],
       },
+      // Every component any file for this month carried (re-exports included),
+      // so a later file for the same month can zero what an earlier one sent.
+      sent: {
+        type: [{
+          code: { type: Number, required: true },
+          table: { type: Number, default: 1 },
+          _id: false,
+        }],
+        default: [],
+      },
       _id: false,
     }],
     default: [],

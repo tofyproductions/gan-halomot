@@ -45,22 +45,41 @@ function cleanComponents(list) {
 function historyOf(snap) {
   const byMonth = new Map();
   if (snap?.month && Array.isArray(snap.components)) {
-    byMonth.set(snap.month, cleanComponents(snap.components));
+    byMonth.set(snap.month, { components: cleanComponents(snap.components), sent: [] });
   }
   for (const h of snap?.history || []) {
-    if (h?.month) byMonth.set(h.month, cleanComponents(h.components));
+    if (h?.month) byMonth.set(h.month, { components: cleanComponents(h.components), sent: cleanComponents(h.sent) });
   }
   return [...byMonth.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([month, components]) => ({ month, components }));
+    .map(([month, e]) => ({ month, components: e.components, sent: e.sent }));
 }
 
-/** The history with `month`'s entry replaced by `components`, newest kept. */
+/**
+ * The history with `month`'s entry replaced by `components`, newest kept.
+ *
+ * `sent` remembers every component ANY file for that month carried, not just
+ * the latest one. שקלולית applies each file on top of the payslip it already
+ * holds, so a component an earlier September file put there stays there when
+ * a later September file simply leaves it out. גלאם רות, 09.2026: the first
+ * file paid 2 ימי חופשה, the system was corrected, the second file had no
+ * vacation row — and her payslip still paid the 2 days. A re-export has to
+ * zero what the earlier one sent, and so has to remember it.
+ */
 function withMonth(snap, month, components, keep = KEEP_MONTHS) {
-  const others = historyOf(snap).filter((h) => h.month !== month);
-  const all = [...others, { month, components: cleanComponents(components) }]
-    .sort((a, b) => a.month.localeCompare(b.month));
-  return all.slice(-keep);
+  const all = historyOf(snap);
+  const prior = all.find((h) => h.month === month);
+  const sent = union(prior ? union(prior.sent, prior.components) : [], components);
+  const others = all.filter((h) => h.month !== month);
+  return [...others, { month, components: cleanComponents(components), sent }]
+    .sort((a, b) => a.month.localeCompare(b.month))
+    .slice(-keep);
+}
+
+/** Everything any file for exactly `month` carried, or null when none was made. */
+function sentIn(snap, month) {
+  const hit = historyOf(snap).find((h) => h.month === month);
+  return hit ? union(hit.sent, hit.components) : null;
 }
 
 /** What was filed for exactly `month`, or null when we never filed it. */
@@ -100,7 +119,7 @@ function union(a, b) {
  * @param {object[]|null} args.prevRows  that month's payroll rows, or null
  *                                    when they could not be fetched
  */
-function previousMonthComponents({ numbers, snapshots, prevMonth, prevRows }) {
+function previousMonthComponents({ numbers, snapshots, prevMonth, prevRows, month = null }) {
   const wanted = new Set((numbers || []).map(String));
   const out = new Map();
   if (!prevMonth) return out;
@@ -108,7 +127,8 @@ function previousMonthComponents({ numbers, snapshots, prevMonth, prevRows }) {
   for (const snap of snapshots || []) {
     const no = String(snap.employee_number);
     if (!wanted.has(no)) continue;
-    const filed = filedIn(snap, prevMonth);
+    // Every file for that month, not just the last: each one reached the payslip.
+    const filed = sentIn(snap, prevMonth);
     if (filed && filed.length) out.set(no, filed);
   }
 
@@ -129,7 +149,17 @@ function previousMonthComponents({ numbers, snapshots, prevMonth, prevRows }) {
       out.set(key, union(out.get(key), comps));
     }
   }
+  // An earlier file for THIS month already reached the payslip — whatever it
+  // carried that this file no longer does has to be switched off too.
+  if (month) {
+    for (const snap of snapshots || []) {
+      const no = String(snap.employee_number);
+      if (!wanted.has(no)) continue;
+      const earlier = sentIn(snap, month);
+      if (earlier && earlier.length) out.set(no, union(out.get(no), earlier));
+    }
+  }
   return out;
 }
 
-module.exports = { KEEP_MONTHS, historyOf, withMonth, filedIn, union, previousMonthComponents };
+module.exports = { KEEP_MONTHS, historyOf, withMonth, filedIn, sentIn, union, previousMonthComponents };

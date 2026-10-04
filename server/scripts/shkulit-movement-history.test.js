@@ -127,4 +127,31 @@ ok('employees not in this month\'s file are left out', () => {
   assert.strictEqual(p.size, 0);
 });
 
+console.log('גלאם רות — September filed twice, the first with 2 ימי חופשה');
+{
+  const first = [{ code: 1, table: 1 }, { code: 8, table: 1 }, { code: 1, table: 4 }, { code: 5, table: 4 }];
+  const second = [{ code: 1, table: 1 }, { code: 5, table: 4 }];
+  const afterFirst = { employee_number: '96', history: mh.withMonth(null, '2026-09', first) };
+  ok('the second September file is told what the first one sent', () => {
+    const p = mh.previousMonthComponents({ numbers: ['96'], snapshots: [afterFirst], prevMonth: '2026-08', prevRows: null, month: '2026-09' });
+    const keys = (p.get('96') || []).map((c) => `${c.table}:${c.code}`);
+    assert.ok(keys.includes('1:8'), 'תמורת חופשה');
+    assert.ok(keys.includes('4:1'), 'ניצול חופשה');
+  });
+  const afterSecond = { employee_number: '96', history: mh.withMonth(afterFirst, '2026-09', second) };
+  ok('and still remembers it after the second file is recorded', () => {
+    assert.deepStrictEqual(mh.filedIn(afterSecond, '2026-09'), second, 'filedIn is the latest file');
+    const keys = mh.sentIn(afterSecond, '2026-09').map((c) => `${c.table}:${c.code}`);
+    assert.ok(keys.includes('1:8') && keys.includes('4:1'));
+  });
+  ok('without the month, only the previous month counts (as before)', () => {
+    const p = mh.previousMonthComponents({ numbers: ['96'], snapshots: [afterSecond], prevMonth: '2026-08', prevRows: null });
+    assert.strictEqual(p.size, 0);
+  });
+  ok('October looks at September\'s full sent set', () => {
+    const p = mh.previousMonthComponents({ numbers: ['96'], snapshots: [afterSecond], prevMonth: '2026-09', prevRows: null, month: '2026-10' });
+    assert.ok((p.get('96') || []).some((c) => c.table === 1 && c.code === 1));
+  });
+}
+
 console.log(`\nAll movement-history tests passed (${passed} checks).`);

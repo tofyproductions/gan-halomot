@@ -6811,7 +6811,7 @@ async function previousMovementComponents(source, month, req) {
       console.error(`[shkulit] rebuilding ${prevMonth} for the switch-off failed:`, e.message);
     }
   }
-  return movementHistory.previousMonthComponents({ numbers, snapshots, prevMonth, prevRows });
+  return movementHistory.previousMonthComponents({ numbers, snapshots, prevMonth, prevRows, month });
 }
 
 /**
@@ -6821,7 +6821,8 @@ async function previousMovementComponents(source, month, req) {
  * off that the accountant never received.
  *
  * Kept per month: re-downloading September replaces September's entry and
- * leaves August's alone.
+ * leaves August's alone — but September's entry keeps, in `sent`, everything
+ * every September file carried, so the next one can zero it.
  */
 async function recordShkulitMovementHandoff(filed, month) {
   const numbers = [...filed.keys()].filter(Boolean).map(String);
