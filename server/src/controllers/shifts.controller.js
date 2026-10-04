@@ -1,4 +1,5 @@
 const svc = require('../services/shifts/shiftWeek.service');
+const cs = require('../services/shifts/constraints.service');
 const { resolveSelfEmployee } = require('./payroll.controller');
 const { weekStart: sundayOf } = require('../services/parentVisibility');
 const { todayIsrael } = require('../services/fixedSchedule');
@@ -46,5 +47,55 @@ module.exports = {
     const employee = await resolveSelfEmployee(req);
     if (!employee) return res.json({ reason: 'no_employee' });
     res.json(await svc.myShifts({ employee, weekStart: weekParam(req.query.week) }));
+  }),
+  // ── אילוצים: employee side ─────────────────────────────────────────
+  createConstraint: handle(async (req, res) => {
+    const employee = await resolveSelfEmployee(req);
+    if (!employee) return res.status(400).json({ error: 'לא נמצא כרטיס עובדת מקושר' });
+    res.json({ constraint: await cs.createConstraint({ employee, body: req.body, files: req.files || [] }) });
+  }),
+  myConstraints: handle(async (req, res) => {
+    const employee = await resolveSelfEmployee(req);
+    if (!employee) return res.json({ reason: 'no_employee', mine: [], incoming: [], offers: [] });
+    res.json(await cs.listMine({ employee }));
+  }),
+  colleagues: handle(async (req, res) => {
+    const employee = await resolveSelfEmployee(req);
+    res.json({ colleagues: employee ? await cs.colleaguesOf({ employee }) : [] });
+  }),
+  cancelConstraint: handle(async (req, res) => {
+    const employee = await resolveSelfEmployee(req);
+    if (!employee) return res.status(400).json({ error: 'לא נמצא כרטיס עובדת מקושר' });
+    res.json(await cs.cancelConstraint({ employee, id: req.params.id }));
+  }),
+  colleagueResponse: handle(async (req, res) => {
+    const employee = await resolveSelfEmployee(req);
+    if (!employee) return res.status(400).json({ error: 'לא נמצא כרטיס עובדת מקושר' });
+    res.json({ constraint: await cs.respondColleague({ employee, id: req.params.id, accept: req.body.accept === true }) });
+  }),
+  volunteer: handle(async (req, res) => {
+    const employee = await resolveSelfEmployee(req);
+    if (!employee) return res.status(400).json({ error: 'לא נמצא כרטיס עובדת מקושר' });
+    res.json(await cs.volunteer({ employee, id: req.params.id }));
+  }),
+  // ── אילוצים: manager side ──────────────────────────────────────────
+  futureConstraints: handle(async (req, res) => {
+    res.json({ constraints: await cs.listFuture({ user: req.user, branchId: String(req.query.branch || '') }) });
+  }),
+  decideConstraint: handle(async (req, res) => {
+    res.json({ constraint: await cs.decide({ user: req.user, id: req.params.id, accept: req.body.accept === true, reason: req.body.reason, confirmFar: req.body.confirm_far === true }) });
+  }),
+  approveBroadcast: handle(async (req, res) => {
+    res.json({ constraint: await cs.approveBroadcast({ user: req.user, id: req.params.id }) });
+  }),
+  pickVolunteer: handle(async (req, res) => {
+    res.json({ constraint: await cs.pickVolunteer({ user: req.user, id: req.params.id, employeeId: String(req.body.employee_id || '') }) });
+  }),
+  constraintFile: handle(async (req, res) => {
+    const employee = await resolveSelfEmployee(req).catch(() => null);
+    const f = await cs.readFile({ user: req.user, employee, id: req.params.id, index: req.params.index });
+    res.setHeader('Content-Type', f.mimetype || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(f.name)}`);
+    res.send(f.buffer);
   }),
 };

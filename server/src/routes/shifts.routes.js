@@ -1,11 +1,24 @@
 const router = require('express').Router();
 const { requireTab } = require('../middleware/auth');
 const c = require('../controllers/shifts.controller');
+const multer = require('multer');
 
 // The screen's roles; finer rules (her branches only, office edits by
 // request) are enforced in the service, next to the writes.
 const board = requireTab('shifts', 'system_admin', 'admin_viewer', 'branch_manager', 'accountant');
 const mine = requireTab('my_shifts', 'teacher', 'assistant', 'class_leader', 'cook');
+
+// Attachments for a constraint: in memory (Render's disk is ephemeral), the
+// service applies type and size rules and says so in Hebrew.
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 3 } });
+function uploadErrors(err, _req, res, next) {
+  if (err && err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'קובץ גדול מ-10MB' });
+  if (err && err.code === 'LIMIT_FILE_COUNT') return res.status(400).json({ error: 'אפשר לצרף עד 3 קבצים' });
+  if (err) return res.status(400).json({ error: err.message });
+  next();
+}
+// The attachment is the employee's and her managers' — the service decides which.
+const anyone = requireTab('my_shifts', 'teacher', 'assistant', 'class_leader', 'cook', 'system_admin', 'admin_viewer', 'branch_manager', 'accountant');
 
 router.get('/board', board, c.board);
 router.post('/weeks', board, c.createWeek);
@@ -19,5 +32,17 @@ router.post('/classrooms/:id/close', board, c.closeClassroom);
 router.post('/classrooms/:id/reopen', board, c.reopenClassroom);
 router.put('/ratios/:branchId', board, c.ratios);
 router.get('/my', mine, c.my);
+
+router.post('/constraints', mine, upload.array('files', 3), uploadErrors, c.createConstraint);
+router.get('/constraints/mine', mine, c.myConstraints);
+router.get('/constraints/colleagues', mine, c.colleagues);
+router.get('/constraints/future', board, c.futureConstraints);
+router.post('/constraints/:id/cancel', mine, c.cancelConstraint);
+router.post('/constraints/:id/colleague-response', mine, c.colleagueResponse);
+router.post('/constraints/:id/volunteer', mine, c.volunteer);
+router.post('/constraints/:id/decide', board, c.decideConstraint);
+router.post('/constraints/:id/approve-broadcast', board, c.approveBroadcast);
+router.post('/constraints/:id/pick', board, c.pickVolunteer);
+router.get('/constraints/:id/files/:index', anyone, c.constraintFile);
 
 module.exports = router;
