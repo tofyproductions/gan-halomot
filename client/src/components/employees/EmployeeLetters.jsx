@@ -53,6 +53,9 @@ export default function EmployeeLetters() {
   const [params, setParams] = useSearchParams();
   const [employees, setEmployees] = useState([]);
   const [branchFilter, setBranchFilter] = useState('');
+  // Archived (inactive) staff keep their file: a termination letter or a
+  // claim can arrive after she left, and it has to be filed on her.
+  const [showArchived, setShowArchived] = useState(false);
   const [loading, setLoading] = useState(true);
   const [empId, setEmpId] = useState('');
   const [ctx, setCtx] = useState(null);
@@ -65,12 +68,16 @@ export default function EmployeeLetters() {
   const [cabinetKey, setCabinetKey] = useState(0);
 
   useEffect(() => {
-    api.get('/payroll/employees', { params: { active: true } })
+    api.get('/payroll/employees')
       .then(res => {
-        const list = (res.data.employees || []).filter(e => e.is_active !== false);
+        const list = res.data.employees || [];
         setEmployees(list);
         const wanted = params.get('employee');
-        if (wanted && list.some(e => String(e.id || e._id) === wanted)) setEmpId(wanted);
+        const hit = wanted && list.find(e => String(e.id || e._id) === wanted);
+        if (hit) {
+          setEmpId(wanted);
+          if (hit.is_active === false) setShowArchived(true);
+        }
       })
       .catch((err) => {
         // The api client already explained a 413; a second, vaguer message
@@ -86,8 +93,10 @@ export default function EmployeeLetters() {
     [employees],
   );
   const visibleEmployees = useMemo(
-    () => (branchFilter ? employees.filter(e => e.branch_name === branchFilter) : employees),
-    [employees, branchFilter],
+    () => employees
+      .filter(e => showArchived || e.is_active !== false)
+      .filter(e => !branchFilter || e.branch_name === branchFilter),
+    [employees, branchFilter, showArchived],
   );
   const selectedEmployee = employees.find(e => String(e.id || e._id) === String(empId)) || null;
 
@@ -216,17 +225,25 @@ export default function EmployeeLetters() {
             size="small" sx={{ minWidth: 340, flex: 1, maxWidth: 520 }}
             options={visibleEmployees}
             groupBy={(o) => o.branch_name || 'ללא סניף'}
-            getOptionLabel={(o) => `${o.full_name}${o.position ? ` · ${o.position}` : ''}`}
+            getOptionLabel={(o) => `${o.full_name}${o.position ? ` · ${o.position}` : ''}${o.is_active === false ? ' (ארכיון)' : ''}`}
             isOptionEqualToValue={(o, v) => String(o.id || o._id) === String(v.id || v._id)}
             value={selectedEmployee}
             onChange={(_e, v) => pickEmployee(v ? String(v.id || v._id) : '')}
             noOptionsText="לא נמצא/ה עובד/ת"
             renderInput={(p) => <TextField {...p} label="חיפוש עובד/ת לפי שם" placeholder="הקלד/י שם…" />}
           />
+          <Button size="small" variant={showArchived ? 'contained' : 'outlined'} color="inherit" sx={{ whiteSpace: 'nowrap', alignSelf: 'center' }}
+            onClick={() => {
+              if (showArchived && selectedEmployee?.is_active === false) pickEmployee('');
+              setShowArchived(!showArchived);
+            }}>
+            {showArchived ? 'הסתר ארכיון' : 'הצג גם ארכיון'}
+          </Button>
         </Stack>
 
         {ctx && (
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 2 }}>
+            {selectedEmployee?.is_active === false && <Chip size="small" color="default" variant="outlined" label="בארכיון — לא פעיל/ה" />}
             <Chip size="small" label={`ת״ז ${ctx.israeli_id || '—'}`} color={ctx.israeli_id ? 'default' : 'warning'} />
             <Chip size="small" label={`תפקיד: ${ctx.position || '—'}`} />
             <Chip size="small" label={`סניף: ${ctx.branch_name || '—'}`} />

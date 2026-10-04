@@ -833,6 +833,11 @@ export default function EmployeeManager() {
           onClick: () => openAdd(false),
         }}
         actions={[
+          {
+            label: showArchived ? 'הסתר ארכיון' : 'הצג גם ארכיון',
+            color: showArchived ? 'primary' : 'inherit',
+            onClick: () => setShowArchived(!showArchived),
+          },
           canManage && {
             label: pendingChanges
               ? `${isAdmin || isAccountant ? 'שינויים לאישור' : 'שינויים שהגשתי'} (${pendingChanges})`
@@ -862,10 +867,6 @@ export default function EmployeeManager() {
             label: hideSalary ? 'הצג עמודות שכר' : 'הסתר עמודות שכר',
             icon: hideSalary ? <VisibilityIcon fontSize="small" /> : <VisibilityOffIcon fontSize="small" />,
             onClick: toggleHideSalary,
-          },
-          {
-            label: showArchived ? 'הסתר ארכיון' : 'הצג גם ארכיון',
-            onClick: () => setShowArchived(!showArchived),
           },
         ]}
       >
