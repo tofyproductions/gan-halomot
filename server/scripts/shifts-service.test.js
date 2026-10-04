@@ -20,8 +20,8 @@ const eq = (a, b, l) => {
   console.log(`  ${g ? '✅' : '❌'} ${l}${g ? '' : ` (${JSON.stringify(a)} ≠ ${JSON.stringify(b)})`}`);
   if (!g) failures++;
 };
-async function throwsStatus(fn, status, label) {
-  try { await fn(); eq('no throw', status, label); } catch (e) { eq(e.status, status, label); }
+async function throwsStatus(fn, status, label, message) {
+  try { await fn(); eq('no throw', status, label); } catch (e) { eq(message === undefined ? e.status : [e.status, e.message], message === undefined ? status : [status, message], label); }
 }
 
 (async () => {
@@ -140,15 +140,20 @@ async function throwsStatus(fn, status, label) {
   const w2 = await svc.createWeek({ user: manager, branchId: String(branch._id), weekStart: WEEK2 });
   const base2 = () => w2.entries.map(e => e.toObject());
   const foreignEntry = { employee_id: foreignEmp._id, date: '2026-10-26', area: 'floater', start_hhmm: '08:00', end_hhmm: '12:00' };
-  await throwsStatus(() => svc.saveEntries({ user: manager, weekId: String(w2._id), entries: [...base2(), foreignEntry] }), 400, 'עובדת מסניף אחר נדחית');
+  await throwsStatus(() => svc.saveEntries({ user: manager, weekId: String(w2._id), entries: [...base2(), foreignEntry] }), 400, 'עובדת מסניף אחר נדחית', 'זרה לא שייכת לסניף הזה');
   eq((await M.Employee.findById(foreignEmp._id)).extra_classroom_ids.length, 0, 'ולא נכתב דבר לכרטיס שלה');
-  const danaE = base2().find(e => String(e.employee_id) === String(dana._id));
-  await throwsStatus(() => svc.saveEntries({ user: manager, weekId: String(w2._id), entries: [...base2().filter(e => e !== danaE), { ...danaE, area: 'class', classroom_id: foreignRoom._id }] }), 400, 'כיתה מסניף אחר נדחית');
-  await throwsStatus(() => svc.createEditRequest({ user: admin, weekId: String(w2._id), entries: [...base2(), foreignEntry] }), 400, 'בקשת משרד עם עובדת זרה נדחית');
+  const isDana = e => String(e.employee_id) === String(dana._id);
+  const danaE = base2().find(isDana);
+  const swapRoom = base2().map(e => (isDana(e) && e.date === danaE.date ? { ...e, area: 'class', classroom_id: foreignRoom._id } : e));
+  eq(swapRoom.length, w2.entries.length, 'הכיתה הזרה מחליפה את השורה, בלי כפילות');
+  await throwsStatus(() => svc.saveEntries({ user: manager, weekId: String(w2._id), entries: swapRoom }), 400, 'כיתה מסניף אחר נדחית', 'הכיתה לא שייכת לסניף');
+  await throwsStatus(() => svc.createEditRequest({ user: admin, weekId: String(w2._id), entries: [...base2(), foreignEntry] }), 400, 'בקשת משרד עם עובדת זרה נדחית', 'זרה לא שייכת לסניף הזה');
 
-  const spoof = base2().map(e => (e === danaE ? { ...e, employee_name: 'מזויף' } : e));
+  const spoof = base2().map(e => (isDana(e) && e.date === danaE.date ? { ...e, employee_name: 'מזויף' } : e));
+  eq(spoof.find(e => e.employee_name === 'מזויף') !== undefined, true, 'השם המזויף אכן נשלח');
   let s2 = await svc.saveEntries({ user: manager, weekId: String(w2._id), entries: spoof });
-  eq(s2.entries.find(e => String(e.employee_id) === String(dana._id)).employee_name, 'דנה', 'שם מזויף מוחלף בשם האמיתי');
+  eq(s2.entries.filter(e => e.employee_name === 'מזויף').length, 0, 'שם מזויף לא נשמר');
+  eq(s2.entries.find(e => isDana(e) && e.date === danaE.date).employee_name, 'דנה', 'ובמקומו השם האמיתי');
 
   const moveDana = (room) => s2.entries.map(e => e.toObject()).map(e => (String(e.employee_id) === String(dana._id) && e.date === danaE.date ? { ...e, area: 'class', classroom_id: room._id, new_class: false } : e));
   const danaOn = (w) => w.entries.find(e => String(e.employee_id) === String(dana._id) && e.date === danaE.date);
@@ -165,6 +170,7 @@ async function throwsStatus(fn, status, label) {
   await throwsStatus(() => svc.decideEditRequest({ user: manager, requestId: String(rej._id), approve: true }), 409, 'החלטה שנייה נדחית');
   await throwsStatus(() => svc.getBoard({ user: manager, branchId: 'bad', weekStart: WEEK }), 404, 'מזהה סניף לא תקין — 404');
 
+  await new Promise(r => setTimeout(r, 500)); // let in-flight notification pushes settle
   await mongoose.disconnect();
   await mongod.stop();
   console.log(failures ? `\n${failures} FAILED` : '\nכל הבדיקות עברו');
