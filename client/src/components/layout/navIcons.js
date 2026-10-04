@@ -61,11 +61,11 @@ import MarkEmailUnreadIcon from '@mui/icons-material/MarkEmailUnread';
 import ShareIcon from '@mui/icons-material/Share';
 import DifferenceIcon from '@mui/icons-material/Difference';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
-import ExpenseOutlinedIcon from '@mui/icons-material/ExpenseOutlined';
+import MoneyIcon from '@mui/icons-material/Money';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import BadgeIcon from '@mui/icons-material/Badge';
 import ScheduleIcon from '@mui/icons-material/Schedule';
-import BoardsIcon from '@mui/icons-material/Boards';
+import ClassIcon from '@mui/icons-material/Class';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
 export const ICON_BY_TAB = {
@@ -79,7 +79,7 @@ export const ICON_BY_TAB = {
   roster_gap: DifferenceIcon,
   collections: ReceiptLongIcon,
   bank: AccountBalanceIcon,
-  expenses: ExpenseOutlinedIcon,
+  expenses: MoneyIcon,
   income: AttachMoneyIcon,
   proposed_changes: RuleFolderIcon,
   parent_letters: DescriptionIcon,
@@ -107,7 +107,7 @@ export const ICON_BY_TAB = {
 
   // תפעול
   nursery: ChildCareIcon,
-  classroom_boards: BoardsIcon,
+  classroom_boards: ClassIcon,
   supplies: Inventory2Icon,
   parent_changes: NotificationsIcon,
   photos: PhotoLibraryIcon,
