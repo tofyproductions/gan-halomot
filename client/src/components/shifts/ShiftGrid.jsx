@@ -300,7 +300,10 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                           {needed != null ? (
                             <>
                               <StaffPill icon="☀️" label="בוקר" staff={uniq('am')} needed={needed} />
-                              <StaffPill icon="🌙" label="צהריים" staff={uniq('pm')} needed={needed} />
+                              {/* שישי נגמר בצהריים — אין משמרת צהריים ואין חוסר להציג. */}
+                              {new Date(`${d}T12:00:00Z`).getUTCDay() !== 5 && (
+                                <StaffPill icon="🌙" label="צהריים" staff={uniq('pm')} needed={needed} />
+                              )}
                             </>
                           ) : warn && (
                             <Tooltip title={`${warn.enrolled} ילדים — צריך ${warn.needed} עובדות, משובצות ${warn.staff}`}>
