@@ -135,7 +135,7 @@ function plannedHoursFor(schedule, dateStr, closureDates = null) {
   const ex = (schedule.exceptions || []).find(e => e.date === dateStr);
   if (ex) {
     if (ex.off) return null;
-    if (ex.in && ex.out) return { in: ex.in, out: ex.out, from_exception: true };
+    if (ex.in && ex.out) return { in: ex.in, out: ex.out, from_exception: true, branch_id: ex.branch_id ? String(ex.branch_id) : null };
     // An exception with no hours and not marked off is meaningless — fall through.
   }
   if (closureDates && closureDates.has(dateStr)) return null;
@@ -367,7 +367,7 @@ async function materializeMonth(month, { branchIds = null, employeeIds = null, u
     const note = planned.from_exception ? 'שעות קבועות (חריג ליום זה)' : 'שעות קבועות';
     docs.push(
       {
-        branch_id: emp.branch_id,
+        branch_id: basePlanned.branch_id || emp.branch_id,
         employee_id: emp._id,
         israeli_id: emp.israeli_id || '',
         device_user_sn: inSn,
@@ -383,7 +383,7 @@ async function materializeMonth(month, { branchIds = null, employeeIds = null, u
         approval_decided_at: new Date(),
       },
       {
-        branch_id: emp.branch_id,
+        branch_id: basePlanned.branch_id || emp.branch_id,
         employee_id: emp._id,
         israeli_id: emp.israeli_id || '',
         device_user_sn: outSn,

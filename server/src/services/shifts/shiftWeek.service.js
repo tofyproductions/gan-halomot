@@ -12,7 +12,8 @@ const {
 } = require('../../models');
 const notificationService = require('../notification.service');
 const { branchManagerFilter } = require('../branch-recipients.service');
-const { closureDateSet } = require('../fixedSchedule');
+const { closureDateSet, todayIsrael } = require('../fixedSchedule');
+const rotaPay = require('./rotaPay.service');
 const { effectiveRatios, ratioWarnings } = require('./ratio');
 const { buildSeedEntries } = require('./seed');
 const constraints = require('./constraints.service');
@@ -327,6 +328,10 @@ async function publishWeek({ user, weekId, now = new Date() }) {
   week.published_at = new Date();
   week.published_by = user.id;
   await week.save();
+  try {
+    const closed = await closedDatesFor(week.branch_id, weekDays(week.week_start), week);
+    await rotaPay.applyRotaToFixedSchedules({ week: week.toObject(), closedDates: closed, today: todayIsrael() });
+  } catch (err) { console.error('[shifts] rota → fixed schedule failed:', err.message); }
 
   const recipients = await userIdsOf(affected);
   const [, m, d] = week.week_start.split('-');

@@ -174,6 +174,10 @@ const fixedScheduleExceptionSchema = new mongoose.Schema({
   in: { type: String, default: '' },             // override hours (ignored when off)
   out: { type: String, default: '' },
   note: { type: String, default: '' },
+  // 'rota' = written from a published סידור עבודה (phase 3); 'manual' = set by a person and never overwritten by the rota.
+  source: { type: String, enum: ['manual', 'rota'], default: 'manual' },
+  // The branch she works at that day per the rota — generated punches carry it so cross-branch rates apply.
+  branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', default: null },
 }, { _id: false });
 
 /**
