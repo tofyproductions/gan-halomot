@@ -152,12 +152,18 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
             if (!slots.length) slots.push(null);
             // A class group ends with a daily-count summary line and a strong divider.
             const hasSummary = row.area === 'class';
+            // A soft stable tint per class, so each group reads as its own band.
+            const hue = row.area === 'class' ? employeeHue(row.classroom_id) : null;
+            const tint = hue == null ? null : {
+              cell: (t) => (t.palette.mode === 'dark' ? `hsl(${hue} 22% 13%)` : `hsl(${hue} 55% 97%)`),
+              strong: (t) => (t.palette.mode === 'dark' ? `hsl(${hue} 22% 17%)` : `hsl(${hue} 50% 93%)`),
+            };
             const slotRows = slots.map((slotId, si) => {
               const last = si === slots.length - 1 && !hasSummary;
               return (
             <TableRow key={`${row.key}:${slotId || 'empty'}`}>
               {si === 0 && (
-                <TableCell rowSpan={slots.length + (hasSummary ? 1 : 0)} sx={{ fontWeight: 700, verticalAlign: 'top', ...stickyCol }}>
+                <TableCell rowSpan={slots.length + (hasSummary ? 1 : 0)} sx={{ fontWeight: 700, verticalAlign: 'top', ...stickyCol, ...(tint && { bgcolor: tint.cell }) }}>
                   {row.label}
                   {row.enrolled != null && (
                     <Typography variant="caption" display="block" color="text.secondary" fontWeight={400}>
@@ -199,7 +205,7 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                       // The class's lines read as one block — only its last line draws the divider.
                       borderBottom: last ? undefined : 'none',
                       cursor: clickable ? 'pointer' : 'default',
-                      bgcolor: closed ? 'action.disabledBackground' : (isOver ? 'primary.soft' : (warn ? 'warning.soft' : undefined)),
+                      bgcolor: closed ? 'action.disabledBackground' : (isOver ? 'primary.soft' : (warn ? 'warning.soft' : tint?.cell)),
                       outline: isOver ? '2px solid' : 'none', outlineColor: 'primary.main', outlineOffset: -2,
                       '&:hover': clickable ? { bgcolor: isOver ? 'primary.soft' : 'action.hover' } : {},
                     }}
@@ -285,7 +291,7 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                   const needed = ratios && catKey && row.enrolled > 0 ? Math.ceil(row.enrolled / ratios[catKey]) : null;
                   return (
                     <TableCell key={d} align="center" sx={{
-                      py: 0.25, px: 0.5, bgcolor: closed ? 'action.disabledBackground' : 'background.sunken',
+                      py: 0.25, px: 0.5, bgcolor: closed ? 'action.disabledBackground' : (tint ? tint.strong : 'background.sunken'),
                       borderBottom: '3px solid', borderBottomColor: 'divider',
                     }}>
                       {!closed && (
