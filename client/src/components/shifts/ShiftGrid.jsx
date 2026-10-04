@@ -55,6 +55,26 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
     position: 'sticky', insetInlineStart: 0, zIndex: 1,
     bgcolor: 'background.paper', borderInlineEnd: '1px solid', borderInlineEndColor: 'divider',
   };
+  // "משלימה את X" — one shift picks up where another ends (same row, same day).
+  const completions = useMemo(() => {
+    const m = new Map();
+    for (const row of rows) {
+      if (row.area === 'away') continue;
+      for (const d of dates) {
+        const list = (row.cells[d] || []).filter(e => toMin(e.start_hhmm) != null && toMin(e.end_hhmm) != null);
+        for (const a of list) {
+          for (const b of list) {
+            if (String(a.employee_id) === String(b.employee_id)) continue;
+            const gap = toMin(b.start_hhmm) - toMin(a.end_hhmm);
+            if (gap >= -30 && gap <= 45 && toMin(b.end_hhmm) > toMin(a.end_hhmm)) {
+              m.set(`${row.key}|${d}|${b.employee_id}`, a.employee_name);
+            }
+          }
+        }
+      }
+    }
+    return m;
+  }, [rows, dates]);
   return (
     <Box>
     {canDrop && (
@@ -101,12 +121,14 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
             const slots = [...names.keys()].sort((a, b) => (first.get(a) || '').localeCompare(first.get(b) || '')
               || String(names.get(a)).localeCompare(String(names.get(b)), 'he'));
             if (!slots.length) slots.push(null);
-            return slots.map((slotId, si) => {
-              const last = si === slots.length - 1;
+            // A class group ends with a daily-count summary line and a strong divider.
+            const hasSummary = row.area === 'class';
+            const slotRows = slots.map((slotId, si) => {
+              const last = si === slots.length - 1 && !hasSummary;
               return (
             <TableRow key={`${row.key}:${slotId || 'empty'}`}>
               {si === 0 && (
-                <TableCell rowSpan={slots.length} sx={{ fontWeight: 700, verticalAlign: 'top', ...stickyCol }}>
+                <TableCell rowSpan={slots.length + (hasSummary ? 1 : 0)} sx={{ fontWeight: 700, verticalAlign: 'top', ...stickyCol }}>
                   {row.label}
                   {row.enrolled != null && (
                     <Typography variant="caption" display="block" color="text.secondary" fontWeight={400}>
@@ -158,6 +180,8 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                       const mine = highlightEmployeeId && String(e.employee_id) === String(highlightEmployeeId);
                       const draggable = droppable && !!(e._id || e.tmp);
                       const colors = chipColors(e.employee_id);
+                      const entryAlerts = row.area !== 'away' && alerts ? alerts.get(`${e.employee_id}|${e.date}`) : null;
+                      const completes = completions.get(`${row.key}|${d}|${e.employee_id}`);
                       return (
                         <Box
                           key={e._id || `${e.employee_id}-${e.start_hhmm}`}
@@ -170,9 +194,9 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                             mb: 0.5, px: 0.75, py: 0.25, borderRadius: 1,
                             bgcolor: colors.bgcolor,
                             borderInlineStart: '3px solid', borderInlineStartColor: colors.accent,
-                            // Her own shift / a mid-day room switch keep their markers as outlines.
-                            outline: mine ? '2px solid' : (isSwitch ? '1px dashed' : 'none'),
-                            outlineColor: mine ? 'primary.main' : 'info.main',
+                            // A constraint outranks every other marker; then her own shift, then a room switch.
+                            outline: entryAlerts ? '2px solid' : mine ? '2px solid' : (isSwitch ? '1px dashed' : 'none'),
+                            outlineColor: entryAlerts ? 'error.main' : mine ? 'primary.main' : 'info.main',
                             outlineOffset: -1,
                             fontWeight: mine ? 700 : 500, fontSize: '0.8rem', lineHeight: 1.3,
                           }}
@@ -198,23 +222,20 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                               </Tooltip>
                             );
                           })()}
+                          {completes && <Chip size="small" color="success" label={`משלימה את ${completes}`} sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />}
                           {editable && e.new_class && <Chip size="small" label="כיתה חדשה לה" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />}
                           {editable && e.alternating && <Chip size="small" label="יום מתחלף" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />}
                           {e.cross_status === 'pending' && <Chip size="small" color="info" label="ממתין לאישור סניף הבית" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />}
-                          {row.area !== 'away' && alerts && alerts.get(`${e.employee_id}|${e.date}`) && (
-                            <Tooltip title={alerts.get(`${e.employee_id}|${e.date}`).join(' · ')}>
-                              <Chip size="small" color="warning" label="⚠ אילוץ" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />
+                          {entryAlerts && (
+                            <Tooltip title={entryAlerts.join(' · ')}>
+                              <Chip size="small" color="error" label="⚠ אילוץ" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />
                             </Tooltip>
                           )}
                         </Box>
                       );
                     })}
-                    {warn && last && (
-                      <Tooltip title={`${warn.enrolled} ילדים — צריך ${warn.needed} עובדות, משובצות ${warn.staff}`}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, color: 'warning.softOn', fontSize: '0.7rem' }}>
-                          <WarningAmberIcon sx={{ fontSize: 14 }} /> חסרות {warn.needed - warn.staff}
-                        </Box>
-                      </Tooltip>
+                    {slotId && !cellEntries.length && !closed && (
+                      <Box sx={{ textAlign: 'center', color: 'text.disabled', fontSize: '0.7rem', lineHeight: 1.2 }}>—</Box>
                     )}
                   </TableCell>
                 );
@@ -222,6 +243,35 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
             </TableRow>
               );
             });
+            if (!hasSummary) return slotRows;
+            return [...slotRows, (
+              <TableRow key={`${row.key}:summary`}>
+                {dates.map(d => {
+                  const closed = closedDates.has(d);
+                  const warn = warnOf(row, d);
+                  const count = new Set((row.cells[d] || []).map(e => String(e.employee_id))).size;
+                  return (
+                    <TableCell key={d} align="center" sx={{
+                      py: 0.25, px: 0.5, bgcolor: closed ? 'action.disabledBackground' : 'background.sunken',
+                      borderBottom: '3px solid', borderBottomColor: 'divider',
+                    }}>
+                      {!closed && (
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, fontSize: '0.7rem', color: 'text.secondary' }}>
+                          <span>{count} שובצו</span>
+                          {warn && (
+                            <Tooltip title={`${warn.enrolled} ילדים — צריך ${warn.needed} עובדות, משובצות ${warn.staff}`}>
+                              <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25, color: 'warning.softOn', fontWeight: 700 }}>
+                                <WarningAmberIcon sx={{ fontSize: 13 }} /> חסרות {warn.needed - warn.staff}
+                              </Box>
+                            </Tooltip>
+                          )}
+                        </Box>
+                      )}
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+            )];
           })}
         </TableBody>
       </Table>

@@ -13,6 +13,7 @@ import EmployeeSidebar from './EmployeeSidebar';
 import EntryDialog from './EntryDialog';
 import PrimaryClassDialog from './PrimaryClassDialog';
 import OvertimeStrip from './OvertimeStrip';
+import FillSuggestions from './FillSuggestions';
 import ShiftSettingsDialog from './ShiftSettingsDialog';
 import EditRequestsPanel from './EditRequestsPanel';
 import ConstraintsPanel from './ConstraintsPanel';
@@ -162,6 +163,15 @@ export default function ShiftsScreen() {
     closeDlg();
     persist(shown.filter(e => !sameEntry(e, entry)));
   };
+  // One click on a fill suggestion — added with her committed hours for that weekday.
+  const addSuggested = (emp, date, classroomId) => {
+    const hours = (emp.commitment || {})[weekdayOf(date)] || { start_hhmm: '07:00', end_hhmm: '16:00' };
+    persist([...shown, {
+      employee_id: emp._id, employee_name: emp.full_name, date,
+      area: 'class', classroom_id: classroomId,
+      start_hhmm: hours.start_hhmm, end_hhmm: hours.end_hhmm, tmp: newTmp(),
+    }]);
+  };
   // Drag and drop on the board: move a shift (Shift = her whole week in that
   // row), or drop someone from the side list (Shift = every open day she is
   // committed to). Saved through persist like any other edit.
@@ -296,6 +306,7 @@ export default function ShiftsScreen() {
       {board && <CrossBranchPanel board={board} onChanged={load} />}
       {board && <ConstraintsPanel constraints={board.constraints} canEdit={!!board.can_edit} onChanged={load} />}
       {board && <OvertimeStrip employees={board.employees} entries={shown} dates={board.dates} />}
+      {board && <FillSuggestions board={board} entries={shown} closed={closed} onAdd={addSuggested} />}
       {board && (
         <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 1.5, alignItems: { md: 'flex-start' }, minWidth: 0 }}>
           {editable && (
