@@ -96,6 +96,10 @@ export const TAB_GROUPS = [
       // accounting approves, because approving writes somebody the payroll pays.
       { id: 'employee_onboarding', label: 'רישומי עובדים', path: '/employee-onboarding', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
       { id: 'attendance',         label: 'החתמות',  path: '/attendance',         defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager'] },
+      // סידור עבודה: the week's rota per class, built from each employee's
+      // commitment. The office sees every branch and proposes changes; only
+      // the branch manager edits and publishes (enforced on the server).
+      { id: 'shifts',             label: 'סידור עבודה', path: '/shifts',         defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
       // The salary table itself is accountant/admin. A branch manager files what
       // she knows from 'עדכוני שכר' instead — she has no business seeing every
       // employee's rate and net in order to record a bonus.
@@ -205,6 +209,7 @@ export const TAB_GROUPS = [
       { id: 'my_payslips',   label: 'התלושים שלי',   path: '/my-payslips',   defaultRoles: EMPLOYEE_ROLES },
       { id: 'my_documents',  label: 'המסמכים שלי',   path: '/my-documents',  defaultRoles: EMPLOYEE_ROLES },
       { id: 'my_attendance', label: 'ההחתמות שלי',   path: '/my-attendance', defaultRoles: EMPLOYEE_ROLES },
+      { id: 'my_shifts',     label: 'המשמרות שלי',   path: '/my-shifts',     defaultRoles: EMPLOYEE_ROLES },
       { id: 'my_vacation',   label: 'ימי החופשה שלי', path: '/my-vacation',  defaultRoles: EMPLOYEE_ROLES },
       { id: 'my_updates',    label: 'עדכונים',       path: '/my-updates',    defaultRoles: EMPLOYEE_ROLES },
       // Everybody may write to the office — managers and the office included.

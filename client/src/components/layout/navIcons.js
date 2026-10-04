@@ -58,15 +58,29 @@ import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import CircleOutlinedIcon from '@mui/icons-material/CircleOutlined';
 import SupportAgentIcon from '@mui/icons-material/SupportAgent';
 import MarkEmailUnreadIcon from '@mui/icons-material/MarkEmailUnread';
+import ShareIcon from '@mui/icons-material/Share';
+import DifferenceIcon from '@mui/icons-material/Difference';
+import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
+import ExpenseOutlinedIcon from '@mui/icons-material/ExpenseOutlined';
+import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
+import BadgeIcon from '@mui/icons-material/Badge';
+import ScheduleIcon from '@mui/icons-material/Schedule';
+import BoardsIcon from '@mui/icons-material/Boards';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
 export const ICON_BY_TAB = {
   // ניהול
   dashboard: DashboardIcon,
+  share_links: ShareIcon,
   leads: ForumIcon,
   registrations: PersonAddIcon,
   // רישום חיצוני is the תמ"ת ↔ קליקטאק comparison, so: two arrows.
   clicktac: CompareArrowsIcon,
+  roster_gap: DifferenceIcon,
   collections: ReceiptLongIcon,
+  bank: AccountBalanceIcon,
+  expenses: ExpenseOutlinedIcon,
+  income: AttachMoneyIcon,
   proposed_changes: RuleFolderIcon,
   parent_letters: DescriptionIcon,
   parent_supply_list: ChecklistIcon,
@@ -79,7 +93,9 @@ export const ICON_BY_TAB = {
   // כוח אדם
   employees: PeopleIcon,
   recruitment: PersonSearchIcon,
+  employee_onboarding: BadgeIcon,
   attendance: FingerprintIcon,
+  shifts: ScheduleIcon,
   payroll: PaymentsIcon,
   payroll_updates: EditNoteIcon,
   branch_payslips: ReceiptIcon,
@@ -91,6 +107,7 @@ export const ICON_BY_TAB = {
 
   // תפעול
   nursery: ChildCareIcon,
+  classroom_boards: BoardsIcon,
   supplies: Inventory2Icon,
   parent_changes: NotificationsIcon,
   photos: PhotoLibraryIcon,
@@ -107,6 +124,7 @@ export const ICON_BY_TAB = {
   orders: ShoppingCartIcon,
   stock: WarehouseIcon,
   suppliers: LocalShippingIcon,
+  'product-matches': CheckCircleIcon,
   maintenance: HandymanIcon,
 
   // האזור האישי של העובד
@@ -114,6 +132,7 @@ export const ICON_BY_TAB = {
   my_payslips: DescriptionIcon,
   my_documents: FolderIcon,
   my_attendance: AccessTimeIcon,
+  my_shifts: ScheduleIcon,
   my_vacation: BeachAccessIcon,
   my_updates: NotificationsActiveIcon,
   contact_office: SupportAgentIcon,

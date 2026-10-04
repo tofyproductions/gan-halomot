@@ -110,7 +110,10 @@ async function main() {
   );
   const mapBody = iconsSrc.slice(iconsSrc.indexOf('export const ICON_BY_TAB'));
   const pathedIds = TAB_GROUPS.flatMap((g) => g.items).filter((i) => i.path).map((i) => i.id);
-  const missing = pathedIds.filter((id) => !new RegExp(`^\\s*${id}:`, 'm').test(mapBody));
+  const missing = pathedIds.filter((id) => {
+    const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return !new RegExp(`^\\s*['"\`]?${escapedId}['"\`]?:`, 'm').test(mapBody);
+  });
   ok(
     missing.length === 0,
     `כל ${pathedIds.length} המסכים ממופים ב-navIcons.js`,

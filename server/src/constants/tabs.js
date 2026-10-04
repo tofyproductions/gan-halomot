@@ -24,11 +24,13 @@ const EMPLOYEE_ROLES = ['teacher', 'assistant', 'class_leader', 'cook'];
 const TAB_DEFAULT_ROLES = {
   // ניהול
   dashboard: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'],
+  share_links: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'],
   leads: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'],
   registrations: ['system_admin', 'admin_viewer', 'branch_manager'],
   clicktac: ['system_admin', 'admin_viewer', 'accountant', 'branch_manager'],
   // Not a screen — the write grant for רישום חיצוני. See the client file.
   clicktac_write: ['system_admin', 'accountant'],
+  roster_gap: ['system_admin', 'admin_viewer', 'accountant', 'branch_manager'],
   collections: ['system_admin', 'admin_viewer', 'accountant'],
   bank: ['system_admin', 'admin_viewer', 'accountant'],
   // Not a screen — the write grant for תנועות בנק. See the client file.
@@ -56,7 +58,9 @@ const TAB_DEFAULT_ROLES = {
   // כוח אדם
   employees: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'],
   recruitment: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'],
+  employee_onboarding: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'],
   attendance: ['system_admin', 'admin_viewer', 'branch_manager'],
+  shifts: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'],
   payroll: ['system_admin', 'admin_viewer', 'accountant'],
   payroll_updates: ['system_admin', 'admin_viewer', 'accountant', 'branch_manager'],
   branch_payslips: ['system_admin', 'admin_viewer', 'accountant', 'branch_manager'],
@@ -68,6 +72,7 @@ const TAB_DEFAULT_ROLES = {
 
   // תפעול
   nursery: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'teacher', 'assistant'],
+  classroom_boards: ['system_admin', 'admin_viewer', 'branch_manager'],
   supplies: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'teacher', 'assistant'],
   parent_changes: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant', 'class_leader'],
   photos: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'teacher', 'assistant'],
@@ -84,6 +89,7 @@ const TAB_DEFAULT_ROLES = {
   orders: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader'],
   stock: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'cook'],
   suppliers: ['system_admin', 'admin_viewer', 'accountant'],
+  'product-matches': ['system_admin'],
   maintenance: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader'],
 
   // האזור שלי
@@ -91,6 +97,7 @@ const TAB_DEFAULT_ROLES = {
   my_payslips: EMPLOYEE_ROLES,
   my_documents: EMPLOYEE_ROLES,
   my_attendance: EMPLOYEE_ROLES,
+  my_shifts: EMPLOYEE_ROLES,
   my_vacation: EMPLOYEE_ROLES,
   my_updates: EMPLOYEE_ROLES,
   contact_office: null,
