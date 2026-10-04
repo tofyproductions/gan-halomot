@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Table, TableHead, TableRow, TableCell, TableBody, Alert, LinearProgress } from '@mui/material';
 import api from '../../api/client';
 import { fmtDate } from './shiftRows';
@@ -7,10 +7,14 @@ import { fmtDate } from './shiftRows';
 export default function AttendanceReportDialog({ open, onClose, branchId, date }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(false);
+  const seq = useRef(0);
   useEffect(() => {
     if (!open || !branchId || !date) return;
     setData(null); setError(false);
-    api.get('/shifts/report', { params: { branch: branchId, date } }).then(r => setData(r.data)).catch(() => setError(true));
+    const mine = ++seq.current;
+    api.get('/shifts/report', { params: { branch: branchId, date } })
+      .then(r => { if (mine === seq.current) setData(r.data); })
+      .catch(() => { if (mine === seq.current) setError(true); });
   }, [open, branchId, date]);
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth dir="rtl">

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, Stack, Autocomplete, Alert } from '@mui/material';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
@@ -8,10 +8,14 @@ export default function RateRequestDialog({ open, onClose, candidates, hostBranc
   const [emp, setEmp] = useState(null);
   const [rate, setRate] = useState('');
   const [busy, setBusy] = useState(false);
+  const wasOpen = useRef(false);
   useEffect(() => {
-    if (!open) return;
-    setEmp((candidates || []).find(c => c._id === initialEmployeeId) || null);
-    setRate('');
+    // Reset only when the dialog opens, not when the board reloads underneath it.
+    if (open && !wasOpen.current) {
+      setEmp((candidates || []).find(c => c._id === initialEmployeeId) || null);
+      setRate('');
+    }
+    wasOpen.current = open;
   }, [open, candidates, initialEmployeeId]);
   const send = async () => {
     setBusy(true);

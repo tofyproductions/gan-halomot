@@ -35,10 +35,11 @@ function addDays(ymd, n) {
   return sundayOf(new Date(y, m - 1, d + n));
 }
 
-/** Local yesterday as YYYY-MM-DD. */
+/** Local yesterday (Friday when today is Sunday) as YYYY-MM-DD. */
 function yesterdayYmd() {
   const d = new Date();
   d.setDate(d.getDate() - 1);
+  if (d.getDay() === 6) d.setDate(d.getDate() - 1); // Saturday is not a working day: use Friday
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
@@ -127,7 +128,7 @@ export default function ShiftsScreen() {
         load();
       } catch (err) {
         toast.error(err.response?.data?.error || 'שמירה נכשלה');
-        if (err.response?.data?.needs_rate) { setRateEmployeeId(String(err.response.data.needs_rate)); setRateOpen(true); }
+        if (err.response?.data?.needs_rate && board.can_edit) { setRateEmployeeId(String(err.response.data.needs_rate)); setRateOpen(true); }
       }
     } else {
       setDraft(next); // office: edits stay local until sent as a request
@@ -229,7 +230,7 @@ export default function ShiftsScreen() {
       <EntryDialog open={dlg.open} onClose={closeDlg}
         entry={dlg.entry} defaults={dlg.defaults || NO_DEFAULTS} employees={board?.employees || []} rows={rows}
         onSave={saveEntry} onDelete={deleteEntry}
-        onRequestRate={board?.can_edit || board?.can_request ? () => { closeDlg(); setRateEmployeeId(null); setRateOpen(true); } : undefined} />
+        onRequestRate={board?.can_edit ? () => { closeDlg(); setRateEmployeeId(null); setRateOpen(true); } : undefined} />
       <RateRequestDialog open={rateOpen} onClose={() => setRateOpen(false)} candidates={board?.foreign_candidates}
         hostBranchId={board?.branch_id} initialEmployeeId={rateEmployeeId}
         onSent={() => { setRateOpen(false); load(); }} />

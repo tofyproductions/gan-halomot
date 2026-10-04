@@ -63,7 +63,7 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                           {editable && e.new_class && <Chip size="small" label="כיתה חדשה לה" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />}
                           {editable && e.alternating && <Chip size="small" label="יום מתחלף" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />}
                           {e.cross_status === 'pending' && <Chip size="small" color="info" label="ממתין לאישור סניף הבית" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />}
-                          {alerts && alerts.get(`${e.employee_id}|${e.date}`) && (
+                          {row.area !== 'away' && alerts && alerts.get(`${e.employee_id}|${e.date}`) && (
                             <Tooltip title={alerts.get(`${e.employee_id}|${e.date}`).join(' · ')}>
                               <Chip size="small" color="warning" label="⚠ אילוץ" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />
                             </Tooltip>
