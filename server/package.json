@@ -13,6 +13,7 @@
     "test:shift-reminder": "node scripts/shift-reminder.test.js",
     "test:constraint-rules": "node scripts/constraint-rules.test.js",
     "test:constraints-service": "node scripts/constraints-service.test.js",
+    "test:cross-rules": "node scripts/cross-rules.test.js",
     "test:finance-ingest": "node scripts/finance-ingest.test.js",
     "test:card-settlement": "node scripts/card-settlement.test.js",
     "test:terms": "node scripts/employment-terms.test.js",
