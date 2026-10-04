@@ -7,7 +7,8 @@ export default function ShiftSettingsDialog({ open, onClose, board, onChanged })
   const [ratios, setRatios] = useState({ infants: '', young: '', older: '' });
   const [closeId, setCloseId] = useState('');
   const [reopenId, setReopenId] = useState('');
-  useEffect(() => { if (open && board) setRatios(board.ratios); }, [open, board]);
+  // The form edits what the branch set (blank = city default), never the effective values.
+  useEffect(() => { if (open && board) setRatios(board.ratio_overrides || { infants: '', young: '', older: '' }); }, [open, board]);
   if (!board) return null;
   const branchId = board.branch_id;
 
@@ -23,6 +24,7 @@ export default function ShiftSettingsDialog({ open, onClose, board, onChanged })
         <Stack direction="row" spacing={1}>
           {[['infants', 'תינוקייה'], ['young', 'צעירים'], ['older', 'בוגרים']].map(([k, label]) => (
             <TextField key={k} type="number" label={label} value={ratios[k] ?? ''} size="small"
+              helperText={board?.ratios ? `ברירת מחדל/בפועל: ${board.ratios[k]}` : undefined}
               onChange={e => setRatios(r => ({ ...r, [k]: e.target.value }))} />
           ))}
         </Stack>

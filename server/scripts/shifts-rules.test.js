@@ -21,13 +21,20 @@ function check(label, fn) {
 
 const { defaultRatios, effectiveRatios, ratioWarnings } = require('../src/services/shifts/ratio');
 const { buildSeedEntries, areaFromCommitmentText } = require('../src/services/shifts/seed');
-const { weekDays, isSunday, findOverlaps, affectedEmployeeIds, suggestPrimary, needsPrimaryPrompt } = require('../src/services/shifts/rules');
+const { weekDays, isSunday, findOverlaps, affectedEmployeeIds, suggestPrimary, needsPrimaryPrompt, padHHMM } = require('../src/services/shifts/rules');
 
 const DATES = weekDays('2026-10-11');
 
 console.log('\nweekDays');
 check('Sunday to Friday, six dates', () => assert.deepStrictEqual(DATES, ['2026-10-11', '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16']));
 check('isSunday', () => { assert.ok(isSunday('2026-10-11')); assert.ok(!isSunday('2026-10-12')); assert.ok(!isSunday('bad')); });
+
+console.log('\npadHHMM');
+check("'7:00' → '07:00'", () => assert.strictEqual(padHHMM('7:00'), '07:00'));
+check("'07:30' stays", () => assert.strictEqual(padHHMM('07:30'), '07:30'));
+check("'24:00' → ''", () => assert.strictEqual(padHHMM('24:00'), ''));
+check("'7:60' → ''", () => assert.strictEqual(padHHMM('7:60'), ''));
+check("'ab' / '' / null → ''", () => { assert.strictEqual(padHHMM('ab'), ''); assert.strictEqual(padHHMM(''), ''); assert.strictEqual(padHHMM(null), ''); });
 
 console.log('\nratios');
 check('Kfar Saba defaults', () => assert.deepStrictEqual(defaultRatios('כפר סבא - קפלן'), { infants: 5, young: 7, older: 9 }));
@@ -78,6 +85,45 @@ check('commitment days become entries; off days, closed days skipped; alternatin
     ['e2', DATES[0], 'kitchen', null, '06:30', '14:00', false],
   ]);
   assert.strictEqual(entries[0].employee_name, 'דנה');
+});
+check('imported H:MM hours are padded to HH:MM', () => {
+  const [e] = buildSeedEntries({
+    dates: DATES,
+    employees: [{ _id: 'e1', full_name: 'דנה', primary_classroom_id: 'r1' }],
+    commitments: [{ employee_id: 'e1', classroom: '', days: [{ day: 0, start_hhmm: '7:00', end_hhmm: '15:00' }] }],
+    activeClassroomIds: new Set(['r1']), closedDates: new Set(),
+  });
+  assert.deepStrictEqual([e.start_hhmm, e.end_hhmm], ['07:00', '15:00']);
+});
+check('imported alternating day (stored is_off) seeds as alternating, with her usual hours', () => {
+  const entries = buildSeedEntries({
+    dates: DATES,
+    employees: [{ _id: 'e1', full_name: 'דנה', primary_classroom_id: 'r1' }],
+    commitments: [{ employee_id: 'e1', classroom: '', is_alternating_off: true, alternating_day: 2,
+      days: [{ day: 0, start_hhmm: '07:00', end_hhmm: '15:00' }, { day: 2, is_off: true, start_hhmm: '', end_hhmm: '' }] }],
+    activeClassroomIds: new Set(['r1']), closedDates: new Set(),
+  });
+  assert.deepStrictEqual(entries.map(e => [e.date, e.start_hhmm, e.end_hhmm, e.alternating]), [
+    [DATES[0], '07:00', '15:00', false],
+    [DATES[2], '07:00', '15:00', true],
+  ]);
+});
+check('alternating day with its own hours keeps them; no working day at all → blank hours', () => {
+  const own = buildSeedEntries({
+    dates: DATES,
+    employees: [{ _id: 'e1', full_name: 'דנה', primary_classroom_id: 'r1' }],
+    commitments: [{ employee_id: 'e1', classroom: '', is_alternating_off: true, alternating_day: 1,
+      days: [{ day: 0, start_hhmm: '07:00', end_hhmm: '15:00' }, { day: 1, is_off: true, start_hhmm: '8:00', end_hhmm: '12:00' }] }],
+    activeClassroomIds: new Set(['r1']), closedDates: new Set(),
+  });
+  assert.deepStrictEqual(own[1] && [own[1].start_hhmm, own[1].end_hhmm, own[1].alternating], ['08:00', '12:00', true]);
+  const none = buildSeedEntries({
+    dates: DATES,
+    employees: [{ _id: 'e1', full_name: 'דנה', primary_classroom_id: 'r1' }],
+    commitments: [{ employee_id: 'e1', classroom: '', is_alternating_off: true, alternating_day: 1, days: [{ day: 1, is_off: true }] }],
+    activeClassroomIds: new Set(['r1']), closedDates: new Set(),
+  });
+  assert.deepStrictEqual(none.map(e => [e.date, e.start_hhmm, e.end_hhmm, e.alternating]), [[DATES[1], '', '', true]]);
 });
 check('primary class that is no longer active → ללא כיתה', () => {
   const [e] = buildSeedEntries({

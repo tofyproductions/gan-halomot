@@ -21,7 +21,10 @@ export default function EditRequestsPanel({ requests, onDecided }) {
     <Stack spacing={1} sx={{ mb: 2 }}>
       {requests.map(r => (
         <Alert key={r._id} severity="warning">
-          <Typography fontWeight={700}>{r.requested_by_name || 'המשרד'} מבקש/ת לשנות את הסידור ({r.entries.length} שיבוצים)</Typography>
+          <Typography fontWeight={700}>{r.requested_by_name || 'המשרד'} מבקש/ת לשנות את הסידור</Typography>
+          <Typography variant="body2">
+            {r.changed_names?.length ? `שינויים אצל: ${r.changed_names.join(', ')}` : `${r.entries.length} שיבוצים בסידור המוצע`}
+          </Typography>
           <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
             <Button size="small" variant="contained" disabled={!!busy[r._id]} onClick={() => decide(r._id, true)}>אישור והחלה</Button>
             <TextField size="small" placeholder="סיבת דחייה" value={reason[r._id] || ''} onChange={e => setReason(s => ({ ...s, [r._id]: e.target.value }))} />

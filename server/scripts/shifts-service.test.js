@@ -66,6 +66,7 @@ async function throwsStatus(fn, status, label, message) {
   eq(board.pending_primary.map(p => p.full_name), ['רות'], 'רות בלי כיתה ראשית — נשאלת');
   eq(board.pending_primary[0].suggestion, String(young._id), 'הצעה: הכיתה היחידה בקטגוריה');
   eq(board.ratios, { infants: 5, young: 7, older: 9 }, 'יחסי כפר סבא');
+  eq(board.ratio_overrides, { infants: '', young: '', older: '' }, 'בלי יחס סניף — הכל ריק (ברירת מחדל עירונית)');
 
   console.log('\nפתיחת שבוע');
   const week = await svc.createWeek({ user: manager, branchId: String(branch._id), weekStart: WEEK });
@@ -73,6 +74,11 @@ async function throwsStatus(fn, status, label, message) {
   await throwsStatus(() => svc.createWeek({ user: manager, branchId: String(branch._id), weekStart: WEEK }), 409, 'פתיחה כפולה נדחית');
   await throwsStatus(() => svc.createWeek({ user: manager, branchId: String(branch._id), weekStart: '2026-10-12' }), 400, 'שבוע חייב להתחיל בראשון');
   await throwsStatus(() => svc.createWeek({ user: admin, branchId: String(branch._id), weekStart: '2026-10-18' }), 403, 'אדמין לא פותח');
+  await M.ShiftWeek.init();
+  const realExists = M.ShiftWeek.exists;
+  M.ShiftWeek.exists = async () => null; // two clicks racing past the pre-check
+  await throwsStatus(() => svc.createWeek({ user: manager, branchId: String(branch._id), weekStart: WEEK }), 409, 'מרוץ פתיחה: מפתח כפול → 409', 'הסידור לשבוע הזה כבר נפתח');
+  M.ShiftWeek.exists = realExists;
 
   console.log('\nשמירה');
   const entries = week.entries.map(e => e.toObject());
@@ -84,6 +90,15 @@ async function throwsStatus(fn, status, label, message) {
   const clash = saved.entries.map(e => e.toObject());
   clash.push({ ...clash[0], _id: undefined, start_hhmm: '14:00', end_hhmm: '17:00', area: 'class', classroom_id: young._id });
   await throwsStatus(() => svc.saveEntries({ user: manager, weekId: String(week._id), entries: clash }), 400, 'חפיפה נדחית');
+  const reversed = saved.entries.map(e => e.toObject());
+  const danaFirst = reversed.find(e => String(e.employee_id) === String(dana._id));
+  danaFirst.start_hhmm = '16:00'; danaFirst.end_hhmm = '07:00';
+  await throwsStatus(() => svc.saveEntries({ user: manager, weekId: String(week._id), entries: reversed }), 400, 'סיום לפני התחלה נדחה', `דנה — שעת הסיום לפני שעת ההתחלה ב-${danaFirst.date}`);
+  const unpadded = saved.entries.map(e => e.toObject());
+  const danaPad = unpadded.find(e => String(e.employee_id) === String(dana._id));
+  danaPad.start_hhmm = '7:00';
+  saved = await svc.saveEntries({ user: manager, weekId: String(week._id), entries: unpadded });
+  eq(saved.entries.find(e => String(e._id) === String(danaPad._id)).start_hhmm, '07:00', "שעה '7:00' נשמרת כ-'07:00' ולא נמחקת");
 
   console.log('\nיחס חניכה');
   board = await svc.getBoard({ user: manager, branchId: String(branch._id), weekStart: WEEK });
@@ -121,6 +136,27 @@ async function throwsStatus(fn, status, label, message) {
   const afterApprove = await M.ShiftWeek.findById(week._id);
   eq(afterApprove.entries.some(e => String(e.employee_id) === String(ruth._id)), false, 'והשינוי הוחל על העותק בעבודה');
 
+  console.log('\nבקשה מול סידור שהשתנה אחריה');
+  const base3 = afterApprove.entries.map(e => e.toObject());
+  const danaLate = base3.find(e => String(e.employee_id) === String(dana._id));
+  const proposed3 = base3.map(e => (String(e._id) === String(danaLate._id) ? { ...e, end_hhmm: '14:00' } : e));
+  const stale = await svc.createEditRequest({ user: admin, weekId: String(week._id), entries: proposed3 });
+  eq(stale.changed_names, ['דנה'], 'הבקשה יודעת אצל מי השינוי');
+  eq(new Date(stale.week_version).getTime(), afterApprove.updated_at.getTime(), 'ועל איזו גרסה של הסידור היא נשלחה');
+  await new Promise(r => setTimeout(r, 5));
+  const managerEdit = base3.map(e => (String(e._id) === String(danaLate._id) ? { ...e, start_hhmm: '08:00' } : e));
+  await svc.saveEntries({ user: manager, weekId: String(week._id), entries: managerEdit });
+  await throwsStatus(() => svc.decideEditRequest({ user: manager, requestId: String(stale._id), approve: true }), 409, 'אישור אחרי שהמנהלת שינתה — 409', 'הסידור השתנה מאז שהבקשה נשלחה — יש לדחות ולבקש מחדש');
+  eq((await M.ShiftWeek.findById(week._id)).entries.find(e => String(e._id) === String(danaLate._id)).start_hhmm, '08:00', 'והשינוי של המנהלת לא נדרס');
+  const staleRejected = await svc.decideEditRequest({ user: manager, requestId: String(stale._id), approve: false, reason: 'הסידור השתנה' });
+  eq([staleRejected.status, staleRejected.reject_reason], ['rejected', 'הסידור השתנה'], 'דחייה עם סיבה עדיין אפשרית');
+
+  console.log('\nסניף בלי מנהלת');
+  const orphanWeek = await M.ShiftWeek.create({ branch_id: other._id, week_start: WEEK, entries: [] });
+  const before = await M.ShiftEditRequest.countDocuments({});
+  await throwsStatus(() => svc.createEditRequest({ user: admin, weekId: String(orphanWeek._id), entries: [] }), 409, 'בקשה לסניף בלי מנהלת נדחית', 'לסניף אין מנהלת — אין מי שיאשר את הבקשה');
+  eq(await M.ShiftEditRequest.countDocuments({}), before, 'ולא נוצרה בקשה');
+
   console.log('\nכיתות ויחסים');
   await throwsStatus(() => svc.closeClassroom({ user: manager, classroomId: String(infants._id) }), 409, 'כיתה עם ילדים לא נסגרת');
   await svc.closeClassroom({ user: manager, classroomId: String(young._id) });
@@ -132,6 +168,7 @@ async function throwsStatus(fn, status, label, message) {
   await svc.setRatios({ user: manager, branchId: String(branch._id), ratios: { infants: 4, young: '', older: 10 } });
   board = await svc.getBoard({ user: manager, branchId: String(branch._id), weekStart: WEEK });
   eq(board.ratios, { infants: 4, young: 7, older: 10 }, 'יחס סניף גובר, ריק חוזר לברירת מחדל');
+  eq(board.ratio_overrides, { infants: 4, young: '', older: 10 }, 'והערכים הגולמיים של הסניף חוזרים לטופס');
 
   console.log('\nגבול סניף ושדות שהשרת קובע');
   const foreignEmp = await M.Employee.create({ full_name: 'זרה', israeli_id: '333333333', branch_id: other._id, is_active: true });

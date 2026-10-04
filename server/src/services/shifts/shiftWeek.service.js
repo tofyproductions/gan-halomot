@@ -8,14 +8,15 @@
 const mongoose = require('mongoose');
 const {
   ShiftWeek, ShiftEditRequest, Branch, Classroom, Child, Employee,
-  EmployeeCommitment, Holiday,
+  EmployeeCommitment, Holiday, User,
 } = require('../../models');
 const notificationService = require('../notification.service');
+const { branchManagerFilter } = require('../branch-recipients.service');
 const { closureDateSet } = require('../fixedSchedule');
 const { effectiveRatios, ratioWarnings } = require('./ratio');
 const { buildSeedEntries } = require('./seed');
 const {
-  weekDays, isSunday, findOverlaps, affectedEmployeeIds, suggestPrimary, needsPrimaryPrompt,
+  weekDays, isSunday, padHHMM, findOverlaps, affectedEmployeeIds, suggestPrimary, needsPrimaryPrompt,
 } = require('./rules');
 
 class ShiftError extends Error {
@@ -118,6 +119,12 @@ async function getBoard({ user, branchId, weekStart }) {
     inactive_classrooms: inactive.map(r => ({ _id: String(r._id), name: r.name, academic_year: r.academic_year })),
     employees: employees.map(e => ({ _id: String(e._id), full_name: e.full_name, primary_classroom_id: e.primary_classroom_id ? String(e.primary_classroom_id) : null, extra_classroom_ids: (e.extra_classroom_ids || []).map(String) })),
     ratios,
+    // What the branch itself set, blank where it follows the city default —
+    // the settings form edits these, not the effective values above.
+    ratio_overrides: Object.fromEntries(['infants', 'young', 'older'].map((k) => {
+      const v = branch.staff_ratios && branch.staff_ratios[k];
+      return [k, v == null ? '' : v];
+    })),
     warnings: ratioWarnings({ entries, classrooms, dates, closedDates: closed, ratios }),
     pending_primary,
     edit_requests: editRequests,
@@ -136,7 +143,13 @@ async function createWeek({ user, branchId, weekStart }) {
   const dates = weekDays(weekStart);
   const closed = await closedDatesFor(branchId, dates, null);
   const entries = await seedFor(branchId, dates, closed);
-  return ShiftWeek.create({ branch_id: branchId, week_start: weekStart, entries, created_by: user.id });
+  try {
+    return await ShiftWeek.create({ branch_id: branchId, week_start: weekStart, entries, created_by: user.id });
+  } catch (err) {
+    // Two opens racing past the check above: the unique index decides.
+    if (err && err.code === 11000) throw new ShiftError(409, 'הסידור לשבוע הזה כבר נפתח');
+    throw err;
+  }
 }
 
 /** Clean what the client sent into Entry shape, refusing what cannot be stored. */
@@ -148,7 +161,6 @@ function normalizeEntries(raw, dates, closed) {
     if (closed.has(e.date)) throw new ShiftError(400, `${e.date} — יום שהגן סגור`);
     if (!['class', 'kitchen', 'floater', 'unassigned'].includes(e.area)) throw new ShiftError(400, 'שורה לא תקינה');
     if (e.area === 'class' && !mongoose.isValidObjectId(e.classroom_id)) throw new ShiftError(400, 'חסרה כיתה');
-    const hhmm = (v) => (/^\d{2}:\d{2}$/.test(String(v || '')) ? String(v) : '');
     return {
       ...(mongoose.isValidObjectId(e._id) ? { _id: e._id } : {}),
       employee_id: e.employee_id,
@@ -156,8 +168,8 @@ function normalizeEntries(raw, dates, closed) {
       date: e.date,
       area: e.area,
       classroom_id: e.area === 'class' ? e.classroom_id : null,
-      start_hhmm: hhmm(e.start_hhmm),
-      end_hhmm: hhmm(e.end_hhmm),
+      start_hhmm: padHHMM(e.start_hhmm),
+      end_hhmm: padHHMM(e.end_hhmm),
       alternating: !!e.alternating,
       new_class: !!e.new_class,
     };
@@ -195,6 +207,10 @@ async function prepareEntries(week, raw) {
     if (String(emp.branch_id) !== String(week.branch_id)) throw new ShiftError(400, `${emp.full_name} לא שייכת לסניף הזה`);
     if (e.area === 'class' && !branchRooms.has(String(e.classroom_id))) throw new ShiftError(400, 'הכיתה לא שייכת לסניף');
     e.employee_name = emp.full_name;
+    // 'HH:MM' strings compare in time order.
+    if (e.start_hhmm && e.end_hhmm && e.start_hhmm >= e.end_hhmm) {
+      throw new ShiftError(400, `${emp.full_name || 'עובדת'} — שעת הסיום לפני שעת ההתחלה ב-${e.date}`);
+    }
     e.new_class = false;
     if (e.area !== 'class') continue;
     const known = [emp.primary_classroom_id, ...(emp.extra_classroom_ids || [])].filter(Boolean).map(String);
@@ -318,12 +334,20 @@ async function createEditRequest({ user, weekId, entries }) {
   if (!OFFICE.includes(user.role)) throw new ShiftError(403, 'רק המשרד מגיש בקשת שינוי');
   const week = await loadWeekOr404(weekId);
   const { entries: clean } = await prepareEntries(week, entries);
+  // Only she approves, so only she is told; with no manager there is no one
+  // to approve and the request would wait forever.
+  const managers = await User.find({ ...branchManagerFilter(week.branch_id), role: 'branch_manager' }).select('_id').lean();
+  if (!managers.length) throw new ShiftError(409, 'לסניף אין מנהלת — אין מי שיאשר את הבקשה');
+  const changedIds = [...affectedEmployeeIds(week.entries.map(e => e.toObject()), clean)];
+  const changedEmps = changedIds.length
+    ? await Employee.find({ _id: { $in: changedIds } }).select('full_name').sort({ full_name: 1 }).lean() : [];
   const doc = await ShiftEditRequest.create({
     shift_week_id: week._id, branch_id: week.branch_id, entries: clean,
+    week_version: week.updated_at,
+    changed_names: changedEmps.map(e => e.full_name),
     requested_by: user.id, requested_by_name: user.full_name || '',
   });
-  const managers = await notificationService.branchManagerIds(week.branch_id);
-  await Promise.all(managers.map(recipient_id => notificationService.createEvent({
+  await Promise.all(managers.map(m => String(m._id)).map(recipient_id => notificationService.createEvent({
     type: 'shift_edit_request', ref_collection: 'ShiftEditRequest', ref_id: doc._id, recipient_id,
     title: 'בקשת שינוי בסידור העבודה', body: `${doc.requested_by_name || 'המשרד'} מבקש/ת לשנות את הסידור`,
     url: `/shifts?week=${week.week_start}`,
@@ -340,6 +364,10 @@ async function decideEditRequest({ user, requestId, approve, reason }) {
   if (!approve && !String(reason || '').trim()) throw new ShiftError(400, 'יש לכתוב סיבה לדחייה');
   if (approve) {
     const week = await loadWeekOr404(doc.shift_week_id);
+    // The request is a whole week; approving it over later edits would undo them.
+    const current = week.updated_at ? new Date(week.updated_at).getTime() : null;
+    const filed = doc.week_version ? new Date(doc.week_version).getTime() : null;
+    if (current !== filed) throw new ShiftError(409, 'הסידור השתנה מאז שהבקשה נשלחה — יש לדחות ולבקש מחדש');
     await applyEntries(week, doc.entries);
   }
   doc.status = approve ? 'approved' : 'rejected';

@@ -11,6 +11,19 @@ function isSunday(ymd) {
   return new Date(`${ymd}T12:00:00.000Z`).getUTCDay() === 0;
 }
 
+/**
+ * Hours as the rota stores them: always 'HH:MM'. The commitments import keeps
+ * whatever the sheet had ('7:00'), so every way into a week goes through here;
+ * anything that is not a real time of day becomes blank rather than garbage.
+ */
+function padHHMM(v) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(v == null ? '' : v).trim());
+  if (!m) return '';
+  const h = Number(m[1]); const min = Number(m[2]);
+  if (h > 23 || min > 59) return '';
+  return `${String(h).padStart(2, '0')}:${m[2]}`;
+}
+
 const minutes = (hhmm) => {
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || ''));
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
@@ -80,4 +93,4 @@ function needsPrimaryPrompt(employee, commitment) {
   return areaFromCommitmentText(commitment.classroom) === null;
 }
 
-module.exports = { weekDays, isSunday, findOverlaps, affectedEmployeeIds, suggestPrimary, needsPrimaryPrompt };
+module.exports = { weekDays, isSunday, padHHMM, findOverlaps, affectedEmployeeIds, suggestPrimary, needsPrimaryPrompt };
