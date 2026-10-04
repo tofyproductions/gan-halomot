@@ -1,3 +1,4 @@
+import { toast } from 'react-toastify';
 import { HEB_DAYS, fmtDate } from './shiftRows';
 
 /**
@@ -31,18 +32,19 @@ function tableHtml({ branchName, dates, pageRows, switched, closedDates, pageNo,
 
 const STYLE = `
   @page { size: A4 landscape; margin: 8mm; }
-  * { box-sizing: border-box; }
-  body { font-family: "Assistant", Arial, sans-serif; direction: rtl; margin: 0; background: #fff; color: #111; }
-  .page { width: 277mm; padding: 2mm; page-break-after: always; background: #fff; }
-  .page:last-child { page-break-after: auto; }
-  h1 { font-size: 16pt; margin: 0 0 1mm; } .sub { font-size: 9pt; color: #555; margin-bottom: 3mm; }
-  table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 8.5pt; }
-  th, td { border: 1px solid #999; padding: 1.5mm; vertical-align: top; }
-  thead th { background: #eee; } th.row { width: 28mm; background: #f6f6f6; text-align: right; }
-  .d { font-weight: 400; color: #555; } td.closed { background: #ddd; color: #666; text-align: center; }
-  .e { margin-bottom: 1mm; font-weight: 600; } .e span { display: block; font-weight: 400; font-size: 7.5pt; color: #444; }
-  .e.sw { background: #dbeafe; border-radius: 1mm; padding: 0.5mm 1mm; }
-  .legend { font-size: 7.5pt; color: #555; margin-top: 2mm; } .sw-box { display: inline-block; width: 8px; height: 8px; background: #dbeafe; border: 1px solid #93c5fd; }
+  .shift-export, .shift-export * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .shift-export { font-family: "Assistant", Arial, sans-serif; direction: rtl; color: #111; background: #fff; }
+  .shift-export .page { width: 277mm; padding: 2mm; page-break-after: always; background: #fff; }
+  .shift-export .page:last-of-type { page-break-after: auto; }
+  .shift-export h1 { font-size: 16pt; margin: 0 0 1mm; } .shift-export .sub { font-size: 9pt; color: #555; margin-bottom: 3mm; }
+  .shift-export table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 8.5pt; }
+  .shift-export tr { break-inside: avoid; page-break-inside: avoid; }
+  .shift-export th, .shift-export td { border: 1px solid #999; padding: 1.5mm; vertical-align: top; }
+  .shift-export thead th { background: #eee; } .shift-export th.row { width: 28mm; background: #f6f6f6; text-align: right; }
+  .shift-export .d { font-weight: 400; color: #555; } .shift-export td.closed { background: #ddd; color: #666; text-align: center; }
+  .shift-export .e { margin-bottom: 1mm; font-weight: 600; } .shift-export .e span { display: block; font-weight: 400; font-size: 7.5pt; color: #444; }
+  .shift-export .e.sw { background: #dbeafe; border-radius: 1mm; padding: 0.5mm 1mm; }
+  .shift-export .legend { font-size: 7.5pt; color: #555; margin-top: 2mm; } .shift-export .sw-box { display: inline-block; width: 8px; height: 8px; background: #dbeafe; border: 1px solid #93c5fd; }
 `;
 
 export function exportHtml({ branchName, dates, rows, switched, closedDates }) {
@@ -53,7 +55,7 @@ export function exportHtml({ branchName, dates, rows, switched, closedDates }) {
 export function exportPdf(args) {
   const win = window.open('', '_blank', 'width=1200,height=850');
   if (!win) { alert('הדפדפן חסם את החלון — אפשרו חלונות קופצים לאתר'); return; }
-  win.document.write(`<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>סידור עבודה</title><style>${STYLE}</style></head><body>${exportHtml(args)}<script>window.onload=()=>{window.print();}</script></body></html>`);
+  win.document.write(`<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>סידור עבודה</title><style>${STYLE} body { margin: 0; }</style></head><body><div class="shift-export">${exportHtml(args)}</div><script>window.onload=()=>{window.print();}</script></body></html>`);
   win.document.close();
 }
 
@@ -62,6 +64,7 @@ export async function exportPng(args) {
   // Off-screen on an OUTER wrapper with a forced white background — the
   // blank-page trap documented in utils/contractPdf.js.
   const wrap = document.createElement('div');
+  wrap.className = 'shift-export';
   wrap.style.cssText = 'position:fixed;left:-10000px;top:0;background:#fff;';
   wrap.innerHTML = `<style>${STYLE}</style>${exportHtml(args)}`;
   document.body.appendChild(wrap);
@@ -74,6 +77,9 @@ export async function exportPng(args) {
       a.download = `סידור-${args.branchName}-${args.dates[0]}${pages.length > 1 ? `-${i + 1}` : ''}.png`;
       a.click();
     }
+  } catch (err) {
+    console.error(err);
+    toast.error('ייצוא התמונה נכשל');
   } finally {
     wrap.remove();
   }
