@@ -224,7 +224,7 @@ async function runPass({ branchId, sheetId, date, mode = 'dry', deps = null }) {
 
   const grids = await d.readGrids(sheetId);
   const childGrid = grids.children || [];
-  const todayGrid = grids.today || [];
+  const fetchedToday = grids.today || [];
   const childRows = parseChildRows(childGrid);
 
   // Both tabs, both anchored on their own header row — see roster.js for why
@@ -232,7 +232,10 @@ async function runPass({ branchId, sheetId, date, mode = 'dry', deps = null }) {
   // pairs so that the column a value was READ from and the column it is
   // WRITTEN to are the same lookup over the same array; re-deriving it here is
   // how those two drift apart.
-  const { pairs, errors, header, headerIndex } = pairRows({ childRows, childGrid, todayRows: todayGrid });
+  const { pairs, errors, header, headerIndex, rows: pairedRows } = pairRows({ childRows, childGrid, todayRows: fetchedToday });
+  // The tab as pairRows sees it: the fetched rows plus the empty tail the
+  // Sheets API leaves out. Every later bounds check reads this one.
+  const todayGrid = pairedRows.length ? pairedRows : fetchedToday;
   // A refusal here is not a partial result to work around. Pairing is by
   // position and nothing else, so "most of it lined up" means the rest lined
   // up onto the wrong families. Nothing has been read or written yet, and

@@ -57,10 +57,20 @@ check('יובל ראובני keeps her own 06:45, not the row above', () => {
 });
 
 console.log('\npairRows — it refuses rather than guesses');
-check('fewer day rows than children is an error, not a partial pairing', () => {
-  const short = pairRows({ childRows: parseChildRows(childGrid), childGrid, todayRows: todayGrid.slice(0, 4) });
-  assert.strictEqual(short.pairs.length, 0);
-  assert.ok(/rows/.test(short.errors[0]));
+// Google's values.get drops trailing rows that are entirely empty. Every
+// morning the board is wiped, so a short tab is the normal state, not a broken
+// one — refusing it blocked every pass until the last child had data (01.10:
+// "סדר יום has 2 rows, needs 18"). The missing tail is read as empty rows.
+check('a tab shorter than the roster (API-trimmed empty tail) pairs every child, tail read as blank', () => {
+  const children = parseChildRows(childGrid);
+  const short = pairRows({ childRows: children, childGrid, todayRows: todayGrid.slice(0, 4) });
+  assert.deepStrictEqual(short.errors, []);
+  assert.strictEqual(short.pairs.length, children.length);
+  const last = short.pairs[short.pairs.length - 1];
+  assert.ok(Object.values(last.values).every(v => v === ''), 'trimmed row reads as blank');
+  assert.ok(short.rows.length > last.row, 'padded rows cover the last child, so write-back is in bounds');
+  const full = pairRows({ childRows: children, childGrid, todayRows: todayGrid });
+  assert.deepStrictEqual(short.pairs.map(p => p.row), full.pairs.map(p => p.row), 'same rows as the untrimmed tab');
 });
 
 // `values` is keyed by the normalized header name, so on a repeat the last

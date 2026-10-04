@@ -318,10 +318,11 @@ scenario('a lookup that answers about something else is reported, not used', asy
 
 scenario('pairRows refusing aborts the pass instead of half-applying it', async () => {
   const d = deps({
-    // Two children on the roster, one row on the live tab: mid-edit, or the
-    // assumption is wrong. Either way a partial pairing writes a day onto the
-    // wrong child.
-    today: todayGrid([['', '', '', '']]),
+    // A live tab with no header row: position cannot be anchored, so any
+    // pairing would be a guess. (A tab merely SHORTER than the roster is not
+    // a refusal any more — the Sheets API trims empty trailing rows; see
+    // roster.js.)
+    today: [['', '', '', ''], ['', '', '', '']],
     logs: new Map([['c1', { staff_note: 'ישן טוב', home: {}, meals: {}, sleep: {}, missing: [] }]]),
     shadow: { 'id-1': { staff_note: '' } },
   });

@@ -22,10 +22,14 @@ const { normalizeFieldName } = require('../../../scripts/lib/nursery-history');
  * finds the roster's, rather than trusting the first row a caller happens
  * to have parsed.
  *
- * Refuses rather than guesses. A live tab with fewer rows than the roster has
- * children means the sheet is mid-edit or the assumption is wrong, and a
- * partial pairing there is worse than no pairing at all — it silently writes
- * the last few children's days onto the wrong records.
+ * A live tab SHORTER than the roster is not a broken sheet. Google's
+ * values.get drops trailing rows that are entirely empty, and every morning
+ * the board is wiped, so the last children — the ones nobody has filled in
+ * yet — simply do not come back. Refusing on that (as this used to) refused
+ * EVERY pass from the nightly wipe until the last child's row had something
+ * in it: from 01.10 the whole morning, parents' notes included, never reached
+ * the board. Position is still anchored on each tab's own header, so a
+ * missing tail row can only ever be an empty row, and it is read as one.
  */
 function pairRows({ childRows, childGrid, todayRows }) {
   const errors = [];
@@ -65,14 +69,14 @@ function pairRows({ childRows, childGrid, todayRows }) {
 
   const rosterFirstRow = rosterHeaderIndex + 1;
   const lastNeeded = todayHeaderIndex + 1 + (children[children.length - 1].row - rosterFirstRow);
-  if (lastNeeded >= grid.length) {
-    errors.push(`סדר יום has ${grid.length} rows, needs ${lastNeeded + 1} for ${children.length} children`);
-    return refusal(errors, header, todayHeaderIndex);
-  }
+  // Restore the empty tail the API trimmed, so reads see blanks and the
+  // write-back's bounds check sees rows that do exist on the sheet.
+  const rows = grid.slice();
+  while (rows.length <= lastNeeded) rows.push([]);
 
   const pairs = children.map((child) => {
     const row = todayHeaderIndex + 1 + (child.row - rosterFirstRow);
-    const cells = grid[row] || [];
+    const cells = rows[row] || [];
     const values = {};
     header.forEach((name, c) => { if (name) values[name] = cells[c] === undefined ? '' : cells[c]; });
     return { row, access_id: child.access_id, name: child.name, values };
@@ -81,11 +85,11 @@ function pairRows({ childRows, childGrid, todayRows }) {
   // a value back has to find that column's index, and re-deriving the header
   // to do it is how the two halves drift apart — the read keyed by name, the
   // write located by a second, differently-written lookup.
-  return { pairs, errors, header, headerIndex: todayHeaderIndex };
+  return { pairs, errors, header, headerIndex: todayHeaderIndex, rows };
 }
 
 function refusal(errors, header, headerIndex) {
-  return { pairs: [], errors, header, headerIndex };
+  return { pairs: [], errors, header, headerIndex, rows: [] };
 }
 
 module.exports = { pairRows };
