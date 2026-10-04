@@ -491,6 +491,9 @@ async function markDayOff(employeeId, dateStr, note = 'נמחק ידנית מה�
     list[idx].off = true;
     list[idx].in = '';
     list[idx].out = '';
+    // The office removed this day: a rota republish must not write it back.
+    list[idx].source = 'manual';
+    list[idx].branch_id = null;
     if (!list[idx].note) list[idx].note = note;
   } else {
     list.push({ date: dateStr, off: true, in: '', out: '', note });

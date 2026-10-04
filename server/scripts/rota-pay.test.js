@@ -60,6 +60,42 @@ const eq = (a, b, l) => { const g = JSON.stringify(a) === JSON.stringify(b); con
   eq([ex2.length, ex2[0].in], [1, '09:00'], 'פרסום חוזר מעדכן את אותו חריג');
   eq(fixedSchedule.plannedHoursFor({ exceptions: [{ date: '2026-10-12', in: '09:00', out: '13:00', branch_id: host._id }] }, '2026-10-12').branch_id, String(host._id), 'plannedHoursFor מחזיר את הסניף');
 
+  // ── Fix round 1 ──
+  const mkFixed = (name, id) => M.Employee.create({ full_name: name, israeli_id: id, branch_id: home._id, is_active: true, fixed_schedule: { enabled: true, days: [0, 1, 2, 3, 4].map(weekday => ({ weekday, in: '07:00', out: '15:00' })) } });
+  const P = (emp, sn, date, hhmm, extra = {}) => ({ branch_id: home._id, employee_id: emp._id, israeli_id: emp.israeli_id, device_user_sn: sn, timestamp: fixedSchedule.ilDateTime(date, hhmm), timestamp_source: 'fixed_schedule', approval_status: 'approved', ...extra });
+  const closed = new Set(['2026-10-13']);
+
+  // 1. A fixed employee the rota never placed keeps her fixed hours and punches.
+  const unplaced = await mkFixed('לא משובצת', '555000010');
+  await M.Punch.create([P(unplaced, 910, '2026-10-11', '07:00')]);
+  const r1 = await applyRotaToFixedSchedules({ week, closedDates: closed, today: '2026-10-20', previousPublished: [] });
+  eq([(await M.Employee.findById(unplaced._id).lean()).fixed_schedule.exceptions.length, await M.Punch.countDocuments({ employee_id: unplaced._id })], [0, 1], 'לא בסידור ולא בקודם — בלי חריגים, ההחתמה נשארה');
+  eq(r1.employees, 1, 'רק מי שבסידור נספרה');
+
+  // 2. A day with an edited generated punch keeps all its punches.
+  const edited = await mkFixed('נערכה', '555000011');
+  await M.Punch.create([P(edited, 911, '2026-10-11', '07:00', { schedule_edited: true }), P(edited, 912, '2026-10-11', '15:00')]);
+  const weekEd = { ...week, published: [...week.published, E(edited, '2026-10-11', '08:00', '12:00')] };
+  await applyRotaToFixedSchedules({ week: weekEd, closedDates: closed, today: '2026-10-20' });
+  eq(await M.Punch.countDocuments({ employee_id: edited._id }), 2, 'יום עם החתמה ערוכה — שתיהן נשארו');
+
+  // 3. markDayOff turns a rota exception manual; a republish leaves it.
+  await fixedSchedule.markDayOff(fixed._id, '2026-10-11');
+  await applyRotaToFixedSchedules({ week, closedDates: closed, today: '2026-10-20' });
+  const d11 = (await M.Employee.findById(fixed._id).lean()).fixed_schedule.exceptions.find(e => e.date === '2026-10-11');
+  eq([d11.off, d11.source, d11.branch_id], [true, 'manual', null], 'מחיקה ידנית — נשארת ידנית אחרי פרסום חוזר');
+
+  // 4. Real punch on a rota-off day survives.
+  await M.Punch.create([P(fixed, 913, '2026-10-14', '07:30', { timestamp_source: 'agent_received_at' })]);
+  await applyRotaToFixedSchedules({ week, closedDates: closed, today: '2026-10-20' });
+  eq(await M.Punch.countDocuments({ employee_id: fixed._id, timestamp_source: 'agent_received_at' }), 1, 'החתמה אמיתית ביום חופש מהסידור נשארה');
+
+  // 5. A host-branch publish updates the home employee's exception with the host branch.
+  const hostWeek = { branch_id: host._id, week_start: '2026-10-11', published: [E(fixed, '2026-10-14', '10:00', '12:00', String(host._id))] };
+  await applyRotaToFixedSchedules({ week: hostWeek, closedDates: new Set(), today: '2026-10-20' });
+  const d14 = (await M.Employee.findById(fixed._id).lean()).fixed_schedule.exceptions.find(e => e.date === '2026-10-14');
+  eq([d14.in, d14.out, String(d14.branch_id), d14.source], ['10:00', '12:00', String(host._id), 'rota'], 'פרסום סניף מארח מעדכן את החריג עם הסניף המארח');
+
   await mongoose.disconnect(); await mongod.stop();
   console.log(failures ? `\n${failures} FAILED` : '\nכל הבדיקות עברו');
   process.exit(failures ? 1 : 0);

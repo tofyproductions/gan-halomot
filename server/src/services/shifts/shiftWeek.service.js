@@ -324,13 +324,14 @@ async function publishWeek({ user, weekId, now = new Date() }) {
   const autoAccepted = await constraints.resolveForPublish({ user, week, entries: week.entries.map(e => e.toObject()) });
   const first = !week.published_at;
   const affected = [...affectedEmployeeIds(first ? [] : week.published, week.entries)];
+  const previousPublished = (week.published || []).map(e => e.toObject());
   week.published = week.entries.map(e => e.toObject());
   week.published_at = new Date();
   week.published_by = user.id;
   await week.save();
   try {
     const closed = await closedDatesFor(week.branch_id, weekDays(week.week_start), week);
-    await rotaPay.applyRotaToFixedSchedules({ week: week.toObject(), closedDates: closed, today: todayIsrael() });
+    await rotaPay.applyRotaToFixedSchedules({ week: week.toObject(), closedDates: closed, today: todayIsrael(), previousPublished });
   } catch (err) { console.error('[shifts] rota → fixed schedule failed:', err.message); }
 
   const recipients = await userIdsOf(affected);
