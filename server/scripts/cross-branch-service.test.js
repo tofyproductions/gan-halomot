@@ -76,6 +76,7 @@ async function throws(fn, status, message, label) {
   await throws(() => cross.decidePlacement({ user: hostMgr, weekId: String(w3._id), entryId: String(w3.entries[0]._id), approve: true }), 403, 'רק מנהלת סניף הבית של העובדת מאשרת', 'המארחת לא מאשרת');
   await cross.decidePlacement({ user: homeMgr, weekId: String(w3._id), entryId: String(w3.entries[0]._id), approve: true });
   eq((await ShiftWeek.findById(w3._id)).entries[0].cross_status, 'approved', 'אושר');
+  eq(await M.NotificationEvent.countDocuments({ type: 'cross_placement_decision', recipient_id: hostMgrU._id, ref_id: w3._id }), 1, 'המארחת קיבלה הודעת אישור');
   const arr = await M.CrossBranchArrangement.findOne({ employee_id: dana._id }).lean();
   eq([arr && arr.status, arr && arr.weekday, arr && arr.start_hhmm], ['proposed', 1, '13:00'], 'אחרי שלוש פעמים — הוצע סידור קבוע');
   eq(await M.NotificationEvent.countDocuments({ type: 'cross_arrangement' }), 2, 'שתי המנהלות נשאלו');

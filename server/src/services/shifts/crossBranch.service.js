@@ -102,7 +102,7 @@ async function decidePlacement({ user, weekId, entryId, approve, reason }) {
   await week.save();
   await notify(await managersOf(week.branch_id), {
     type: 'cross_placement_decision', ref_collection: 'ShiftWeek', ref_id: week._id,
-    title: `השיבוץ של ${emp.full_name} ב-${entry.date} אושר`, body: '', url: `/shifts?week=${week.week_start}`,
+    title: `השיבוץ של ${emp.full_name} ב-${entry.date} אושר`, body: 'אפשר להמשיך לסגירת הסידור', url: `/shifts?week=${week.week_start}`,
   });
   await maybeProposeArrangement({ week, entry: entry.toObject() });
   return { approved: true };
