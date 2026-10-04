@@ -11,6 +11,7 @@
     "import": "node scripts/import-from-gsheets.js",
     "test:shifts-service": "node scripts/shifts-service.test.js",
     "test:shift-reminder": "node scripts/shift-reminder.test.js",
+    "test:constraint-rules": "node scripts/constraint-rules.test.js",
     "test:finance-ingest": "node scripts/finance-ingest.test.js",
     "test:card-settlement": "node scripts/card-settlement.test.js",
     "test:terms": "node scripts/employment-terms.test.js",
