@@ -28,6 +28,7 @@ const PriceAdjustment = require('./PriceAdjustment');
 const SalaryRequest = require('./SalaryRequest');
 const Holiday = require('./Holiday');
 const ShiftWeek = require('./ShiftWeek');
+const ShiftConstraint = require('./ShiftConstraint');
 const ShiftEditRequest = require('./ShiftEditRequest');
 const SupplyList = require('./SupplyList');
 const Activity = require('./Activity');
@@ -168,6 +169,7 @@ const real = {
   SalaryRequest,
   Holiday,
   ShiftWeek,
+  ShiftConstraint,
   ShiftEditRequest,
   SupplyList,
   Activity,
