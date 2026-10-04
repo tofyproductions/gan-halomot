@@ -86,19 +86,39 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
           </TableRow>
         </TableHead>
         <TableBody>
-          {rows.map(row => (
-            <TableRow key={row.key}>
-              <TableCell sx={{ fontWeight: 700, verticalAlign: 'top', ...stickyCol }}>
-                {row.label}
-                {row.enrolled != null && (
-                  <Typography variant="caption" display="block" color="text.secondary" fontWeight={400}>
-                    {row.enrolled} ילדים
-                  </Typography>
-                )}
-              </TableCell>
+          {rows.flatMap(row => {
+            // One line per employee, kept the same all week, so the eye can
+            // follow a person across the days (sorted by earliest start, then name).
+            const first = new Map(); const names = new Map();
+            for (const d of dates) {
+              for (const e of (row.cells[d] || [])) {
+                const id = String(e.employee_id);
+                if (!names.has(id)) names.set(id, e.employee_name);
+                const s = e.start_hhmm || '99:99';
+                if (!first.has(id) || s < first.get(id)) first.set(id, s);
+              }
+            }
+            const slots = [...names.keys()].sort((a, b) => (first.get(a) || '').localeCompare(first.get(b) || '')
+              || String(names.get(a)).localeCompare(String(names.get(b)), 'he'));
+            if (!slots.length) slots.push(null);
+            return slots.map((slotId, si) => {
+              const last = si === slots.length - 1;
+              return (
+            <TableRow key={`${row.key}:${slotId || 'empty'}`}>
+              {si === 0 && (
+                <TableCell rowSpan={slots.length} sx={{ fontWeight: 700, verticalAlign: 'top', ...stickyCol }}>
+                  {row.label}
+                  {row.enrolled != null && (
+                    <Typography variant="caption" display="block" color="text.secondary" fontWeight={400}>
+                      {row.enrolled} ילדים
+                    </Typography>
+                  )}
+                </TableCell>
+              )}
               {dates.map(d => {
                 const closed = closedDates.has(d);
                 const warn = row.area === 'class' && warnOf(row, d);
+                const cellEntries = slotId ? (row.cells[d] || []).filter(e => String(e.employee_id) === slotId) : [];
                 const clickable = editable && !closed && row.area !== 'away';
                 const droppable = canDrop && clickable;
                 const cellKey = `${row.key}|${d}`;
@@ -124,14 +144,16 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                       if (payload) onDropToCell(row, d, payload, { shiftKey: ev.shiftKey });
                     } : undefined}
                     sx={{
-                      verticalAlign: 'top', minWidth: 110, p: 0.75,
+                      verticalAlign: 'top', minWidth: 110, p: 0.5,
+                      // The class's lines read as one block — only its last line draws the divider.
+                      borderBottom: last ? undefined : 'none',
                       cursor: clickable ? 'pointer' : 'default',
                       bgcolor: closed ? 'action.disabledBackground' : (isOver ? 'primary.soft' : (warn ? 'warning.soft' : undefined)),
                       outline: isOver ? '2px solid' : 'none', outlineColor: 'primary.main', outlineOffset: -2,
                       '&:hover': clickable ? { bgcolor: isOver ? 'primary.soft' : 'action.hover' } : {},
                     }}
                   >
-                    {(row.cells[d] || []).map(e => {
+                    {cellEntries.map(e => {
                       const isSwitch = switched.has(`${e.employee_id}|${e.date}`);
                       const mine = highlightEmployeeId && String(e.employee_id) === String(highlightEmployeeId);
                       const draggable = droppable && !!(e._id || e.tmp);
@@ -187,7 +209,7 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                         </Box>
                       );
                     })}
-                    {warn && (
+                    {warn && last && (
                       <Tooltip title={`${warn.enrolled} ילדים — צריך ${warn.needed} עובדות, משובצות ${warn.staff}`}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, color: 'warning.softOn', fontSize: '0.7rem' }}>
                           <WarningAmberIcon sx={{ fontSize: 14 }} /> חסרות {warn.needed - warn.staff}
@@ -198,7 +220,9 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                 );
               })}
             </TableRow>
-          ))}
+              );
+            });
+          })}
         </TableBody>
       </Table>
     </Box>
