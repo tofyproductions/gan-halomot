@@ -871,8 +871,26 @@ async function cancel(req, res, next) {
       return res.status(409).json({ error: 'הרישום כבר בוטל' });
     }
 
+    /**
+     * "The family owes nothing" — a child who left, whose account is square.
+     *
+     * Before this, the only one-step way to take such a child out of גבייה
+     * was the delete button, and delete erases everything: the registration,
+     * the children, their daily logs and photos, the payment history. The
+     * safe path (cancel, then mark the debt settled) existed but was two
+     * actions on two different days of the screen, so the destructive one got
+     * used. This folds the second step into the first. It is the office's
+     * call — settling is admin/accountant only (see the settle route), so a
+     * manager's request carrying the flag is refused, not quietly downgraded.
+     */
+    const noDebt = req.body?.no_debt === true;
+    if (noDebt && !['system_admin', 'accountant'].includes(req.user?.role)) {
+      return res.status(403).json({ error: 'סגירת חוב — רק הנהלת חשבונות או מנהל מערכת' });
+    }
+
     const exitMonth = Number(req.body?.exit_month);
-    if (!Number.isInteger(exitMonth) || exitMonth < 1 || exitMonth > 12) {
+    const hasExitMonth = Number.isInteger(exitMonth) && exitMonth >= 1 && exitMonth <= 12;
+    if (!hasExitMonth && !noDebt) {
       return res.status(400).json({ error: 'יש לבחור עד איזה חודש המשפחה מחויבת' });
     }
 
@@ -884,23 +902,31 @@ async function cancel(req, res, next) {
     // the collections screen, where the office adjusts to what the contract
     // says for this family).
     const academicYear = academicYearOf(registration) || '';
-    const existing = await Collection.findOne({ registration_id: id });
-    if (existing) {
-      existing.exit_month = exitMonth;
-      existing.last_updated = new Date();
-      await existing.save();
-    } else {
-      await Collection.create({ registration_id: id, academic_year: academicYear, exit_month: exitMonth });
+    // The collection row is history too — what was billed and paid stays.
+    // With no debt and no month given there is nothing new to record on it.
+    if (hasExitMonth) {
+      const existing = await Collection.findOne({ registration_id: id });
+      if (existing) {
+        existing.exit_month = exitMonth;
+        existing.last_updated = new Date();
+        await existing.save();
+      } else {
+        await Collection.create({ registration_id: id, academic_year: academicYear, exit_month: exitMonth });
+      }
     }
 
     registration.status = 'cancelled';
     registration.cancelled_at = new Date();
     registration.cancelled_by = req.user?.id || null;
     registration.cancel_note = String(req.body?.note || '').trim();
-    registration.billing_settled = false;
+    registration.billing_settled = noDebt;
+    if (noDebt) {
+      registration.billing_settled_at = new Date();
+      registration.billing_settled_by = req.user?.id || null;
+    }
     await registration.save();
 
-    res.json({ ok: true, exit_month: exitMonth });
+    res.json({ ok: true, exit_month: hasExitMonth ? exitMonth : null, billing_settled: noDebt });
   } catch (error) {
     next(error);
   }

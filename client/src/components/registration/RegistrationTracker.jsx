@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../hooks/useAuth';
 import {
   Box, Typography, Card, Stack, Chip, IconButton, Tooltip,
   TextField, InputAdornment, Button, MenuItem, Checkbox,
   Dialog, DialogTitle, DialogContent, DialogActions, Divider, CircularProgress, Alert,
-  ToggleButton, ToggleButtonGroup,
+  ToggleButton, ToggleButtonGroup, FormControlLabel,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import EditIcon from '@mui/icons-material/Edit';
@@ -49,6 +50,9 @@ const ACADEMIC_MONTH_OPTIONS = [
 
 export default function RegistrationTracker() {
   const navigate = useNavigate();
+  const { isAdmin, isAccountant } = useAuth();
+  // Same gate as the settle-billing route on the server.
+  const mayCloseDebt = isAdmin || isAccountant;
   const [registrations, setRegistrations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -62,7 +66,7 @@ export default function RegistrationTracker() {
   const [yearDlg, setYearDlg] = useState({ open: false, regs: [], year: '', saving: false, conflict: null });
   const [confirm, setConfirm] = useState({ open: false, id: null });
   // ביטול רישום — off the rosters, still billed through the chosen month.
-  const [cancelDlg, setCancelDlg] = useState({ open: false, reg: null, exitMonth: '', note: '', saving: false });
+  const [cancelDlg, setCancelDlg] = useState({ open: false, reg: null, exitMonth: '', note: '', noDebt: false, saving: false });
   const [renewDlg, setRenewDlg] = useState({ open: false, reg: null, monthlyFee: '', regFee: '', saving: false, mode: 'link', file: null });
   const [docsDialog, setDocsDialog] = useState({ open: false, reg: null, documents: [], loading: false });
   const [docTypeForUpload, setDocTypeForUpload] = useState('id_copy');
@@ -284,13 +288,17 @@ export default function RegistrationTracker() {
   };
 
   const handleCancelReg = async () => {
-    const { reg, exitMonth, note } = cancelDlg;
-    if (!exitMonth) return toast.error('יש לבחור עד איזה חודש המשפחה מחויבת');
+    const { reg, exitMonth, note, noDebt } = cancelDlg;
+    if (!exitMonth && !noDebt) return toast.error('יש לבחור עד איזה חודש המשפחה מחויבת');
     setCancelDlg(d => ({ ...d, saving: true }));
     try {
-      await api.post(`/registrations/${reg._id || reg.id}/cancel`, { exit_month: exitMonth, note });
-      toast.success('הרישום בוטל — הילד/ה הוסר/ה מהרשימות, המשפחה נשארת בגבייה עד סגירת החוב');
-      setCancelDlg({ open: false, reg: null, exitMonth: '', note: '', saving: false });
+      await api.post(`/registrations/${reg._id || reg.id}/cancel`, {
+        exit_month: exitMonth || undefined, note, no_debt: noDebt,
+      });
+      toast.success(noDebt
+        ? 'הילד/ה הוסר/ה מהגן ומהגבייה — ההיסטוריה נשמרה'
+        : 'הרישום בוטל — הילד/ה הוסר/ה מהרשימות, המשפחה נשארת בגבייה עד סגירת החוב');
+      setCancelDlg({ open: false, reg: null, exitMonth: '', note: '', noDebt: false, saving: false });
       fetchData();
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה בביטול הרישום');
@@ -771,7 +779,7 @@ export default function RegistrationTracker() {
                   {reg.status !== 'cancelled' ? (
                     <Tooltip title="ביטול רישום — הילד/ה יורד/ת מהרשימות אך המשפחה נשארת בגבייה">
                       <IconButton size="small" sx={{ color: '#b45309' }}
-                        onClick={() => setCancelDlg({ open: true, reg, exitMonth: '', note: '', saving: false })}>
+                        onClick={() => setCancelDlg({ open: true, reg, exitMonth: '', note: '', noDebt: false, saving: false })}>
                         <PersonOffIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
@@ -782,7 +790,7 @@ export default function RegistrationTracker() {
                       </IconButton>
                     </Tooltip>
                   )}
-                  <Tooltip title="מחיקה (לטעויות הקלדה בלבד — מוחקת גם את הגבייה)">
+                  <Tooltip title="מחיקה (לטעויות הקלדה בלבד — מוחקת את כל ההיסטוריה). ילד/ה שעזב/ה? השתמשו בביטול רישום">
                     <IconButton size="small" color="error" onClick={() => setConfirm({ open: true, id })}>
                       <DeleteIcon fontSize="small" />
                     </IconButton>
@@ -979,6 +987,7 @@ export default function RegistrationTracker() {
             </Stack>
             <TextField
               select label="מחויבים עד חודש (כולל)" value={cancelDlg.exitMonth} fullWidth
+              disabled={cancelDlg.noDebt}
               onChange={e => setCancelDlg(d => ({ ...d, exitMonth: Number(e.target.value) }))}
               helperText='לפי החוזה: ביטול מאוחר — החודש הראשון אינו מוחזר; עזיבה באמצע שנה — חודש ההודעה ועוד חודש.'
             >
@@ -986,6 +995,21 @@ export default function RegistrationTracker() {
                 <MenuItem key={num} value={num}>{name}</MenuItem>
               ))}
             </TextField>
+            {/* The office's shortcut for a child who left with the account
+                square: off the rosters AND off גבייה in one step, everything
+                kept. Without it the only one-step removal was "delete", which
+                erases the child's whole history. */}
+            {mayCloseDebt && (
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={cancelDlg.noDebt}
+                    onChange={e => setCancelDlg(d => ({ ...d, noDebt: e.target.checked }))}
+                  />
+                }
+                label="המשפחה לא חייבת כסף — להסיר גם מהגבייה (ההיסטוריה נשמרת)"
+              />
+            )}
             <TextField
               label="הערה (סיבת הביטול)" multiline minRows={2} fullWidth
               value={cancelDlg.note}
@@ -996,7 +1020,7 @@ export default function RegistrationTracker() {
         <DialogActions>
           <Button onClick={() => setCancelDlg(d => ({ ...d, open: false }))}>סגירה</Button>
           <Button variant="contained" color="warning" onClick={handleCancelReg} disabled={cancelDlg.saving}>
-            {cancelDlg.saving ? 'מבטל…' : 'ביטול הרישום'}
+            {cancelDlg.saving ? 'מבטל…' : (cancelDlg.noDebt ? 'הסרה מהגן ומהגבייה' : 'ביטול הרישום')}
           </Button>
         </DialogActions>
       </Dialog>
