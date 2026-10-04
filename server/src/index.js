@@ -602,6 +602,12 @@ connectDB().then(() => {
       setInterval(runPunchDigest, 60 * 60 * 1000);
     }
 
+    // סידור עבודה: Friday 12:00 reminder for an unpublished next-week rota.
+    const shiftReminder = require('./services/shiftReminderJob');
+    const runShiftReminder = () => withJobLock('shift-close-reminder', 20 * 60 * 1000, () => shiftReminder.tick())
+      .catch(err => console.error('[shift-reminder] failed:', err.message));
+    if (!platformMode) { setTimeout(runShiftReminder, 90 * 1000); setInterval(runShiftReminder, 60 * 60 * 1000); }
+
     // התראות פוש: כל 5 דקות, כל מה שממתין ועבר עליו שעה מהשליחה הקודמת
     // נשלח שוב. יצירת אירוע חדש שולחת מיד בעצמה (notification.service.js);
     // ה-job הזה הוא רק החזרה החוזרת עד שמישהו מטפל.
