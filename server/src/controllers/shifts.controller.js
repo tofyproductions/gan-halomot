@@ -3,6 +3,10 @@ const cs = require('../services/shifts/constraints.service');
 const { resolveSelfEmployee } = require('./payroll.controller');
 const { weekStart: sundayOf } = require('../services/parentVisibility');
 const { todayIsrael } = require('../services/fixedSchedule');
+const rates = require('../services/shifts/rateRequests.service');
+const cross = require('../services/shifts/crossBranch.service');
+const report = require('../services/shifts/attendanceReport.service');
+const { canView } = require('../services/shifts/access');
 
 /** Service errors carry their own status; everything else is a 500 via next(). */
 const handle = (fn) => async (req, res, next) => {
@@ -98,5 +102,24 @@ module.exports = {
     res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(f.name)}`);
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.send(f.buffer);
+  }),
+  // ── cross-branch ───────────────────────────────────────────────────
+  createRateRequest: handle(async (req, res) => {
+    res.json({ request: await rates.createRateRequest({ user: req.user, employeeId: String(req.body.employee_id || ''), hostBranchId: String(req.body.host_branch_id || ''), proposedRate: req.body.proposed_rate }) });
+  }),
+  rateRequests: handle(async (req, res) => { res.json({ requests: await rates.listRateRequests({ user: req.user }) }); }),
+  decideRateRequest: handle(async (req, res) => {
+    res.json({ request: await rates.decideRateRequest({ user: req.user, id: req.params.id, approve: req.body.approve === true, reason: req.body.reason, finalRate: req.body.final_rate }) });
+  }),
+  decideCross: handle(async (req, res) => {
+    res.json(await cross.decidePlacement({ user: req.user, weekId: req.params.id, entryId: req.params.entryId, approve: req.body.approve === true, reason: req.body.reason }));
+  }),
+  confirmArrangement: handle(async (req, res) => { res.json({ arrangement: await cross.confirmArrangement({ user: req.user, id: req.params.id }) }); }),
+  cancelArrangement: handle(async (req, res) => { res.json({ arrangement: await cross.cancelArrangement({ user: req.user, id: req.params.id }) }); }),
+  attendanceReport: handle(async (req, res) => {
+    const branchId = String(req.query.branch || ''); const date = String(req.query.date || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'תאריך לא תקין' });
+    if (!canView(req.user, branchId)) return res.status(403).json({ error: 'אין הרשאה לסניף הזה' });
+    res.json(await report.attendanceVsRota({ branchId, date }));
   }),
 };

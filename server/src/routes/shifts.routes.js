@@ -45,4 +45,12 @@ router.post('/constraints/:id/approve-broadcast', board, c.approveBroadcast);
 router.post('/constraints/:id/pick', board, c.pickVolunteer);
 router.get('/constraints/:id/files/:index', anyone, c.constraintFile);
 
+router.post('/rate-requests', board, c.createRateRequest);
+router.get('/rate-requests', board, c.rateRequests);
+router.post('/rate-requests/:id/decide', board, c.decideRateRequest);
+router.post('/weeks/:id/cross/:entryId/decide', board, c.decideCross);
+router.post('/arrangements/:id/confirm', board, c.confirmArrangement);
+router.post('/arrangements/:id/cancel', board, c.cancelArrangement);
+router.get('/report', board, c.attendanceReport);
+
 module.exports = router;
