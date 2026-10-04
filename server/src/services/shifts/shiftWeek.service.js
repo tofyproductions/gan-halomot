@@ -572,7 +572,10 @@ async function autoPlaceWeek({ user, weekId }) {
   assertEdit(user, week.branch_id);
   const added = await seedMissing({ branchId: week.branch_id, weekId });
   const placed = await placeByCards({ branchId: week.branch_id, weekId });
-  return { placed: placed + added, added };
+  // Nothing moved can mean "all set" or "cards are missing" — let the client say which.
+  const after = await ShiftWeek.findById(weekId).select('entries.area').lean();
+  const unplaced = (after.entries || []).filter(e => e.area === 'unassigned').length;
+  return { placed: placed + added, added, unplaced };
 }
 
 function sundayOfYmd(ymd) {

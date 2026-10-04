@@ -123,6 +123,12 @@ module.exports = {
   }),
   confirmArrangement: handle(async (req, res) => { res.json({ arrangement: await cross.confirmArrangement({ user: req.user, id: req.params.id }) }); }),
   cancelArrangement: handle(async (req, res) => { res.json({ arrangement: await cross.cancelArrangement({ user: req.user, id: req.params.id }) }); }),
+  actualHours: handle(async (req, res) => {
+    const branchId = String(req.query.branch || '');
+    if (!mongoose.isValidObjectId(branchId)) return res.status(404).json({ error: 'סניף לא נמצא' });
+    if (!canView(req.user, branchId)) return res.status(403).json({ error: 'אין הרשאה לסניף הזה' });
+    res.json({ actual: await report.actualWeek({ branchId, weekStart: weekParam(req.query.week) }) });
+  }),
   attendanceReport: handle(async (req, res) => {
     const branchId = String(req.query.branch || ''); const date = String(req.query.date || '');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'תאריך לא תקין' });

@@ -12,6 +12,7 @@ import ShiftGrid from './ShiftGrid';
 import EmployeeSidebar from './EmployeeSidebar';
 import EntryDialog from './EntryDialog';
 import PrimaryClassDialog from './PrimaryClassDialog';
+import OvertimeStrip from './OvertimeStrip';
 import ShiftSettingsDialog from './ShiftSettingsDialog';
 import EditRequestsPanel from './EditRequestsPanel';
 import ConstraintsPanel from './ConstraintsPanel';
@@ -74,6 +75,17 @@ export default function ShiftsScreen() {
     }
   }, [selectedBranch, isAllBranches, week, begin, isCurrent]);
   useEffect(() => { load(); }, [load]);
+
+  // What the clock recorded this week ({ employee_id: { date: { in, out } } }) — drawn on the chips.
+  const [actual, setActual] = useState({});
+  useEffect(() => {
+    if (!board?.branch_id) { setActual({}); return undefined; }
+    let on = true;
+    api.get('/shifts/actual', { params: { branch: board.branch_id, week } })
+      .then(res => { if (on) setActual(res.data.actual || {}); })
+      .catch(() => { if (on) setActual({}); });
+    return () => { on = false; };
+  }, [board, week]);
 
   const [draft, setDraft] = useState(null);          // working entries while editing
   const [dlg, setDlg] = useState({ open: false, entry: null, defaults: null });
@@ -212,7 +224,11 @@ export default function ShiftsScreen() {
   const autoPlace = async () => {
     try {
       const { data } = await api.post(`/shifts/weeks/${board.week._id}/auto-place`);
-      toast[data.placed ? 'success' : 'info'](data.placed ? `${data.placed} משמרות שובצו לפי הכרטיסים` : 'אין למי לשבץ — קבעו כיתות קבועות קודם');
+      toast[data.placed ? 'success' : 'info'](data.placed
+        ? `${data.placed} משמרות שובצו לפי הכרטיסים`
+        : data.unplaced
+          ? `${data.unplaced} משמרות עדיין ללא כיתה — קבעו להן כיתות קבועות`
+          : 'הכל כבר משובץ לפי הכרטיסים');
       load();
     } catch (err) { toast.error(err.response?.data?.error || 'הפעולה נכשלה'); }
   };
@@ -279,6 +295,7 @@ export default function ShiftsScreen() {
       {board?.can_edit && <EditRequestsPanel requests={board.edit_requests} onDecided={load} />}
       {board && <CrossBranchPanel board={board} onChanged={load} />}
       {board && <ConstraintsPanel constraints={board.constraints} canEdit={!!board.can_edit} onChanged={load} />}
+      {board && <OvertimeStrip employees={board.employees} entries={shown} dates={board.dates} />}
       {board && (
         <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 1.5, alignItems: { md: 'flex-start' }, minWidth: 0 }}>
           {editable && (
@@ -290,7 +307,7 @@ export default function ShiftsScreen() {
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <ShiftGrid
               dates={board.dates} rows={gridRows} closedDates={closed} warnings={board.warnings}
-              switched={switched} editable={editable} alerts={alerts}
+              switched={switched} editable={editable} alerts={alerts} actual={actual}
               onCellClick={(row, date) => setDlg({ open: true, entry: null, defaults: { date, area: row.area, classroom_id: row.classroom_id } })}
               onEntryClick={(entry) => setDlg({ open: true, entry, defaults: null })}
               onDropToCell={onDropToCell}

@@ -1,7 +1,18 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Box, Paper, Table, TableHead, TableBody, TableRow, TableCell, Typography, Tooltip, Chip } from '@mui/material';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import { HEB_DAYS, fmtDate } from './shiftRows';
+import { HEB_DAYS, fmtDate, employeeHue, toMin } from './shiftRows';
+
+/** Her chip's colors — one stable pastel per employee, readable in both themes. */
+const chipColors = (employeeId) => {
+  const hue = employeeHue(employeeId);
+  return {
+    bgcolor: (t) => (t.palette.mode === 'dark' ? `hsl(${hue} 32% 23%)` : `hsl(${hue} 68% 91%)`),
+    accent: `hsl(${hue} 55% 45%)`,
+  };
+};
+
+const todayYmd = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 
 const DND_TYPE = 'application/x-shift';
 // What is being dragged right now. Some browsers refuse getData() during
@@ -26,10 +37,24 @@ function readDrag(ev) {
  * scrolling sideways inside its own box — the page itself never widens (see
  * PageHeader for what a wide page does to sticky cells on iOS).
  */
-export default function ShiftGrid({ dates, rows, closedDates, warnings = [], switched, editable, onCellClick, onEntryClick, onDropToCell, highlightEmployeeId, alerts }) {
+export default function ShiftGrid({ dates, rows, closedDates, warnings = [], switched, editable, onCellClick, onEntryClick, onDropToCell, highlightEmployeeId, alerts, actual = {} }) {
   const warnOf = (row, date) => warnings.find(w => w.date === date && String(w.classroom_id) === String(row.classroom_id));
   const [over, setOver] = useState(null); // `${row.key}|${date}` under the dragged item
   const canDrop = !!(editable && onDropToCell);
+  const today = todayYmd();
+  // How many people are on the floor each day — the away row doesn't count.
+  const staffPerDay = useMemo(() => {
+    const m = Object.fromEntries(dates.map(d => [d, new Set()]));
+    for (const row of rows) {
+      if (row.area === 'away') continue;
+      for (const d of dates) for (const e of (row.cells[d] || [])) m[d].add(String(e.employee_id));
+    }
+    return Object.fromEntries(dates.map(d => [d, m[d].size]));
+  }, [rows, dates]);
+  const stickyCol = {
+    position: 'sticky', insetInlineStart: 0, zIndex: 1,
+    bgcolor: 'background.paper', borderInlineEnd: '1px solid', borderInlineEndColor: 'divider',
+  };
   return (
     <Box>
     {canDrop && (
@@ -41,19 +66,36 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
       <Table size="small" sx={{ minWidth: 760 }}>
         <TableHead>
           <TableRow>
-            <TableCell sx={{ width: 130, fontWeight: 700 }}>כיתה</TableCell>
-            {dates.map((d, i) => (
-              <TableCell key={d} align="center" sx={{ fontWeight: 700, bgcolor: closedDates.has(d) ? 'action.disabledBackground' : undefined }}>
-                {HEB_DAYS[i]} <Typography component="span" variant="caption" color="text.secondary">{fmtDate(d)}</Typography>
-                {closedDates.has(d) && <Typography variant="caption" display="block" color="text.secondary">הגן סגור</Typography>}
-              </TableCell>
-            ))}
+            <TableCell sx={{ width: 130, fontWeight: 700, ...stickyCol, zIndex: 2 }}>כיתה</TableCell>
+            {dates.map((d, i) => {
+              const isToday = d === today;
+              const closed = closedDates.has(d);
+              return (
+                <TableCell key={d} align="center" sx={{
+                  fontWeight: 700,
+                  bgcolor: closed ? 'action.disabledBackground' : (isToday ? 'primary.soft' : undefined),
+                  borderBlockEnd: '2px solid', borderBlockEndColor: isToday ? 'primary.main' : 'divider',
+                }}>
+                  {HEB_DAYS[i]} <Typography component="span" variant="caption" color="text.secondary">{fmtDate(d)}</Typography>
+                  {closed
+                    ? <Typography variant="caption" display="block" color="text.secondary">הגן סגור</Typography>
+                    : <Typography variant="caption" display="block" color="text.secondary">{staffPerDay[d] || 0} עובדות</Typography>}
+                </TableCell>
+              );
+            })}
           </TableRow>
         </TableHead>
         <TableBody>
           {rows.map(row => (
             <TableRow key={row.key}>
-              <TableCell sx={{ fontWeight: 700, verticalAlign: 'top' }}>{row.label}</TableCell>
+              <TableCell sx={{ fontWeight: 700, verticalAlign: 'top', ...stickyCol }}>
+                {row.label}
+                {row.enrolled != null && (
+                  <Typography variant="caption" display="block" color="text.secondary" fontWeight={400}>
+                    {row.enrolled} ילדים
+                  </Typography>
+                )}
+              </TableCell>
               {dates.map(d => {
                 const closed = closedDates.has(d);
                 const warn = row.area === 'class' && warnOf(row, d);
@@ -93,6 +135,7 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                       const isSwitch = switched.has(`${e.employee_id}|${e.date}`);
                       const mine = highlightEmployeeId && String(e.employee_id) === String(highlightEmployeeId);
                       const draggable = droppable && !!(e._id || e.tmp);
+                      const colors = chipColors(e.employee_id);
                       return (
                         <Box
                           key={e._id || `${e.employee_id}-${e.start_hhmm}`}
@@ -103,7 +146,12 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                           sx={{
                             cursor: draggable ? 'grab' : undefined,
                             mb: 0.5, px: 0.75, py: 0.25, borderRadius: 1,
-                            bgcolor: mine ? 'primary.soft' : (isSwitch ? 'info.soft' : 'background.sunken'),
+                            bgcolor: colors.bgcolor,
+                            borderInlineStart: '3px solid', borderInlineStartColor: colors.accent,
+                            // Her own shift / a mid-day room switch keep their markers as outlines.
+                            outline: mine ? '2px solid' : (isSwitch ? '1px dashed' : 'none'),
+                            outlineColor: mine ? 'primary.main' : 'info.main',
+                            outlineOffset: -1,
                             fontWeight: mine ? 700 : 500, fontSize: '0.8rem', lineHeight: 1.3,
                           }}
                         >
@@ -111,6 +159,23 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                           <Box component="span" dir="ltr" sx={{ display: 'block', fontSize: '0.7rem', color: 'text.secondary' }}>
                             {e.start_hhmm && e.end_hhmm ? `${e.start_hhmm}–${e.end_hhmm}` : 'חסרות שעות'}
                           </Box>
+                          {(() => {
+                            const act = actual[String(e.employee_id)]?.[e.date];
+                            if (!act || !act.in) return null;
+                            const worked = act.out != null ? (toMin(act.out) ?? 0) - (toMin(act.in) ?? 0) : null;
+                            const planned = (toMin(e.end_hhmm) ?? 0) - (toMin(e.start_hhmm) ?? 0);
+                            const overWorked = worked != null && planned > 0 && worked > planned + 15;
+                            return (
+                              <Tooltip title={act.out ? 'לפי שעון הנוכחות' : 'לפי שעון הנוכחות — אין עדיין החתמת יציאה'}>
+                                <Box component="span" dir="ltr" sx={{
+                                  display: 'block', fontSize: '0.7rem', fontWeight: 600,
+                                  color: overWorked ? 'warning.softOn' : 'text.secondary',
+                                }}>
+                                  ⏱ {act.in}–{act.out || '…'}
+                                </Box>
+                              </Tooltip>
+                            );
+                          })()}
                           {editable && e.new_class && <Chip size="small" label="כיתה חדשה לה" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />}
                           {editable && e.alternating && <Chip size="small" label="יום מתחלף" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />}
                           {e.cross_status === 'pending' && <Chip size="small" color="info" label="ממתין לאישור סניף הבית" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />}

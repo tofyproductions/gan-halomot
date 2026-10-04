@@ -53,5 +53,6 @@ router.post('/weeks/:id/cross/:entryId/decide', board, c.decideCross);
 router.post('/arrangements/:id/confirm', board, c.confirmArrangement);
 router.post('/arrangements/:id/cancel', board, c.cancelArrangement);
 router.get('/report', board, c.attendanceReport);
+router.get('/actual', board, c.actualHours);
 
 module.exports = router;

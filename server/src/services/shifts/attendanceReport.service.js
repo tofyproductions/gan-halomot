@@ -37,4 +37,46 @@ async function attendanceVsRota({ branchId, date }) {
   return out;
 }
 
-module.exports = { attendanceVsRota };
+/**
+ * The clock's answer per employee per day of the week — first punch in, last
+ * punch out — for the days that already happened. Generated fixed-schedule
+ * punches count too: they are what payroll counts for her. One punch with no
+ * exit yet comes back as { in, out: null }.
+ */
+async function actualWeek({ branchId, weekStart: ws }) {
+  const { weekDays } = require('./rules');
+  const dates = weekDays(ws);
+  const today = ISR_DAY(new Date());
+  const past = dates.filter(d => d <= today);
+  if (!past.length) return {};
+  const emps = await Employee.find({ branch_id: branchId, is_active: true }).select('israeli_id').lean();
+  if (!emps.length) return {};
+  const withTz = emps.filter(e => e.israeli_id);
+  const idOfTz = new Map(withTz.map(e => [e.israeli_id, String(e._id)]));
+  const { from } = ilDayBounds(past[0]);
+  const { to } = ilDayBounds(past[past.length - 1]);
+  const punches = await Punch.find({
+    $or: [
+      { employee_id: { $in: emps.map(e => e._id) } },
+      { employee_id: null, israeli_id: { $in: withTz.map(e => e.israeli_id) } },
+    ],
+    timestamp: { $gte: from, $lt: to },
+    ignored: { $ne: true },
+    approval_status: { $in: ['auto', 'approved'] },
+  }).sort({ timestamp: 1 }).select('employee_id israeli_id timestamp').lean();
+  const out = {};
+  for (const p of punches) {
+    const id = p.employee_id ? String(p.employee_id) : idOfTz.get(p.israeli_id);
+    if (!id) continue;
+    const d = ISR_DAY(p.timestamp);
+    if (!past.includes(d)) continue;
+    const mine = (out[id] = out[id] || {});
+    const day = (mine[d] = mine[d] || { in: null, out: null });
+    const t = hhmmIL(p.timestamp);
+    if (!day.in) day.in = t;
+    else day.out = t; // sorted ascending — the last one wins
+  }
+  return out;
+}
+
+module.exports = { attendanceVsRota, actualWeek };

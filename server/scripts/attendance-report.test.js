@@ -53,6 +53,24 @@ const eq = (a, b, l) => { const g = JSON.stringify(a) === JSON.stringify(b); con
   await ctl.attendanceReport({ query: { branch: 'bad', date: D }, user: { role: 'system_admin' } }, res, (err) => { res.code = 500; res.body = String(err); });
   eq([res.code, res.body && res.body.error], [404, 'סניף לא נמצא'], 'M4: מזהה סניף לא תקין — 404');
 
+  console.log('\nשעות בפועל על הסידור (actualWeek)');
+  {
+    const { actualWeek } = require('../src/services/shifts/attendanceReport.service');
+    // Last week relative to now, so every date passes the "already happened" filter.
+    const il = new Date(`${new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' })}T12:00:00Z`);
+    il.setUTCDate(il.getUTCDate() - il.getUTCDay() - 7);
+    const WS = il.toISOString().slice(0, 10);
+    const mon = new Date(`${WS}T12:00:00Z`); mon.setUTCDate(mon.getUTCDate() + 1);
+    const DM = mon.toISOString().slice(0, 10);
+    await punch(onTime, '', { timestamp: ilDateTime(DM, '07:12') });
+    await punch(onTime, '', { timestamp: ilDateTime(DM, '12:00') });
+    await punch(onTime, '', { timestamp: ilDateTime(DM, '16:58') });
+    await punch(late, '', { timestamp: ilDateTime(DM, '08:01') });
+    const act = await actualWeek({ branchId: String(b._id), weekStart: WS });
+    eq(act[String(onTime._id)][DM], { in: '07:12', out: '16:58' }, 'כניסה ראשונה ויציאה אחרונה — האמצעית לא מבלבלת');
+    eq(act[String(late._id)][DM], { in: '08:01', out: null }, 'החתמה בודדת — כניסה בלי יציאה');
+  }
+
   eq((await tick(new Date('2026-10-13T03:00:00Z'))).skipped, 'not 07:00 yet', '06:00 — עוד לא');
   const r1 = await tick(new Date('2026-10-13T04:30:00Z')); // Tue 07:30 IL → about Monday
   eq([r1.date, r1.branches], [D, 1], '07:30 — דוח על אתמול');
