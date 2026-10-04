@@ -96,6 +96,28 @@ const eq = (a, b, l) => { const g = JSON.stringify(a) === JSON.stringify(b); con
   const d14 = (await M.Employee.findById(fixed._id).lean()).fixed_schedule.exceptions.find(e => e.date === '2026-10-14');
   eq([d14.in, d14.out, String(d14.branch_id), d14.source], ['10:00', '12:00', String(host._id), 'rota'], 'פרסום סניף מארח מעדכן את החריג עם הסניף המארח');
 
+  // Foreign rota (home week not published): her other days are NOT turned off.
+  const hostEmp = await mkFixed('אורחת', '555000020');
+  await M.Punch.create([P(hostEmp, 920, '2026-11-02', '07:00')]);
+  const hostW2 = { branch_id: host._id, week_start: '2026-11-01', published: [E(hostEmp, '2026-11-03', '09:00', '12:00', String(host._id))] };
+  await applyRotaToFixedSchedules({ week: hostW2, closedDates: new Set(), today: '2026-11-20', previousPublished: [] });
+  let exA = (await M.Employee.findById(hostEmp._id).lean()).fixed_schedule.exceptions;
+  eq([exA.map(e => e.date), exA[0].off, await M.Punch.countDocuments({ employee_id: hostEmp._id })], [['2026-11-03'], false, 1], 'פרסום מארח בלבד: רק יום המארח נכתב; שאר הימים והחתמותיהם לא נגעו');
+  // Removal from the host week: the rota exception goes, no off written.
+  await applyRotaToFixedSchedules({ week: { ...hostW2, published: [] }, closedDates: new Set(), today: '2026-11-20', previousPublished: hostW2.published });
+  exA = (await M.Employee.findById(hostEmp._id).lean()).fixed_schedule.exceptions;
+  eq(exA.length, 0, 'הוסרה מסידור המארח: חריג הסידור נמחק, בלי יום חופש');
+  // Home week published with her in it + host publish: her other open days are off.
+  await M.ShiftWeek.create({ branch_id: home._id, week_start: '2026-11-01', published_at: new Date(), published: [{ ...E(hostEmp, '2026-11-02', '07:00', '15:00', home._id), employee_name: 'אורחת', area: 'floater' }] });
+  await applyRotaToFixedSchedules({ week: hostW2, closedDates: new Set(), today: '2026-11-20' });
+  const exC = Object.fromEntries((await M.Employee.findById(hostEmp._id).lean()).fixed_schedule.exceptions.map(e => [e.date, e]));
+  eq([exC['2026-11-04'].off, exC['2026-11-04'].source, exC['2026-11-03'].in, String(exC['2026-11-02'].branch_id)], [true, 'rota', '09:00', String(home._id)], 'בית פירסם איתה + פרסום מארח: שאר הימים חופש, יום מארח וביתי נכונים');
+  // Stale rota hours on a day closed at home with no entry now: removed.
+  const stale = await M.Employee.create({ full_name: 'ישנה', israeli_id: '555000021', branch_id: home._id, is_active: true, fixed_schedule: { enabled: true, days: [], exceptions: [{ date: '2026-11-04', in: '08:00', out: '12:00', source: 'rota', branch_id: host._id }] } });
+  await applyRotaToFixedSchedules({ week: { branch_id: home._id, week_start: '2026-11-01', published: [E(stale, '2026-11-02', '07:00', '15:00')] }, closedDates: new Set(['2026-11-04']), today: '2026-11-20' });
+  const exD = (await M.Employee.findById(stale._id).lean()).fixed_schedule.exceptions;
+  eq([exD.some(e => e.date === '2026-11-04'), exD.some(e => e.date === '2026-11-02')], [false, true], 'יום סגור בבית בלי שיבוץ: חריג סידור ישן הוסר');
+
   await mongoose.disconnect(); await mongod.stop();
   console.log(failures ? `\n${failures} FAILED` : '\nכל הבדיקות עברו');
   process.exit(failures ? 1 : 0);

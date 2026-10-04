@@ -60,17 +60,25 @@ async function applyRotaToFixedSchedules({ week, closedDates, today, previousPub
     try {
       const mine = all.filter(e => String(e.employee_id) === String(emp._id));
       const closed = await closuresOf(emp.branch_id);
-      const list = emp.fixed_schedule.exceptions || [];
+      // Her home branch speaks for her whole week only when it is the publisher
+      // or has itself published a week she is in; a foreign rota never turns her other days off.
+      const homeRow = weeks.find(w => String(w.branch_id) === String(emp.branch_id));
+      const managedByHome = String(emp.branch_id) === String(week.branch_id)
+        || !!(homeRow && homeRow.published_at && (homeRow.published || []).some(e => String(e.employee_id) === String(emp._id)));
+      let list = emp.fixed_schedule.exceptions || [];
       const touched = [];
       for (const date of dates) {
         const day = rotaDay(mine, date);
-        if (!day && closed.has(date)) continue;
         const existing = list.findIndex(x => x.date === date);
         if (existing >= 0 && list[existing].source !== 'rota') continue;
-        const ex = day
-          ? { date, off: false, in: day.in, out: day.out, branch_id: day.branch_id, note: 'סידור עבודה', source: 'rota' }
-          : { date, off: true, in: '', out: '', branch_id: null, note: 'סידור עבודה — לא משובצת', source: 'rota' };
-        if (existing >= 0) list[existing] = ex; else list.push(ex);
+        if (day || (managedByHome && !closed.has(date))) {
+          const ex = day
+            ? { date, off: false, in: day.in, out: day.out, branch_id: day.branch_id, note: 'סידור עבודה', source: 'rota' }
+            : { date, off: true, in: '', out: '', branch_id: null, note: 'סידור עבודה — לא משובצת', source: 'rota' };
+          if (existing >= 0) list[existing] = ex; else list.push(ex);
+        } else if (existing >= 0) {
+          list = list.filter((_, i) => i !== existing); // fixed hours / closure apply again
+        } else continue;
         exceptions += 1;
         touched.push(date);
       }
