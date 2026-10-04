@@ -155,6 +155,7 @@ export default function GanttEditor() {
     return !!g && savedSnapRef.current != null && ganttSnapshot(g) !== savedSnapRef.current;
   });
   const [holidays, setHolidays] = useState([]);
+  const [birthdays, setBirthdays] = useState([]);
   const [activities, setActivities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -211,6 +212,7 @@ export default function GanttEditor() {
         setGantt(res.data.gantt);
         savedSnapRef.current = ganttSnapshot(res.data.gantt);
         setHolidays(res.data.holidays || []);
+        setBirthdays(res.data.birthdays || []);
         setCanEdit(res.data.can_edit !== false);
         setLastSavedAt(res.data.gantt?.updated_at || null);
       })
@@ -233,6 +235,18 @@ export default function GanttEditor() {
   const holidayYmd = (v) => new Date(v).toISOString().slice(0, 10);
 
   /** The gan's own vacation calendar, on this date. */
+
+  // Children whose birthday falls on this date (any year). A 29.2 birthday is
+  // marked on 28.2 in a year without one.
+  const birthdaysOn = (date) => {
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    const y = date.getFullYear();
+    const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+    return birthdays
+      .filter(b => b.md === `${mm}-${dd}` || (!leap && b.md === '02-29' && mm === '02' && dd === '28'))
+      .map(b => ({ ...b, age: b.birth_year ? y - b.birth_year : null }));
+  };
 
   const isHoliday = (date) => {
     if (!date) return null;
@@ -946,6 +960,15 @@ export default function GanttEditor() {
                     return `${own[0].toLocaleDateString('he-IL')} - ${own[own.length - 1].toLocaleDateString('he-IL')}`;
                   })()}
                 </Typography>
+                {(() => {
+                  // A Friday birthday changes the קבלת שבת — say so where the week is planned.
+                  const fri = dateOfColumn(5);
+                  const kids = inMonth(fri) ? birthdaysOn(fri) : [];
+                  return kids.length ? (
+                    <Chip size="small" label={`🎂 יום הולדת ביום שישי: ${kids.map(k => k.name).join(', ')}`}
+                      sx={{ bgcolor: '#fde68a', color: '#78350f', fontWeight: 800 }} />
+                  ) : null;
+                })()}
                 <Box sx={{ flex: 1, textAlign: 'center' }}>
                   <TextField size="small" placeholder="נושא שבועי" value={week.topic || ''}
                     onChange={e => updateWeek(weekIdx, 'topic', e.target.value)}
@@ -986,6 +1009,11 @@ export default function GanttEditor() {
                                 {!shut && hol.end_time ? ` · עד ${hol.end_time}` : ''}
                               </Box>
                             )}
+                            {own && birthdaysOn(dd).map(b => (
+                              <Box key={b.child_id} sx={{ mt: 0.3, fontSize: '0.72rem', fontWeight: 800, bgcolor: '#fde68a', color: '#78350f', borderRadius: 1, px: 0.5 }}>
+                                🎂 {b.name}{b.age > 0 ? ` (${b.age})` : ''}
+                              </Box>
+                            ))}
                             {!own && <Box sx={{ fontSize: '0.68rem', opacity: 0.85 }}>{dd.toLocaleDateString('he-IL', { month: 'long' })}</Box>}
                           </TableCell>
                         );

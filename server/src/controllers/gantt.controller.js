@@ -160,8 +160,25 @@ async function get(req, res, next) {
       gantt,
       can_edit: await mayEdit(req.user, classroom),
       holidays: holidays.map(h => ({ ...h, id: h._id })),
+      birthdays: await classroomBirthdays(classroom),
     });
   } catch (error) { next(error); }
+}
+
+/**
+ * The room's birthdays, as month-day, so the gantt can mark the day without
+ * anyone remembering it — and flag a Friday one, which changes the קבלת שבת.
+ * Israel's calendar day: a birth date saved as local midnight is the previous
+ * evening in UTC.
+ */
+async function classroomBirthdays(classroom) {
+  if (!mongoose.isValidObjectId(classroom)) return [];
+  const kids = await Child.find({ classroom_id: classroom, is_active: true, birth_date: { $ne: null } })
+    .select('child_name birth_date').lean();
+  return kids.map((c) => {
+    const ymd = new Date(c.birth_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
+    return { child_id: String(c._id), name: c.child_name, md: ymd.slice(5), birth_year: Number(ymd.slice(0, 4)) };
+  });
 }
 
 async function save(req, res, next) {
