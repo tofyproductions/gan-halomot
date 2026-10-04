@@ -14,6 +14,7 @@ const storage = require('../storage.service');
 const { weekStart } = require('../parentVisibility');
 const { ShiftError, canView, assertEdit } = require('./access');
 const { weekDays } = require('./rules');
+const { otherBranchEntries } = require('./crossBranch.service');
 const { TYPES, FINAL, ACTIONABLE, addDays, ilNow, submissionWindow, isFarFuture, respected, blocksEntry } = require('./constraintRules');
 
 const MAX_FILES = 3;
@@ -334,8 +335,10 @@ async function listFuture({ user, branchId, now = new Date() }) {
   return list.map(c => ({ ...c, files: (c.files || []).map(f => ({ name: f.name, mimetype: f.mimetype, size: f.size })), volunteers: undefined, volunteer_count: (c.volunteers || []).length }));
 }
 
-async function acceptedFor({ branchId, dates }) {
-  return ShiftConstraint.find({ branch_id: branchId, status: 'accepted', date: { $in: dates } }).lean();
+/** Accepted constraints of these employees on these dates — whichever branch they were filed at. */
+async function acceptedFor({ employeeIds, dates }) {
+  if (!(employeeIds || []).length) return [];
+  return ShiftConstraint.find({ employee_id: { $in: employeeIds }, status: 'accepted', date: { $in: dates } }).lean();
 }
 
 /**
@@ -344,7 +347,11 @@ async function acceptedFor({ branchId, dates }) {
  */
 async function resolveForPublish({ user, week, entries }) {
   const live = await ShiftConstraint.find({ branch_id: week.branch_id, week_start: week.week_start, status: { $in: ['open', 'pending_broadcast', 'broadcast'] } });
-  const auto = live.filter(c => c.status === 'open' && respected(c, entries) === true);
+  // Respected means in every branch's week: a day off at home is not kept while she works at the host.
+  const people = [...new Set(live.flatMap(c => [c.employee_id, c.colleague_id].filter(Boolean).map(String)))];
+  const elsewhere = people.length ? await otherBranchEntries({ weekStart: week.week_start, employeeIds: people, excludeBranchId: week.branch_id }) : [];
+  const everywhere = [...entries, ...elsewhere];
+  const auto = live.filter(c => c.status === 'open' && respected(c, everywhere) === true);
   const blocking = live.filter(c => !auto.includes(c));
   if (blocking.length) {
     throw new ShiftError(409, `יש ${blocking.length} אילוצים שלא טופלו — יש לאשר או לדחות לפני סגירת הסידור`, { open_constraints: blocking.map(c => String(c._id)) });
@@ -352,7 +359,7 @@ async function resolveForPublish({ user, week, entries }) {
   // An accepted constraint is a promise already made: the published rota must
   // keep it. Checked before anything is auto-accepted, so a refused publish
   // changes nothing.
-  const accepted = await acceptedFor({ branchId: week.branch_id, dates: weekDays(week.week_start) });
+  const accepted = await acceptedFor({ employeeIds: [...new Set(entries.map(e => String(e.employee_id)))], dates: weekDays(week.week_start) });
   for (const e of entries) {
     if (accepted.some(c => blocksEntry(c, e))) {
       throw new ShiftError(409, `${e.employee_name || 'עובדת'} משובצת ב-${e.date} למרות אילוץ מאושר — יש להסיר את השיבוץ לפני הסגירה`);

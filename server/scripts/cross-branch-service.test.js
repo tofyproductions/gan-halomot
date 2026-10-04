@@ -26,6 +26,10 @@ async function throws(fn, status, message, label) {
   const mongod = await MongoMemoryServer.create();
   await mongoose.connect(mongod.getUri());
   const M = require('../src/models');
+  // F4: the clock sync is stubbed — record the call, then fail, to prove it never reaches the request.
+  const syncCalls = [];
+  const fpPath = require.resolve('../src/services/fingerprintSync');
+  require.cache[fpPath] = { id: fpPath, filename: fpPath, loaded: true, children: [], paths: [], exports: { syncEmployee: async (id, opts) => { syncCalls.push([String(id), opts && opts.createdBy]); throw new Error('no clock in tests'); } } };
   const rates = require('../src/services/shifts/rateRequests.service');
   const cross = require('../src/services/shifts/crossBranch.service');
 
@@ -57,6 +61,7 @@ async function throws(fn, status, message, label) {
   eq(done.status, 'approved', 'אושר');
   const d2 = await M.Employee.findById(dana._id).lean();
   eq(d2.branch_rates.map(r => [String(r.branch_id), r.hourly_rate]), [[String(host._id), 48]], 'התעריף נכתב לכרטיס העובדת');
+  eq(syncCalls, [[String(dana._id), acc.id]], 'F4: אחרי קביעת התעריף — סנכרון טביעת אצבע לשעונים (כשל לא מפיל את הבקשה)');
   eq(await M.NotificationEvent.countDocuments({ type: 'rate_request_decision', recipient_id: hostMgrU._id }), 1, 'המבקשת עודכנה');
   eq((await rates.listRateRequests({ user: acc })).length, 0, 'אחרי אישור — יורדת מהרשימה');
 
@@ -95,6 +100,37 @@ async function throws(fn, status, message, label) {
   await cross.decidePlacement({ user: homeMgr, weekId: String(w4._id), entryId: String(w4.entries[0]._id), approve: false, reason: 'צריכה אותה אצלי' });
   eq((await ShiftWeek.findById(w4._id)).entries.length, 0, 'השיבוץ הוסר מהסידור המארח');
   eq(await M.NotificationEvent.countDocuments({ type: 'cross_placement_decision', recipient_id: hostMgrU._id, ref_id: w4._id }), 1, 'המארחת עודכנה עם הסיבה');
+
+  console.log('\nסקירה סופית');
+  // M5: a placement / rate request / arrangement of an employee who no longer exists — 404 before any write.
+  const ghost = new mongoose.Types.ObjectId();
+  const ghostReq = await M.BranchRateRequest.create({ employee_id: ghost, home_branch_id: home._id, host_branch_id: host._id, proposed_rate: 40, requested_by: hostMgrU._id, status: 'pending_office' });
+  await throws(() => rates.decideRateRequest({ user: acc, id: String(ghostReq._id), approve: true, finalRate: 40 }), 404, 'עובדת לא נמצאה', 'M5: שלב המשרד — עובדת שנמחקה');
+  eq((await M.BranchRateRequest.findById(ghostReq._id)).status, 'pending_office', 'M5: הבקשה לא השתנתה');
+  const wGhost = await mkWeek('2026-11-29', [{ ...entry('2026-11-30'), employee_id: ghost, cross_status: 'pending' }], false);
+  await throws(() => cross.decidePlacement({ user: homeMgr, weekId: String(wGhost._id), entryId: String(wGhost.entries[0]._id), approve: true }), 404, 'עובדת לא נמצאה', 'M5: אישור שיבוץ — עובדת שנמחקה');
+  await mkWeek('2026-11-15', [{ ...entry('2026-11-16'), employee_id: ghost }]);
+  await mkWeek('2026-11-22', [{ ...entry('2026-11-23'), employee_id: ghost }]);
+  await throws(() => cross.maybeProposeArrangement({ week: wGhost.toObject(), entry: { ...entry('2026-11-30'), employee_id: ghost } }), 404, 'עובדת לא נמצאה', 'M5: הצעת סידור קבוע — עובדת שנמחקה');
+  eq(await M.CrossBranchArrangement.countDocuments({ employee_id: ghost }), 0, 'M5: לא נוצר סידור קבוע');
+
+  // M6: a slot cancelled in the last 28 days is not proposed again.
+  await mkWeek('2026-12-06', [entry('2026-12-07')]);
+  await mkWeek('2026-12-13', [entry('2026-12-14')]);
+  const w6 = await mkWeek('2026-12-20', [{ ...entry('2026-12-21'), cross_status: 'pending' }], false);
+  await cross.decidePlacement({ user: homeMgr, weekId: String(w6._id), entryId: String(w6.entries[0]._id), approve: true });
+  eq(await M.CrossBranchArrangement.countDocuments({ employee_id: dana._id, status: 'proposed' }), 0, 'M6: בוטל לאחרונה — לא מוצע שוב');
+  await M.CrossBranchArrangement.collection.updateOne({ _id: arr._id }, { $set: { updated_at: new Date(Date.now() - 40 * 864e5) } });
+  const again6 = await cross.maybeProposeArrangement({ week: (await ShiftWeek.findById(w6._id)).toObject(), entry: entry('2026-12-21') });
+  eq(again6 && again6.status, 'proposed', 'M6: ביטול ישן (מעל 28 יום) — מוצע שוב');
+  // M8: the approval did not touch the week's version.
+  const w6doc = await ShiftWeek.findById(w6._id).lean();
+  eq([w6doc.entries[0].cross_status, new Date(w6doc.updated_at).getTime()], ['approved', new Date(w6.updated_at).getTime()], 'M8: אישור שיבוץ לא משנה את גרסת הסידור');
+
+  // M7: both managers confirming at once still activates.
+  const arr7 = await M.CrossBranchArrangement.create({ employee_id: dana._id, employee_name: 'דנה', home_branch_id: home._id, host_branch_id: host._id, weekday: 3, start_hhmm: '08:00', end_hhmm: '10:00' });
+  await Promise.all([cross.confirmArrangement({ user: hostMgr, id: String(arr7._id) }), cross.confirmArrangement({ user: homeMgr, id: String(arr7._id) })]);
+  eq((await M.CrossBranchArrangement.findById(arr7._id)).status, 'active', 'M7: אישור בו־זמני של שתיהן — פעיל');
 
   console.log('\nשיבוצים בסניפים אחרים');
   const others = await cross.otherBranchEntries({ weekStart: '2026-10-11', employeeIds: [String(dana._id)], excludeBranchId: String(home._id) });

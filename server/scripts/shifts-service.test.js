@@ -283,6 +283,51 @@ async function throwsStatus(fn, status, label, message) {
   const boardX = await svc.getBoard({ user: manager, branchId: String(branch._id), weekStart: WK });
   eq(boardX.foreign_candidates.find(c => c._id === String(guest._id)).has_rate, true, 'הלוח מציע עובדות מסניפים אחרים');
 
+  console.log('\nסקירה סופית — סניפים אחרים');
+  const WF = '2026-11-15'; // Mon 16, Tue 17, Wed 18
+  const AFTER_F = new Date('2026-11-12T16:00:00Z');
+  await M.EmployeeCommitment.create({ employee_id: guest._id, branch_id: other._id, classroom: 'מחליפה', days: [1, 2, 3].map(day => ({ day, start_hhmm: '07:00', end_hhmm: '15:00' })) });
+  await M.ShiftConstraint.create({ employee_id: guest._id, employee_name: 'אורחת', branch_id: other._id, type: 'day_off', date: '2026-11-17', week_start: WF, details: 'x', status: 'accepted' });
+  const guestOpenOff = await M.ShiftConstraint.create({ employee_id: guest._id, employee_name: 'אורחת', branch_id: other._id, type: 'day_off', date: '2026-11-16', week_start: WF, details: 'x', status: 'open' });
+  const wkF = await svc.createWeek({ user: manager, branchId: String(branch._id), weekStart: WF });
+  const baseF = () => wkF.entries.map(e => e.toObject());
+  // F3: her accepted day off (filed at home) binds the host too.
+  await throwsStatus(() => svc.saveEntries({ user: manager, weekId: String(wkF._id), entries: [...baseF(), { employee_id: guest._id, date: '2026-11-17', area: 'floater', start_hhmm: '13:00', end_hhmm: '17:00' }] }), 400, 'F3: אילוץ מאושר בסניף הבית חוסם שיבוץ במארח', 'אורחת — יש לה אילוץ מאושר ב-2026-11-17');
+  // M2: a foreign employee whose home branch has no manager cannot be placed.
+  const lonely = await M.Branch.create({ name: 'סניף בלי מנהלת' });
+  const orphan = await M.Employee.create({ full_name: 'בודדה', israeli_id: '777000003', branch_id: lonely._id, is_active: true, branch_rates: [{ branch_id: branch._id, hourly_rate: 50 }] });
+  await throwsStatus(() => svc.saveEntries({ user: manager, weekId: String(wkF._id), entries: [...baseF(), { employee_id: orphan._id, date: '2026-11-18', area: 'floater', start_hhmm: '13:00', end_hhmm: '17:00' }] }), 409, 'M2: לסניף הבית אין מנהלת — השיבוץ נדחה', 'לסניף הבית של בודדה אין מנהלת שתאשר את השיבוץ');
+  const savedF = await svc.saveEntries({ user: manager, weekId: String(wkF._id), entries: [...baseF(), { employee_id: guest._id, date: '2026-11-16', area: 'floater', start_hhmm: '13:00', end_hhmm: '17:00' }] });
+  const gF = savedF.entries.find(e => String(e.employee_id) === String(guest._id));
+  // M3: only her home manager may decide.
+  const boardHome = await svc.getBoard({ user: otherMgr, branchId: String(other._id), weekStart: WF });
+  eq(boardHome.cross_pending.map(p => p.can_decide), [true], 'M3: מנהלת הבית יכולה להחליט');
+  const boardAdmin = await svc.getBoard({ user: admin, branchId: String(other._id), weekStart: WF });
+  eq(boardAdmin.cross_pending.map(p => p.can_decide), [false], 'M3: המשרד רואה ולא מחליט');
+  // F2: the home seed skips what overlaps her placement elsewhere.
+  eq(boardHome.preview.filter(e => String(e.employee_id) === String(guest._id)).map(e => e.date), ['2026-11-18'], 'F2: תצוגה מקדימה — בלי שני (חופף למארח) ובלי שלישי (אילוץ מאושר)');
+  const wkOF = await svc.createWeek({ user: otherMgr, branchId: String(other._id), weekStart: WF });
+  eq(wkOF.entries.filter(e => String(e.employee_id) === String(guest._id)).map(e => e.date), ['2026-11-18'], 'F2: פתיחת שבוע בבית — לא זורעת שיבוץ חופף לסניף אחר');
+  // F3: her open day off is not respected while she works at the host that day.
+  await throwsStatus(() => svc.publishWeek({ user: otherMgr, weekId: String(wkOF._id), now: AFTER_F }), 409, 'F3: פרסום הבית נחסם — האילוץ הפתוח לא מכובד (משובצת במארח)', 'יש 1 אילוצים שלא טופלו — יש לאשר או לדחות לפני סגירת הסידור');
+  eq((await M.ShiftConstraint.findById(guestOpenOff._id)).status, 'open', 'F3: האילוץ נשאר פתוח');
+  // M8: approving the placement does not invalidate a pending office edit request.
+  const officeReq = await svc.createEditRequest({ user: admin, weekId: String(wkF._id), entries: savedF.entries.map(e => e.toObject()) });
+  await C2.decidePlacement({ user: otherMgr, weekId: String(wkF._id), entryId: String(gF._id), approve: true });
+  eq((await M.ShiftWeek.findById(wkF._id)).entries.find(e => String(e._id) === String(gF._id)).cross_status, 'approved', 'M8: השיבוץ אושר');
+  const decidedReq = await svc.decideEditRequest({ user: manager, requestId: String(officeReq._id), approve: true });
+  eq(decidedReq.status, 'approved', 'M8: בקשת המשרד עדיין ניתנת לאישור אחרי אישור השיבוץ');
+  // F2: publish refuses a cross-branch overlap that got in some other way.
+  await M.ShiftWeek.updateOne({ _id: wkOF._id }, { $push: { entries: { employee_id: guest._id, employee_name: 'אורחת', date: '2026-11-16', area: 'floater', start_hhmm: '12:00', end_hhmm: '14:00' } } });
+  await throwsStatus(() => svc.publishWeek({ user: manager, weekId: String(wkF._id), now: AFTER_F }), 409, 'F2: פרסום נחסם כשיש חפיפה בין סניפים', 'אורחת משובצת באותן שעות בסניף הרצליה הרצוג ב-2026-11-16 — יש לתקן לפני הסגירה');
+  eq((await M.ShiftWeek.findById(wkF._id)).published_at, null, 'F2: ולא פורסם');
+  await M.ShiftWeek.updateOne({ _id: wkOF._id }, { $pull: { entries: { employee_id: guest._id, date: '2026-11-16' } } });
+  const pubF = await svc.publishWeek({ user: manager, weekId: String(wkF._id), now: AFTER_F });
+  eq(!!pubF.week.published_at, true, 'F2: אחרי התיקון — פורסם');
+  // F5: she sees her published shifts at the host.
+  const guestView = await svc.myShifts({ employee: await M.Employee.findById(guest._id).lean(), weekStart: WF });
+  eq([guestView.published, (guestView.away || []).map(e => [e.date, e.start_hhmm, e.branch_name])], [false, [['2026-11-16', '13:00', 'כפר סבא - קפלן']]], 'F5: העובדת רואה את המשמרת שלה בסניף המארח');
+
   await new Promise(r => setTimeout(r, 500)); // let in-flight notification pushes settle
   await mongoose.disconnect();
   await mongod.stop();

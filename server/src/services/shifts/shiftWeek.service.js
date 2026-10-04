@@ -67,13 +67,18 @@ async function seedFor(branchId, dates, closedDates) {
   });
 }
 
-/** The seed for a new week, minus what an accepted constraint already rules out. */
+/**
+ * The seed for a new week, minus what an accepted constraint already rules out
+ * and minus hours she is already placed at in another branch.
+ */
 async function seedRespectingConstraints(branchId, dates, closedDates) {
-  const [seeded, locked] = await Promise.all([
-    seedFor(branchId, dates, closedDates),
-    constraints.acceptedFor({ branchId, dates }),
+  const seeded = await seedFor(branchId, dates, closedDates);
+  const ids = [...new Set(seeded.map(e => String(e.employee_id)))];
+  const [locked, elsewhere] = await Promise.all([
+    constraints.acceptedFor({ employeeIds: ids, dates }),
+    cross.otherBranchEntries({ weekStart: dates[0], employeeIds: ids, excludeBranchId: branchId }),
   ]);
-  return seeded.filter(e => !locked.some(c => blocksEntry(c, e)));
+  return seeded.filter(e => !locked.some(c => blocksEntry(c, e)) && !crossOverlaps([e], elsewhere).length);
 }
 
 async function getBoard({ user, branchId, weekStart }) {
@@ -110,7 +115,7 @@ async function getBoard({ user, branchId, weekStart }) {
   const [foreignCandidates, away, crossPending, arrangements, allRateRequests] = await Promise.all([
     cross.foreignCandidates({ hostBranchId: branchId }),
     cross.otherBranchEntries({ weekStart, employeeIds: branchEmployeeIds, excludeBranchId: branchId }),
-    cross.homePending({ branchId }),
+    cross.homePending({ branchId, user }),
     cross.arrangementsFor({ user, branchId }),
     rateRequests.listRateRequests({ user }),
   ]);
@@ -213,12 +218,19 @@ async function prepareEntries(week, raw) {
   // A placement already flagged in the stored week stays flagged until it is moved.
   const flagged = new Set(week.entries.filter(e => e.new_class).map(e => `${e.employee_id}|${e.classroom_id}`));
   const additions = new Map();
+  const homeHasManager = new Map();
   for (const e of entries) {
     const emp = byId.get(String(e.employee_id));
     if (!emp) throw new ShiftError(400, 'עובדת לא נמצאה');
     const foreign = String(emp.branch_id) !== String(week.branch_id);
     if (foreign && !hasBranchRate(emp, week.branch_id)) {
       throw new ShiftError(400, `ל${emp.full_name} אין תעריף לסניף הזה — יש לשלוח בקשת תעריף`, { needs_rate: String(emp._id) });
+    }
+    if (foreign) {
+      // Her home manager approves the placement; with none, it would wait forever.
+      const key = String(emp.branch_id);
+      if (!homeHasManager.has(key)) homeHasManager.set(key, (await cross.managersOf(emp.branch_id)).length > 0);
+      if (!homeHasManager.get(key)) throw new ShiftError(409, `לסניף הבית של ${emp.full_name} אין מנהלת שתאשר את השיבוץ`);
     }
     e.cross_branch = foreign;
     e.cross_status = null;
@@ -258,7 +270,8 @@ async function prepareEntries(week, raw) {
     throw new ShiftError(400, `${c.employee_name} משובצת באותן שעות בסניף ${where ? where.branch_name : 'אחר'} ב-${c.date}`);
   }
   // An accepted constraint is final: the employee cannot be put back on it.
-  const locked = await constraints.acceptedFor({ branchId: week.branch_id, dates });
+  // Hers wherever it was filed — a day off accepted at home binds the host too.
+  const locked = await constraints.acceptedFor({ employeeIds: allIds, dates });
   for (const e of entries) {
     const hit = locked.find(c => blocksEntry(c, e));
     if (hit) throw new ShiftError(400, `${e.employee_name || 'עובדת'} — יש לה אילוץ מאושר ב-${e.date}`);
@@ -317,6 +330,15 @@ async function publishWeek({ user, weekId, now = new Date() }) {
   assertEdit(user, week.branch_id);
   if (submissionWindow([week.week_start], now).ok) {
     throw new ShiftError(409, 'אי אפשר לסגור את הסידור לפני שהגשת האילוצים נסגרת (יום חמישי ב-18:00)');
+  }
+  // Nobody published into two branches at once, however the overlap got in.
+  const weekEntries = week.entries.map(e => e.toObject());
+  const elsewhere = await cross.otherBranchEntries({ weekStart: week.week_start, employeeIds: [...new Set(weekEntries.map(e => String(e.employee_id)))], excludeBranchId: week.branch_id });
+  const clash = crossOverlaps(weekEntries, elsewhere);
+  if (clash.length) {
+    const c = clash[0];
+    const where = elsewhere.find(o => o.branch_id === c.other_branch_id);
+    throw new ShiftError(409, `${c.employee_name} משובצת באותן שעות בסניף ${where ? where.branch_name : 'אחר'} ב-${c.date} — יש לתקן לפני הסגירה`);
   }
   if (week.entries.some(e => e.cross_status === 'pending')) {
     throw new ShiftError(409, 'יש שיבוצים מסניף אחר שממתינים לאישור מנהלת סניף הבית');
@@ -459,12 +481,18 @@ async function myShifts({ employee, weekStart }) {
     Classroom.find({ branch_id: branchId }).select('name').lean(),
   ]);
   const published = !!(week && week.published_at);
+  // Her own shifts in other branches' published rotas — shown to her, read-only.
+  const awayWeeks = await ShiftWeek.find({ week_start: weekStart, branch_id: { $ne: branchId }, published_at: { $ne: null }, 'published.employee_id': employee._id }).lean();
+  const awayNames = new Map((await Branch.find({ _id: { $in: awayWeeks.map(w => w.branch_id) } }).select('name').lean()).map(b => [String(b._id), b.name]));
+  const away = awayWeeks.flatMap(w => (w.published || []).filter(e => String(e.employee_id) === String(employee._id))
+    .map(e => ({ ...e, branch_id: String(w.branch_id), branch_name: awayNames.get(String(w.branch_id)) || '' })));
   return {
     week_start: weekStart,
     dates: weekDays(weekStart),
     branch_name: branch ? branch.name : '',
     published,
     entries: published ? week.published : [],
+    away,
     classrooms: rooms.map(r => ({ _id: String(r._id), name: r.name })),
     me: String(employee._id),
   };

@@ -39,6 +39,20 @@ const eq = (a, b, l) => { const g = JSON.stringify(a) === JSON.stringify(b); con
   const rep = await attendanceVsRota({ branchId: String(b._id), date: D });
   eq(rep.rows.map(r => [r.employee_name, r.kind, r.minutes || null]), [['מאחרת', 'late', 45], ['נעדרת', 'absent', null]], 'איחור 45 ונעדרת (החתמה מבוטלת לא נספרת); קבועה מדולגת');
 
+  // M4: no ת"ז → an unlinked punch with an empty ת"ז is not hers; an inactive employee is skipped.
+  const D2 = '2026-10-13';
+  const noId = await M.Employee.create({ full_name: 'בלי תז', israeli_id: '', branch_id: b._id, is_active: true });
+  const gone = await mk('לא פעילה', { is_active: false });
+  await M.ShiftWeek.updateOne({ branch_id: b._id, week_start: '2026-10-11' }, { $push: { published: { $each: [{ ...E(noId, '07:00'), date: D2 }, { ...E(gone, '07:00'), date: D2 }] } } });
+  await M.Punch.collection.insertOne({ branch_id: b._id, employee_id: null, israeli_id: '', device_user_sn: 5000, timestamp: ilDateTime(D2, '07:05'), approval_status: 'auto' });
+  const rep2 = await attendanceVsRota({ branchId: String(b._id), date: D2 });
+  eq(rep2.rows.map(r => [r.employee_name, r.kind]), [['בלי תז', 'absent']], 'M4: בלי ת"ז — החתמה לא משויכת לא נספרת לה; לא פעילה מדולגת');
+  // M4: an invalid branch id is a 404, not a crash.
+  const ctl = require('../src/controllers/shifts.controller');
+  const res = { code: 200, body: null, status(c) { this.code = c; return this; }, json(b2) { this.body = b2; return this; } };
+  await ctl.attendanceReport({ query: { branch: 'bad', date: D }, user: { role: 'system_admin' } }, res, (err) => { res.code = 500; res.body = String(err); });
+  eq([res.code, res.body && res.body.error], [404, 'סניף לא נמצא'], 'M4: מזהה סניף לא תקין — 404');
+
   eq((await tick(new Date('2026-10-13T03:00:00Z'))).skipped, 'not 07:00 yet', '06:00 — עוד לא');
   const r1 = await tick(new Date('2026-10-13T04:30:00Z')); // Tue 07:30 IL → about Monday
   eq([r1.date, r1.branches], [D, 1], '07:30 — דוח על אתמול');

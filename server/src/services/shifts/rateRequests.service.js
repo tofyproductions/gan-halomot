@@ -75,6 +75,7 @@ async function decideRateRequest({ user, id, approve, reason, finalRate }) {
     });
     return r;
   }
+  if (!emp) throw new ShiftError(404, 'עובדת לא נמצאה');
   const rate = Number(finalRate ?? r.proposed_rate);
   if (!(rate > 0)) throw new ShiftError(400, 'יש להזין תעריף לשעה');
   const rows = emp.branch_rates || [];
@@ -82,6 +83,11 @@ async function decideRateRequest({ user, id, approve, reason, finalRate }) {
   if (row) row.hourly_rate = rate; else rows.push({ branch_id: r.host_branch_id, hourly_rate: rate });
   emp.branch_rates = rows;
   await emp.save();
+  // She may now punch at the host branch: bring her fingerprint to its clock. Never fails the request.
+  try {
+    require('../fingerprintSync').syncEmployee(emp._id, { createdBy: user.id })
+      .catch(err => console.error('[rate-requests] fingerprint sync failed:', err.message));
+  } catch (err) { console.error('[rate-requests] fingerprint sync failed:', err.message); }
   r.status = 'approved'; r.final_rate = rate; r.office_decided_by = user.id;
   await r.save();
   await notify([r.requested_by], {

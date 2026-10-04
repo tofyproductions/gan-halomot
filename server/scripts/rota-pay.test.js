@@ -118,6 +118,30 @@ const eq = (a, b, l) => { const g = JSON.stringify(a) === JSON.stringify(b); con
   const exD = (await M.Employee.findById(stale._id).lean()).fixed_schedule.exceptions;
   eq([exD.some(e => e.date === '2026-11-04'), exD.some(e => e.date === '2026-11-02')], [false, true], 'יום סגור בבית בלי שיבוץ: חריג סידור ישן הוסר');
 
+  // ── Final review ──
+  // F1: a day she is in the rota but without valid hours is not a day off.
+  const blank = await mkFixed('בלי שעות', '555000030');
+  const WS = '2026-12-06';
+  const dayRange = (d) => { const b = fixedSchedule.ilDayBounds(d); return { $gte: b.from, $lt: b.to }; };
+  await M.Punch.create([P(blank, 930, '2026-12-08', '07:00')]);
+  const blankWeek = { branch_id: home._id, week_start: WS, published: [E(blank, '2026-12-07', '07:00', '15:00'), { employee_id: blank._id, date: '2026-12-08', start_hhmm: '', end_hhmm: '' }] };
+  await applyRotaToFixedSchedules({ week: blankWeek, closedDates: new Set(), today: '2026-12-31' });
+  let exF = Object.fromEntries((await M.Employee.findById(blank._id).lean()).fixed_schedule.exceptions.map(e => [e.date, e]));
+  eq([exF['2026-12-08'], await M.Punch.countDocuments({ employee_id: blank._id, timestamp: dayRange('2026-12-08') })], [undefined, 1], 'F1: שיבוץ בלי שעות — אין חריג סידור, ההחתמה שנוצרה נשארה');
+  eq([exF['2026-12-09'] && exF['2026-12-09'].off, exF['2026-12-09'] && exF['2026-12-09'].source], [true, 'rota'], 'F1: יום פתוח בלי שום שיבוץ — חופש');
+  // An earlier rota exception on that day goes when the hours are blanked; the day regenerates.
+  const withHours = { ...blankWeek, published: [blankWeek.published[0], E(blank, '2026-12-08', '08:00', '12:00')] };
+  await applyRotaToFixedSchedules({ week: withHours, closedDates: new Set(), today: '2026-12-31' });
+  await M.Punch.create([P(blank, 931, '2026-12-08', '08:00')]);
+  await applyRotaToFixedSchedules({ week: blankWeek, closedDates: new Set(), today: '2026-12-31' });
+  exF = Object.fromEntries((await M.Employee.findById(blank._id).lean()).fixed_schedule.exceptions.map(e => [e.date, e]));
+  eq([exF['2026-12-08'], await M.Punch.countDocuments({ employee_id: blank._id, device_user_sn: 931 })], [undefined, 0], 'F1: שעות נמחקו מהשיבוץ — חריג הסידור הוסר והיום ייווצר מחדש מהשעות הקבועות');
+
+  // M1: republishing the same rota changes nothing — no exception rewrite, no punch regeneration.
+  await M.Punch.create([P(blank, 932, '2026-12-07', '07:00')]);
+  const same = await applyRotaToFixedSchedules({ week: blankWeek, closedDates: new Set(), today: '2026-12-31' });
+  eq([same.exceptions, await M.Punch.countDocuments({ employee_id: blank._id, device_user_sn: 932 })], [0, 1], 'M1: פרסום זהה — בלי חריגים חדשים, ההחתמה שנוצרה נשארה');
+
   await mongoose.disconnect(); await mongod.stop();
   console.log(failures ? `\n${failures} FAILED` : '\nכל הבדיקות עברו');
   process.exit(failures ? 1 : 0);

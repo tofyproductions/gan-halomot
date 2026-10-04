@@ -30,6 +30,12 @@ async function homeClosures(branchId, dates, weekRow) {
   return set;
 }
 
+const norm = (v) => (v == null ? '' : String(v));
+function sameException(a, b) {
+  return norm(a.date) === norm(b.date) && !!a.off === !!b.off && norm(a.in) === norm(b.in) && norm(a.out) === norm(b.out)
+    && norm(a.branch_id) === norm(b.branch_id) && norm(a.source) === norm(b.source);
+}
+
 async function applyRotaToFixedSchedules({ week, closedDates, today, previousPublished = [] }) {
   const dates = weekDays(week.week_start);
   const ids = new Map();
@@ -69,12 +75,15 @@ async function applyRotaToFixedSchedules({ week, closedDates, today, previousPub
       const touched = [];
       for (const date of dates) {
         const day = rotaDay(mine, date);
+        // In the rota that day, but no entry with valid hours: not a day off — her fixed hours apply.
+        const placedBlank = !day && mine.some(e => e.date === date);
         const existing = list.findIndex(x => x.date === date);
         if (existing >= 0 && list[existing].source !== 'rota') continue;
-        if (day || (managedByHome && !closed.has(date))) {
+        if (day || (!placedBlank && managedByHome && !closed.has(date))) {
           const ex = day
             ? { date, off: false, in: day.in, out: day.out, branch_id: day.branch_id, note: 'סידור עבודה', source: 'rota' }
             : { date, off: true, in: '', out: '', branch_id: null, note: 'סידור עבודה — לא משובצת', source: 'rota' };
+          if (existing >= 0 && sameException(list[existing], ex)) continue; // nothing changed — leave the day alone
           if (existing >= 0) list[existing] = ex; else list.push(ex);
         } else if (existing >= 0) {
           list = list.filter((_, i) => i !== existing); // fixed hours / closure apply again

@@ -16,13 +16,16 @@ async function attendanceVsRota({ branchId, date }) {
   if (!week) return out;
   const placed = (week.published || []).filter(e => e.date === date && e.start_hhmm);
   const ids = [...new Set(placed.map(e => String(e.employee_id)))];
-  const emps = await Employee.find({ _id: { $in: ids } }).select('full_name israeli_id fixed_schedule').lean();
+  const emps = await Employee.find({ _id: { $in: ids }, is_active: { $ne: false } }).select('full_name israeli_id fixed_schedule').lean();
   const { from, to } = ilDayBounds(date);
   for (const emp of emps) {
     if (emp.fixed_schedule && emp.fixed_schedule.enabled) continue;
     const start = placed.filter(e => String(e.employee_id) === String(emp._id)).map(e => e.start_hhmm).sort()[0];
+    // Unlinked clock punches are hers only by her ת"ז — without one, only her linked punches count.
+    const who = [{ employee_id: emp._id }];
+    if (emp.israeli_id) who.push({ employee_id: null, israeli_id: emp.israeli_id });
     const punches = await Punch.find({
-      $or: [{ employee_id: emp._id }, { employee_id: null, israeli_id: emp.israeli_id }],
+      $or: who,
       timestamp: { $gte: from, $lt: to }, ignored: { $ne: true },
       approval_status: { $in: ['auto', 'approved'] }, timestamp_source: { $ne: 'fixed_schedule' },
     }).sort({ timestamp: 1 }).limit(1).lean();

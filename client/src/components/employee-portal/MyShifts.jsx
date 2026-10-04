@@ -3,7 +3,7 @@ import { Box, Stack, Typography, Alert, ToggleButtonGroup, ToggleButton, LinearP
 import MyConstraints from './MyConstraints';
 import api from '../../api/client';
 import ShiftGrid from '../shifts/ShiftGrid';
-import { buildRows, switchedSet, fmtDate } from '../shifts/shiftRows';
+import { buildRows, buildAwayRow, switchedSet, fmtDate } from '../shifts/shiftRows';
 
 function sunday(offsetWeeks) {
   const d = new Date();
@@ -28,7 +28,11 @@ export default function MyShifts() {
     const used = new Set(data.entries.filter(e => e.area === 'class').map(e => String(e.classroom_id)));
     return (data.classrooms || []).filter(c => used.has(c._id));
   }, [data]);
-  const rows = useMemo(() => (data?.entries ? buildRows({ entries: data.entries, classrooms }) : []), [data, classrooms]);
+  const rows = useMemo(() => {
+    const base = data?.entries ? buildRows({ entries: data.entries, classrooms }) : [];
+    // Her own shifts in other branches — read-only, as in her home rota.
+    return data?.away?.length ? [...base, buildAwayRow(data.away)] : base;
+  }, [data, classrooms]);
   const switched = useMemo(() => switchedSet(data?.entries || []), [data]);
 
   return (

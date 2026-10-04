@@ -28,11 +28,15 @@ export default function CrossBranchPanel({ board, onChanged }) {
       {pending.map(p => (
         <Alert key={p._id} severity="info" icon={false}>
           <Typography fontWeight={700}>{p.employee_name} שובצה ב{p.branch_name} — {fmtDate(p.date)} <span dir="ltr">{p.start_hhmm}–{p.end_hhmm}</span></Typography>
-          <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
-            <Button size="small" variant="contained" disabled={!!busy[p._id]} onClick={() => post(p._id, `/shifts/weeks/${p.week_id}/cross/${p._id}/decide`, { approve: true }, 'השיבוץ אושר')}>אישור</Button>
-            <TextField size="small" placeholder="סיבת דחייה" value={reason[p._id] || ''} onChange={e => setReason(s => ({ ...s, [p._id]: e.target.value }))} />
-            <Button size="small" color="error" disabled={!!busy[p._id] || !reason[p._id]?.trim()} onClick={() => post(p._id, `/shifts/weeks/${p.week_id}/cross/${p._id}/decide`, { approve: false, reason: reason[p._id] }, 'השיבוץ נדחה')}>דחייה</Button>
-          </Stack>
+          {p.can_decide ? (
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
+              <Button size="small" variant="contained" disabled={!!busy[p._id]} onClick={() => post(p._id, `/shifts/weeks/${p.week_id}/cross/${p._id}/decide`, { approve: true }, 'השיבוץ אושר')}>אישור</Button>
+              <TextField size="small" placeholder="סיבת דחייה" value={reason[p._id] || ''} onChange={e => setReason(s => ({ ...s, [p._id]: e.target.value }))} />
+              <Button size="small" color="error" disabled={!!busy[p._id] || !reason[p._id]?.trim()} onClick={() => post(p._id, `/shifts/weeks/${p.week_id}/cross/${p._id}/decide`, { approve: false, reason: reason[p._id] }, 'השיבוץ נדחה')}>דחייה</Button>
+            </Stack>
+          ) : (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>ממתין לאישור מנהלת סניף הבית</Typography>
+          )}
         </Alert>
       ))}
       {arrangements.map(a => (

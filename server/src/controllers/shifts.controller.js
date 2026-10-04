@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const svc = require('../services/shifts/shiftWeek.service');
 const cs = require('../services/shifts/constraints.service');
 const { resolveSelfEmployee } = require('./payroll.controller');
@@ -119,6 +120,7 @@ module.exports = {
   attendanceReport: handle(async (req, res) => {
     const branchId = String(req.query.branch || ''); const date = String(req.query.date || '');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'תאריך לא תקין' });
+    if (!mongoose.isValidObjectId(branchId)) return res.status(404).json({ error: 'סניף לא נמצא' });
     if (!canView(req.user, branchId)) return res.status(403).json({ error: 'אין הרשאה לסניף הזה' });
     res.json(await report.attendanceVsRota({ branchId, date }));
   }),

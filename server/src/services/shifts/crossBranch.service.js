@@ -43,13 +43,15 @@ async function otherBranchEntries({ weekStart, employeeIds, excludeBranchId }) {
   })));
 }
 
-async function homePending({ branchId }) {
+async function homePending({ branchId, user }) {
   const mine = (await Employee.find({ branch_id: branchId }).select('_id').lean()).map(e => e._id);
   const weeks = await ShiftWeek.find({ branch_id: { $ne: branchId }, entries: { $elemMatch: { employee_id: { $in: mine }, cross_status: 'pending' } } }).lean();
   const names = await branchNames(weeks.map(w => w.branch_id));
   const set = new Set(mine.map(String));
   return weeks.flatMap(w => w.entries.filter(e => set.has(String(e.employee_id)) && e.cross_status === 'pending').map(e => ({
     ...e, _id: String(e._id), week_id: String(w._id), branch_id: String(w.branch_id), branch_name: names.get(String(w.branch_id)) || '',
+    // Every one of these is an employee of branchId — her home manager decides.
+    can_decide: canEdit(user, branchId),
   })));
 }
 
@@ -58,6 +60,12 @@ async function maybeProposeArrangement({ week, entry }) {
   const weekday = weekdayOf(entry.date);
   const exists = await CrossBranchArrangement.exists({ employee_id: entry.employee_id, host_branch_id: week.branch_id, weekday, start_hhmm: entry.start_hhmm, end_hhmm: entry.end_hhmm, status: { $in: ['proposed', 'active'] } });
   if (exists) return null;
+  // A slot one of them cancelled lately is not asked about again so soon.
+  const recentlyCancelled = await CrossBranchArrangement.exists({
+    employee_id: entry.employee_id, host_branch_id: week.branch_id, weekday, start_hhmm: entry.start_hhmm, end_hhmm: entry.end_hhmm,
+    status: 'cancelled', updated_at: { $gte: new Date(Date.now() - 28 * 24 * 60 * 60 * 1000) },
+  });
+  if (recentlyCancelled) return null;
   for (const back of [7, 14]) {
     const date = addDays(entry.date, -back);
     const prev = await ShiftWeek.findOne({ branch_id: week.branch_id, week_start: addDays(week.week_start, -back) }).lean();
@@ -66,8 +74,9 @@ async function maybeProposeArrangement({ week, entry }) {
     if (!hit) return null;
   }
   const emp = await Employee.findById(entry.employee_id).select('full_name branch_id').lean();
+  if (!emp) throw new ShiftError(404, 'עובדת לא נמצאה');
   const arr = await CrossBranchArrangement.create({
-    employee_id: entry.employee_id, employee_name: emp ? emp.full_name : '', home_branch_id: emp.branch_id, host_branch_id: week.branch_id,
+    employee_id: entry.employee_id, employee_name: emp.full_name, home_branch_id: emp.branch_id, host_branch_id: week.branch_id,
     weekday, start_hhmm: entry.start_hhmm, end_hhmm: entry.end_hhmm,
   });
   const ids = [...await managersOf(week.branch_id), ...await managersOf(emp.branch_id)];
@@ -85,21 +94,25 @@ async function decidePlacement({ user, weekId, entryId, approve, reason }) {
   const entry = week.entries.id(entryId);
   if (!entry || !entry.cross_branch) throw new ShiftError(404, 'שיבוץ לא נמצא');
   const emp = await Employee.findById(entry.employee_id).select('full_name branch_id').lean();
-  if (!emp || !canEdit(user, emp.branch_id)) throw new ShiftError(403, 'רק מנהלת סניף הבית של העובדת מאשרת');
+  if (!emp) throw new ShiftError(404, 'עובדת לא נמצאה');
+  if (!canEdit(user, emp.branch_id)) throw new ShiftError(403, 'רק מנהלת סניף הבית של העובדת מאשרת');
   if (entry.cross_status !== 'pending') throw new ShiftError(409, 'השיבוץ כבר טופל');
   if (!approve) {
     const why = String(reason || '').trim();
     if (!why) throw new ShiftError(400, 'יש לכתוב סיבה לדחייה');
-    entry.deleteOne();
-    await week.save();
+    // Without touching the week's version, so a pending office edit request stays valid.
+    await ShiftWeek.updateOne({ _id: week._id }, { $pull: { entries: { _id: entry._id } } }, { timestamps: false });
     await notify(await managersOf(week.branch_id), {
       type: 'cross_placement_decision', ref_collection: 'ShiftWeek', ref_id: week._id,
       title: `השיבוץ של ${emp.full_name} ב-${entry.date} לא אושר`, body: why, url: `/shifts?week=${week.week_start}`,
     });
     return { approved: false };
   }
-  entry.cross_status = 'approved';
-  await week.save();
+  const r = await ShiftWeek.updateOne(
+    { _id: week._id, entries: { $elemMatch: { _id: entry._id, cross_status: 'pending' } } },
+    { $set: { 'entries.$.cross_status': 'approved' } }, { timestamps: false },
+  );
+  if (!r.matchedCount) throw new ShiftError(409, 'השיבוץ כבר טופל');
   await notify(await managersOf(week.branch_id), {
     type: 'cross_placement_decision', ref_collection: 'ShiftWeek', ref_id: week._id,
     title: `השיבוץ של ${emp.full_name} ב-${entry.date} אושר`, body: 'אפשר להמשיך לסגירת הסידור', url: `/shifts?week=${week.week_start}`,
@@ -120,11 +133,13 @@ async function confirmArrangement({ user, id }) {
   if (a.status !== 'proposed') throw new ShiftError(409, 'הסידור כבר לא ממתין לאישור');
   const isHost = canEdit(user, a.host_branch_id); const isHome = canEdit(user, a.home_branch_id);
   if (!isHost && !isHome) throw new ShiftError(403, 'רק אחת משתי המנהלות מאשרת');
-  if (isHost) a.host_confirmed = true;
-  if (isHome) a.home_confirmed = true;
-  if (a.host_confirmed && a.home_confirmed) a.status = 'active';
-  await a.save();
-  return a;
+  // Atomic: two managers confirming at the same moment both count, and the second flag activates it.
+  const set = {};
+  if (isHost) set.host_confirmed = true;
+  if (isHome) set.home_confirmed = true;
+  await CrossBranchArrangement.updateOne({ _id: a._id, status: 'proposed' }, { $set: set });
+  await CrossBranchArrangement.updateOne({ _id: a._id, status: 'proposed', host_confirmed: true, home_confirmed: true }, { $set: { status: 'active' } });
+  return CrossBranchArrangement.findById(a._id);
 }
 
 async function cancelArrangement({ user, id }) {
