@@ -2,10 +2,11 @@
  * A new week, before the manager touches it: each employee where her
  * commitment says she works, for the hours it says.
  *
- * The commitment's `classroom` is free text (תינוקייה / מטבח / מחליפה …). It
- * decides the row only for kitchen and floater staff; a class row comes from
- * the employee card's primary class, and with none she waits in "ללא כיתה"
- * for the manager to place her.
+ * Area assignment precedence: (1) employee's active primary classroom (if set
+ * and active); (2) the commitment's free-text `classroom` interpreted for
+ * kitchen/floater (תינוקייה / מטבח / מחליפה …) only if no primary class is
+ * active; (3) "unassigned" if neither applies, waiting for the manager to
+ * place her.
  */
 function areaFromCommitmentText(text) {
   const t = String(text || '');
