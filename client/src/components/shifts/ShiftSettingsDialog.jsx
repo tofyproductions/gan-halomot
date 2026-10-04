@@ -11,8 +11,8 @@ export default function ShiftSettingsDialog({ open, onClose, board, onChanged })
   if (!board) return null;
   const branchId = board.branch_id;
 
-  const call = async (fn, ok) => {
-    try { await fn(); toast.success(ok); onChanged(); } catch (err) { toast.error(err.response?.data?.error || 'הפעולה נכשלה'); }
+  const call = async (fn, ok, after) => {
+    try { await fn(); toast.success(ok); if (after) after(); onChanged(); } catch (err) { toast.error(err.response?.data?.error || 'הפעולה נכשלה'); }
   };
 
   return (
@@ -35,14 +35,14 @@ export default function ShiftSettingsDialog({ open, onClose, board, onChanged })
           <TextField select size="small" fullWidth label="כיתה" value={closeId} onChange={e => setCloseId(e.target.value)}>
             {board.classrooms.map(c => <MenuItem key={c._id} value={c._id}>{c.name} ({c.enrolled} ילדים)</MenuItem>)}
           </TextField>
-          <Button color="warning" disabled={!closeId} onClick={() => call(() => api.post(`/shifts/classrooms/${closeId}/close`), 'הכיתה נסגרה')}>סגירה</Button>
+          <Button color="warning" disabled={!closeId} onClick={() => call(() => api.post(`/shifts/classrooms/${closeId}/close`), 'הכיתה נסגרה', () => setCloseId(''))}>סגירה</Button>
         </Stack>
         <Typography fontWeight={700} sx={{ mt: 2, mb: 1 }}>פתיחת כיתה מחדש</Typography>
         <Stack direction="row" spacing={1}>
           <TextField select size="small" fullWidth label="כיתה סגורה" value={reopenId} onChange={e => setReopenId(e.target.value)}>
             {board.inactive_classrooms.map(c => <MenuItem key={c._id} value={c._id}>{c.name} · {c.academic_year}</MenuItem>)}
           </TextField>
-          <Button disabled={!reopenId} onClick={() => call(() => api.post(`/shifts/classrooms/${reopenId}/reopen`), 'הכיתה נפתחה')}>פתיחה</Button>
+          <Button disabled={!reopenId} onClick={() => call(() => api.post(`/shifts/classrooms/${reopenId}/reopen`), 'הכיתה נפתחה', () => setReopenId(''))}>פתיחה</Button>
         </Stack>
       </DialogContent>
       <DialogActions><Button onClick={onClose}>סגירה</Button></DialogActions>

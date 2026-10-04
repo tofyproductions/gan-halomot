@@ -12,7 +12,11 @@ import ShiftGrid from './ShiftGrid';
 import EntryDialog from './EntryDialog';
 import PrimaryClassDialog from './PrimaryClassDialog';
 import ShiftSettingsDialog from './ShiftSettingsDialog';
+import EditRequestsPanel from './EditRequestsPanel';
+import { exportPdf, exportPng } from './shiftExport';
 import { buildRows, switchedSet, fmtDate } from './shiftRows';
+
+const NO_DEFAULTS = {};
 
 /** The Sunday of the week containing `date` (local), as YYYY-MM-DD. */
 function sundayOf(date = new Date()) {
@@ -70,6 +74,8 @@ export default function ShiftsScreen() {
   const rows = useMemo(() => (board ? buildRows({ entries: shown, classrooms: board.classrooms }) : []), [board, shown]);
   const switched = useMemo(() => switchedSet(shown), [shown]);
   const closed = useMemo(() => new Set(board?.closed_dates || []), [board]);
+
+  const exportArgs = board && { branchName: board.branch_name, dates: board.dates, rows, switched, closedDates: closed };
 
   const openWeek = async () => {
     try {
@@ -138,6 +144,10 @@ export default function ShiftsScreen() {
           : board.can_edit ? { label: board.week.published_at ? 'סגירת סידור (פרסום שינויים)' : 'סגירת סידור ופרסום', onClick: publish, disabled: !board.has_unpublished_changes }
           : board.can_request ? { label: 'שליחת בקשת שינוי למנהלת', onClick: sendRequest, disabled: !dirty } : undefined}
         actions={board?.can_edit ? [{ label: 'הגדרות', onClick: () => setSettingsOpen(true) }] : []}
+        menu={board ? [
+          { label: board.has_unpublished_changes ? 'ייצוא PDF (כולל שינויים שלא פורסמו)' : 'ייצוא PDF להדפסה', onClick: () => exportPdf(exportArgs) },
+          { label: 'ייצוא תמונה (PNG)', onClick: () => exportPng(exportArgs) },
+        ] : []}
       >
         <Stack direction="row" alignItems="center" spacing={1}>
           <IconButton onClick={() => setWeek(addDays(week, -7))} aria-label="שבוע קודם"><ChevronRightIcon /></IconButton>
@@ -167,6 +177,7 @@ export default function ShiftsScreen() {
           })}
         </Stack>
       )}
+      {board?.can_edit && <EditRequestsPanel requests={board.edit_requests} onDecided={load} />}
       {board && (
         <ShiftGrid
           dates={board.dates} rows={rows} closedDates={closed} warnings={board.warnings}
@@ -177,12 +188,12 @@ export default function ShiftsScreen() {
       )}
 
       <EntryDialog open={dlg.open} onClose={closeDlg}
-        entry={dlg.entry} defaults={dlg.defaults || {}} employees={board?.employees || []} rows={rows}
+        entry={dlg.entry} defaults={dlg.defaults || NO_DEFAULTS} employees={board?.employees || []} rows={rows}
         onSave={saveEntry} onDelete={deleteEntry} />
       {board && <PrimaryClassDialog open={primaryOpen}
         onClose={() => { primaryDismissed.current.add(selectedBranch); setPrimaryOpen(false); }}
         pending={board.pending_primary} classrooms={board.classrooms}
-        onDone={() => { setPrimaryOpen(false); load(); }} />}
+        onDone={() => { primaryDismissed.current.add(selectedBranch); setPrimaryOpen(false); load(); }} />}
       <ShiftSettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} board={board} onChanged={load} />
     </Box>
   );
