@@ -152,8 +152,10 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
             if (!slots.length) slots.push(null);
             // A class group ends with a daily-count summary line and a strong divider.
             const hasSummary = row.area === 'class';
-            // A soft stable tint per class, so each group reads as its own band.
-            const hue = row.area === 'class' ? employeeHue(row.classroom_id) : null;
+            // A soft stable tint per class — fixed hue per age category (a hashed
+            // hue made תינוקייה ובוגרים land on the same color), hash as fallback.
+            const CATEGORY_HUE = { 'תינוקייה': 340, 'צעירים': 145, 'בוגרים': 215 };
+            const hue = row.area === 'class' ? (CATEGORY_HUE[row.category] ?? employeeHue(row.classroom_id)) : null;
             const tint = hue == null ? null : {
               cell: (t) => (t.palette.mode === 'dark' ? `hsl(${hue} 22% 13%)` : `hsl(${hue} 55% 97%)`),
               strong: (t) => (t.palette.mode === 'dark' ? `hsl(${hue} 22% 17%)` : `hsl(${hue} 50% 93%)`),
