@@ -44,3 +44,13 @@ export function switchedSet(entries) {
   }
   return new Set([...rowsByKey].filter(([, s]) => s.size > 1).map(([k]) => k));
 }
+
+/** Her people placed in other branches this week — shown for information, never exported or clickable. */
+export function buildAwayRow(away) {
+  const cells = {};
+  for (const e of away || []) {
+    (cells[e.date] = cells[e.date] || []).push({ ...e, employee_name: `${e.employee_name} (${e.branch_name})` });
+  }
+  for (const d of Object.keys(cells)) cells[d].sort((a, b) => String(a.start_hhmm).localeCompare(String(b.start_hhmm)));
+  return { key: 'away', label: 'בסניפים אחרים', area: 'away', classroom_id: null, cells };
+}

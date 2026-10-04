@@ -31,15 +31,16 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
               {dates.map(d => {
                 const closed = closedDates.has(d);
                 const warn = row.area === 'class' && warnOf(row, d);
+                const clickable = editable && !closed && row.area !== 'away';
                 return (
                   <TableCell
                     key={d}
-                    onClick={editable && !closed ? () => onCellClick(row, d) : undefined}
+                    onClick={clickable ? () => onCellClick(row, d) : undefined}
                     sx={{
                       verticalAlign: 'top', minWidth: 110, p: 0.75,
-                      cursor: editable && !closed ? 'pointer' : 'default',
+                      cursor: clickable ? 'pointer' : 'default',
                       bgcolor: closed ? 'action.disabledBackground' : (warn ? 'warning.soft' : undefined),
-                      '&:hover': editable && !closed ? { bgcolor: 'action.hover' } : {},
+                      '&:hover': clickable ? { bgcolor: 'action.hover' } : {},
                     }}
                   >
                     {(row.cells[d] || []).map(e => {
@@ -48,7 +49,7 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                       return (
                         <Box
                           key={e._id || `${e.employee_id}-${e.start_hhmm}`}
-                          onClick={editable ? (ev) => { ev.stopPropagation(); onEntryClick(e); } : undefined}
+                          onClick={editable && row.area !== 'away' ? (ev) => { ev.stopPropagation(); onEntryClick(e); } : undefined}
                           sx={{
                             mb: 0.5, px: 0.75, py: 0.25, borderRadius: 1,
                             bgcolor: mine ? 'primary.soft' : (isSwitch ? 'info.soft' : 'background.sunken'),
@@ -61,6 +62,7 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                           </Box>
                           {editable && e.new_class && <Chip size="small" label="כיתה חדשה לה" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />}
                           {editable && e.alternating && <Chip size="small" label="יום מתחלף" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />}
+                          {e.cross_status === 'pending' && <Chip size="small" color="info" label="ממתין לאישור סניף הבית" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />}
                           {alerts && alerts.get(`${e.employee_id}|${e.date}`) && (
                             <Tooltip title={alerts.get(`${e.employee_id}|${e.date}`).join(' · ')}>
                               <Chip size="small" color="warning" label="⚠ אילוץ" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, MenuItem, Stack, Autocomplete } from '@mui/material';
 
 /** Add or edit one person's block of hours in one row on one day. */
-export default function EntryDialog({ open, onClose, onSave, onDelete, entry, defaults, employees, rows }) {
+export default function EntryDialog({ open, onClose, onSave, onDelete, entry, defaults, employees, rows, onRequestRate }) {
   const [form, setForm] = useState(null);
   useEffect(() => {
     if (!open) return;
@@ -29,6 +29,9 @@ export default function EntryDialog({ open, onClose, onSave, onDelete, entry, de
             onChange={(_, v) => setForm(f => ({ ...f, employee_id: v ? v._id : '', employee_name: v ? v.full_name : '' }))}
             renderInput={p => <TextField {...p} label="עובדת" />}
           />
+          {onRequestRate && !entry && (
+            <Button size="small" variant="text" onClick={onRequestRate} sx={{ alignSelf: 'flex-start' }}>עובדת מסניף אחר בלי תעריף? בקשת תעריף</Button>
+          )}
           <TextField
             select label="כיתה / שורה" value={rowValue}
             onChange={e => {

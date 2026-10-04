@@ -15,9 +15,12 @@ import ShiftSettingsDialog from './ShiftSettingsDialog';
 import EditRequestsPanel from './EditRequestsPanel';
 import ConstraintsPanel from './ConstraintsPanel';
 import FutureConstraintsDialog from './FutureConstraintsDialog';
+import CrossBranchPanel from './CrossBranchPanel';
+import RateRequestDialog from './RateRequestDialog';
+import AttendanceReportDialog from './AttendanceReportDialog';
 import { describe } from './constraintLabels';
 import { exportPdf, exportPng } from './shiftExport';
-import { buildRows, switchedSet, fmtDate } from './shiftRows';
+import { buildRows, buildAwayRow, switchedSet, fmtDate } from './shiftRows';
 
 const NO_DEFAULTS = {};
 
@@ -30,6 +33,13 @@ function sundayOf(date = new Date()) {
 function addDays(ymd, n) {
   const [y, m, d] = ymd.split('-').map(Number);
   return sundayOf(new Date(y, m - 1, d + n));
+}
+
+/** Local yesterday as YYYY-MM-DD. */
+function yesterdayYmd() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 export default function ShiftsScreen() {
@@ -65,6 +75,12 @@ export default function ShiftsScreen() {
   const [primaryOpen, setPrimaryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [futureOpen, setFutureOpen] = useState(false);
+  const [rateOpen, setRateOpen] = useState(false);
+  const [rateEmployeeId, setRateEmployeeId] = useState(null);
+  const [reportDate, setReportDate] = useState(() => {
+    const r = new URLSearchParams(window.location.search).get('report');
+    return r && /^\d{4}-\d{2}-\d{2}$/.test(r) ? r : null;
+  });
   const primaryDismissed = useRef(new Set());         // branches where she chose "later"
   useEffect(() => { setDraft(board?.week ? board.week.entries : null); }, [board]);
   useEffect(() => {
@@ -76,6 +92,7 @@ export default function ShiftsScreen() {
   const shown = draft || entries;
   const dirty = !!(draft && board?.week && draft !== board.week.entries);
   const rows = useMemo(() => (board ? buildRows({ entries: shown, classrooms: board.classrooms }) : []), [board, shown]);
+  const gridRows = useMemo(() => [...rows, ...(board?.away?.length ? [buildAwayRow(board.away)] : [])], [rows, board]);
   const switched = useMemo(() => switchedSet(shown), [shown]);
   const alerts = useMemo(() => {
     const m = new Map();
@@ -108,7 +125,10 @@ export default function ShiftsScreen() {
         const { data } = await api.put(`/shifts/weeks/${board.week._id}/entries`, { entries: clean(next) });
         setDraft(data.week.entries);
         load();
-      } catch (err) { toast.error(err.response?.data?.error || 'שמירה נכשלה'); }
+      } catch (err) {
+        toast.error(err.response?.data?.error || 'שמירה נכשלה');
+        if (err.response?.data?.needs_rate) { setRateEmployeeId(String(err.response.data.needs_rate)); setRateOpen(true); }
+      }
     } else {
       setDraft(next); // office: edits stay local until sent as a request
     }
@@ -159,6 +179,7 @@ export default function ShiftsScreen() {
         actions={[
           ...(board?.can_edit ? [{ label: 'הגדרות', onClick: () => setSettingsOpen(true) }] : []),
           { label: 'אילוצים עתידיים', onClick: () => setFutureOpen(true) },
+          { label: 'דוח נוכחות אתמול', onClick: () => setReportDate(yesterdayYmd()) },
         ]}
         menu={board ? [
           { label: board.has_unpublished_changes ? 'ייצוא PDF (כולל שינויים שלא פורסמו)' : 'ייצוא PDF להדפסה', onClick: () => exportPdf(exportArgs) },
@@ -194,10 +215,11 @@ export default function ShiftsScreen() {
         </Stack>
       )}
       {board?.can_edit && <EditRequestsPanel requests={board.edit_requests} onDecided={load} />}
+      {board && <CrossBranchPanel board={board} onChanged={load} />}
       {board && <ConstraintsPanel constraints={board.constraints} canEdit={!!board.can_edit} onChanged={load} />}
       {board && (
         <ShiftGrid
-          dates={board.dates} rows={rows} closedDates={closed} warnings={board.warnings}
+          dates={board.dates} rows={gridRows} closedDates={closed} warnings={board.warnings}
           switched={switched} editable={editable} alerts={alerts}
           onCellClick={(row, date) => setDlg({ open: true, entry: null, defaults: { date, area: row.area, classroom_id: row.classroom_id } })}
           onEntryClick={(entry) => setDlg({ open: true, entry, defaults: null })}
@@ -206,7 +228,12 @@ export default function ShiftsScreen() {
 
       <EntryDialog open={dlg.open} onClose={closeDlg}
         entry={dlg.entry} defaults={dlg.defaults || NO_DEFAULTS} employees={board?.employees || []} rows={rows}
-        onSave={saveEntry} onDelete={deleteEntry} />
+        onSave={saveEntry} onDelete={deleteEntry}
+        onRequestRate={board?.can_edit || board?.can_request ? () => { closeDlg(); setRateEmployeeId(null); setRateOpen(true); } : undefined} />
+      <RateRequestDialog open={rateOpen} onClose={() => setRateOpen(false)} candidates={board?.foreign_candidates}
+        hostBranchId={board?.branch_id} initialEmployeeId={rateEmployeeId}
+        onSent={() => { setRateOpen(false); load(); }} />
+      <AttendanceReportDialog open={!!reportDate} onClose={() => setReportDate(null)} branchId={board?.branch_id} date={reportDate} />
       {board && <PrimaryClassDialog open={primaryOpen}
         onClose={() => { primaryDismissed.current.add(selectedBranch); setPrimaryOpen(false); }}
         pending={board.pending_primary} classrooms={board.classrooms}
