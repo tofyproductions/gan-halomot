@@ -526,7 +526,7 @@ export default function GanttEditor() {
   const printOpts = () => ({
     weeks: gantt?.weeks || [],
     rows: gantt?.row_definitions || [],
-    holidays, month, year,
+    holidays, birthdays, month, year,
     classroomName,
     status: gantt?.status,
   });

@@ -133,6 +133,7 @@ export default function GanttMultiPrintDialog({ open, onClose, y1, yearRange }) 
         weeks: res.data.gantt?.weeks || [],
         rows: res.data.gantt?.row_definitions || [],
         holidays: res.data.holidays || [],
+        birthdays: res.data.birthdays || [],
         month,
         year: yr,
         classroomName: r.name,

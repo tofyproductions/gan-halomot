@@ -71,9 +71,17 @@ const dm = (d) => `${d.getDate()}.${d.getMonth() + 1}`;
  * page. The type scale lives on the section for the same reason.
  */
 export function ganttSheetHtml({
-  weeks = [], rows = [], holidays = [], month, year,
+  weeks = [], rows = [], holidays = [], birthdays = [], month, year,
   classroomName = '', branchName = '', status = 'draft',
 }) {
+  // Children whose birthday is this date (month-day; 29.2 shows on 28.2 in a
+  // year without one) — printed in the date strip like a holiday.
+  const birthdaysOn = (d) => {
+    const md = ymd(d).slice(5);
+    const y = d.getFullYear();
+    const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+    return birthdays.filter(b => b.md === md || (!leap && b.md === '02-29' && md === '02-28'));
+  };
   const isHoliday = (d) => holidays.find(h => (
     ymd(d) >= holidayYmd(h.start_date) && ymd(d) <= holidayYmd(h.end_date)
   ));
@@ -179,7 +187,9 @@ export function ganttSheetHtml({
       const note = hol
         ? `<span class="hn">${esc(hol.emoji || '')} ${esc(hol.name)}${!shut && hol.end_time ? ` · עד ${esc(hol.end_time)}` : ''}</span>`
         : '';
-      return `<td class="${cls}"><b>${dm(d)}</b>${note}</td>`;
+      const bdays = isOwn ? birthdaysOn(d) : [];
+      const bd = bdays.length ? `<span class="bd">🎂 ${bdays.map(b => esc(b.name)).join(', ')}</span>` : '';
+      return `<td class="${cls}"><b>${dm(d)}</b>${note}${bd}</td>`;
     }).join('');
 
     const body = printed.map((row, printedIdx) => {
@@ -334,6 +344,7 @@ export function ganttPrintCss({ image = false } = {}) {
   /* The date strip. */
   tr.strip td.ds { background: #DCE6F0 !important; text-align: center; padding: 0.4mm 1mm;
                    font-size: calc(var(--small) * var(--k) * 1.15); line-height: 1.2; color: #1B3556; font-weight: 800; }
+  tr.strip td.ds .bd { display: block; font-size: calc(var(--small) * var(--k)); font-weight: 800; color: #78350f; background: #fde68a !important; border-radius: 3px; margin-top: 1px; }
   tr.strip td.ds .hn { display: block; font-size: calc(var(--small) * var(--k)); color: ${G.note.on}; }
   tr.strip td.ds.short { background: ${G.cell.holiday} !important; color: ${G.note.on}; }
   tr.strip td.ds.shut { background: ${G.day.closed.bg} !important; color: ${G.day.closed.on}; }
