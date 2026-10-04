@@ -14,29 +14,27 @@ const ACTIONABLE = new Set(['open', 'pending_broadcast', 'broadcast']);
 const DEADLINE_HOUR = 18;
 
 function addDays(ymd, n) {
-  const d = new Date(ymd + 'T00:00:00Z');
+  const d = new Date(`${ymd}T12:00:00.000Z`);
   d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().split('T')[0];
+  return d.toISOString().slice(0, 10);
 }
 
 function ilNow(now) {
-  const copy = new Date(now);
-  copy.setUTCHours(copy.getUTCHours() + 3); // UTC+3 (Israel EDT)
-  const day = copy.toISOString().split('T')[0];
-  const hour = copy.getUTCHours();
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(now);
+  const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Jerusalem', hour: 'numeric', hourCycle: 'h23' }).format(now));
   return { day, hour };
 }
 
+const isYmd = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+
 function submissionWindow(dates, now) {
+  if (!dates.length || !dates.every(isYmd)) return { ok: false, error: 'תאריך לא תקין' };
+  const earliest = [...dates].sort()[0];
   const { day, hour } = ilNow(now);
   const current = weekStart(day);
   const next = addDays(current, 7);
-
-  if (!dates || dates.length === 0) return { ok: true };
-
-  const earliest = dates[0];
   const target = weekStart(earliest);
-
+  if (target <= current) return { ok: false, error: 'אי אפשר להגיש אילוץ לשבוע הנוכחי או לתאריך שעבר' };
   if (target === next) {
     const thursday = addDays(current, 4);
     if (day > thursday || (day === thursday && hour >= DEADLINE_HOUR)) {
@@ -49,7 +47,7 @@ function submissionWindow(dates, now) {
 /** A week after next or later — deciding it now is deciding early, and final. */
 function isFarFuture(date, now) {
   const current = weekStart(ilNow(now).day);
-  return weekStart(date) > addDays(current, 14);
+  return weekStart(date) > addDays(current, 7);
 }
 
 const mins = (hhmm) => {
@@ -73,8 +71,9 @@ function respected(c, entries) {
       return on(entries, me, c.date).length === 0 && on(entries, me, c.target_date).length > 0;
     case 'swap': {
       if (!c.colleague_id) return false;
-      const col = String(c.colleague_id);
-      return on(entries, me, c.date).length === 0 && on(entries, col, c.date).length > 0 && on(entries, col, c.target_date).length === 0 && on(entries, me, c.target_date).length > 0;
+      const handover = on(entries, me, c.date).length === 0 && on(entries, c.colleague_id, c.date).length > 0;
+      if (c.swap_mode !== 'mutual') return handover;
+      return handover && on(entries, me, c.target_date).length > 0 && on(entries, c.colleague_id, c.target_date).length === 0;
     }
     default:
       return null;

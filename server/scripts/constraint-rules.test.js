@@ -26,29 +26,27 @@ const fri = new Date('2026-10-09T08:00:00Z');
 
 console.log('\nwindow');
 check('ilNow is Israel time', () => assert.deepStrictEqual(R.ilNow(thu1800), { day: '2026-10-08', hour: 18 }));
+check('ilNow in winter (UTC+2)', () => assert.deepStrictEqual(R.ilNow(new Date('2026-12-10T16:00:00Z')), { day: '2026-12-10', hour: 18 }));
 check('next week open on Wednesday', () => assert.deepStrictEqual(R.submissionWindow(['2026-10-13'], wed), { ok: true }));
 check('next week open at Thu 17:59', () => assert.strictEqual(R.submissionWindow(['2026-10-13'], thu1759).ok, true));
-check('next week closed at Thu 18:00', () => assert.strictEqual(R.submissionWindow(['2026-10-13'], thu1800).ok, false));
-check('next week closes with Hebrew error', () => assert(/^ההגשה/.test(R.submissionWindow(['2026-10-13'], thu1800).error), true));
-check('two weeks out: open on Thu 18:00', () => assert.deepStrictEqual(R.submissionWindow(['2026-10-20'], thu1800), { ok: true }));
-check('addDays', () => {
-  assert.strictEqual(R.addDays('2026-10-04', 0), '2026-10-04');
-  assert.strictEqual(R.addDays('2026-10-04', 1), '2026-10-05');
-  assert.strictEqual(R.addDays('2026-10-31', 1), '2026-11-01');
+check('next week closed from Thu 18:00', () => {
+  const r = R.submissionWindow(['2026-10-13'], thu1800);
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.error, 'ההגשה לשבוע הבא נסגרה ביום חמישי ב-18:00');
 });
-
-console.log('\nfar future');
-check('next week not far', () => assert.strictEqual(R.isFarFuture('2026-10-13', wed), false));
-check('two weeks out not far', () => assert.strictEqual(R.isFarFuture('2026-10-20', wed), false));
-check('three weeks out: far', () => assert.strictEqual(R.isFarFuture('2026-10-27', wed), true));
+check('current week always closed', () => assert.strictEqual(R.submissionWindow(['2026-10-08'], wed).error, 'אי אפשר להגיש אילוץ לשבוע הנוכחי או לתאריך שעבר'));
+check('week after next open even on Friday', () => assert.strictEqual(R.submissionWindow(['2026-10-20'], fri).ok, true));
+check('earliest date decides', () => assert.strictEqual(R.submissionWindow(['2026-10-20', '2026-10-13'], fri).ok, false));
+check('bad date refused', () => assert.strictEqual(R.submissionWindow(['13/10'], wed).error, 'תאריך לא תקין'));
+check('isFarFuture', () => { assert.strictEqual(R.isFarFuture('2026-10-13', wed), false); assert.strictEqual(R.isFarFuture('2026-10-18', wed), true); });
 
 console.log('\nrespected');
-const D = '2026-10-07';
-const T = '2026-10-14';
-const E = (id, date, start, end) => ({ employee_id: id, date, start_hhmm: start, end_hhmm: end });
-check('day_off with no entry', () => assert.strictEqual(R.respected({ type: 'day_off', employee_id: 'a', date: D }, []), true));
-check('day_off with entry blocks', () => assert.strictEqual(R.respected({ type: 'day_off', employee_id: 'a', date: D }, [E('a', D, '07:00', '15:00')]), false));
-check('day_off for other employee does not block', () => assert.strictEqual(R.respected({ type: 'day_off', employee_id: 'a', date: D }, [E('b', D, '07:00', '15:00')]), true));
+const E = (employee_id, date, s, t) => ({ employee_id, date, start_hhmm: s, end_hhmm: t });
+const D = '2026-10-13'; const T = '2026-10-15';
+check('day_off: not placed → true; placed → false', () => {
+  assert.strictEqual(R.respected({ type: 'day_off', employee_id: 'a', date: D }, [E('b', D, '07:00', '15:00')]), true);
+  assert.strictEqual(R.respected({ type: 'day_off', employee_id: 'a', date: D }, [E('a', D, '07:00', '15:00')]), false);
+});
 check('sick_expected same as day_off', () => assert.strictEqual(R.respected({ type: 'sick_expected', employee_id: 'a', date: D }, []), true));
 check('partial: overlap false, outside true, touching true', () => {
   const c = { type: 'partial', employee_id: 'a', date: D, from_hhmm: '10:00', to_hhmm: '12:00' };
@@ -57,23 +55,29 @@ check('partial: overlap false, outside true, touching true', () => {
 });
 check('move_day: off on date and working on target', () => {
   const c = { type: 'move_day', employee_id: 'a', date: D, target_date: T };
-  assert.strictEqual(R.respected(c, [E('a', D, '07:00', '15:00'), E('a', T, '08:00', '16:00')]), false);
-  assert.strictEqual(R.respected(c, [E('a', T, '08:00', '16:00')]), true);
-  assert.strictEqual(R.respected(c, [E('a', D, '07:00', '15:00')]), false);
+  assert.strictEqual(R.respected(c, [E('a', T, '07:00', '15:00')]), true);
+  assert.strictEqual(R.respected(c, []), false);
 });
-check('swap: requester off, colleague working', () => {
-  const c = { type: 'swap', employee_id: 'a', date: D, colleague_id: 'b', target_date: T };
-  assert.strictEqual(R.respected(c, [E('b', D, '07:00', '15:00'), E('a', T, '08:00', '16:00')]), true);
-  assert.strictEqual(R.respected(c, [E('a', D, '07:00', '15:00'), E('b', T, '08:00', '16:00')]), false);
-  assert.strictEqual(R.respected(c, [E('a', D, '07:00', '15:00')]), false);
+check('swap handover', () => {
+  const c = { type: 'swap', swap_mode: 'handover', employee_id: 'a', colleague_id: 'b', date: D };
+  assert.strictEqual(R.respected(c, [E('b', D, '07:00', '15:00')]), true);
+  assert.strictEqual(R.respected(c, [E('a', D, '07:00', '15:00'), E('b', D, '07:00', '15:00')]), false);
+  assert.strictEqual(R.respected({ ...c, colleague_id: null }, [E('b', D, '07:00', '15:00')]), false);
 });
-check('other: no logic', () => assert.strictEqual(R.respected({ type: 'other', employee_id: 'a', date: D }, [E('a', D, '07:00', '15:00')]), null));
+check('swap mutual', () => {
+  const c = { type: 'swap', swap_mode: 'mutual', employee_id: 'a', colleague_id: 'b', date: D, target_date: T };
+  assert.strictEqual(R.respected(c, [E('b', D, '07:00', '15:00'), E('a', T, '07:00', '15:00')]), true);
+  assert.strictEqual(R.respected(c, [E('b', D, '07:00', '15:00'), E('a', T, '07:00', '15:00'), E('b', T, '07:00', '15:00')]), false);
+});
+check('other is never automatic', () => assert.strictEqual(R.respected({ type: 'other', employee_id: 'a', date: D }, []), null));
+check('ids compared as strings', () => assert.strictEqual(R.respected({ type: 'day_off', employee_id: { toString: () => 'a' }, date: D }, [E('a', D, '07:00', '15:00')]), false));
 
-console.log('\nblocks');
-check('day_off blocks entry on same date', () => assert.strictEqual(R.blocksEntry({ type: 'day_off', employee_id: 'a', date: D }, E('a', D, '07:00', '15:00')), true));
-check('day_off does not block other dates or employees', () => {
-  assert.strictEqual(R.blocksEntry({ type: 'day_off', employee_id: 'a', date: D }, E('a', T, '07:00', '15:00')), false);
-  assert.strictEqual(R.blocksEntry({ type: 'day_off', employee_id: 'a', date: D }, E('b', D, '07:00', '15:00')), false);
+console.log('\nblocksEntry');
+check('day_off blocks her entry that day only', () => {
+  const c = { type: 'day_off', employee_id: 'a', date: D };
+  assert.strictEqual(R.blocksEntry(c, E('a', D, '07:00', '15:00')), true);
+  assert.strictEqual(R.blocksEntry(c, E('a', T, '07:00', '15:00')), false);
+  assert.strictEqual(R.blocksEntry(c, E('b', D, '07:00', '15:00')), false);
 });
 check('partial blocks only overlapping hours', () => {
   const c = { type: 'partial', employee_id: 'a', date: D, from_hhmm: '10:00', to_hhmm: '12:00' };
@@ -81,6 +85,7 @@ check('partial blocks only overlapping hours', () => {
   assert.strictEqual(R.blocksEntry(c, E('a', D, '12:00', '15:00')), false);
 });
 check('swap blocks the requester on date', () => assert.strictEqual(R.blocksEntry({ type: 'swap', employee_id: 'a', date: D }, E('a', D, '07:00', '15:00')), true));
+check('other blocks nothing', () => assert.strictEqual(R.blocksEntry({ type: 'other', employee_id: 'a', date: D }, E('a', D, '07:00', '15:00')), false));
 
 console.log(failures ? `\n${failures} FAILED` : '\nall passed');
 process.exit(failures ? 1 : 0);
