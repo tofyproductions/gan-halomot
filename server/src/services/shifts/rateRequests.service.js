@@ -1,0 +1,111 @@
+/**
+ * Branch-rate requests: host asks, home manager agrees, office sets the money.
+ */
+const mongoose = require('mongoose');
+const { BranchRateRequest, Employee, Branch, User } = require('../../models');
+const notificationService = require('../notification.service');
+const { branchManagerFilter } = require('../branch-recipients.service');
+const { ShiftError, canEdit } = require('./access');
+
+const OFFICE = ['system_admin', 'accountant'];
+
+async function managersOf(branchId) {
+  return (await User.find({ ...branchManagerFilter(branchId), role: 'branch_manager' }).select('_id').lean()).map(u => u._id);
+}
+async function officeIds() {
+  return (await User.find({ role: { $in: OFFICE }, is_active: { $ne: false } }).select('_id').lean()).map(u => u._id);
+}
+const notify = (ids, payload) => Promise.all(ids.map(recipient_id => notificationService.notifyOnce({ ...payload, recipient_id })
+  .catch(err => console.error('[rate-requests] notify failed:', err.message))));
+
+async function loadOr404(id) {
+  if (!mongoose.isValidObjectId(id)) throw new ShiftError(404, 'בקשה לא נמצאה');
+  const r = await BranchRateRequest.findById(id);
+  if (!r) throw new ShiftError(404, 'בקשה לא נמצאה');
+  return r;
+}
+
+async function createRateRequest({ user, employeeId, hostBranchId, proposedRate }) {
+  if (!canEdit(user, hostBranchId)) throw new ShiftError(403, 'רק מנהלת הסניף המארח מבקשת תעריף');
+  if (!mongoose.isValidObjectId(employeeId)) throw new ShiftError(404, 'עובדת לא נמצאה');
+  const emp = await Employee.findOne({ _id: employeeId, is_active: true }).lean();
+  if (!emp) throw new ShiftError(404, 'עובדת לא נמצאה');
+  if (String(emp.branch_id) === String(hostBranchId)) throw new ShiftError(400, 'העובדת כבר שייכת לסניף הזה');
+  if (await BranchRateRequest.exists({ employee_id: emp._id, host_branch_id: hostBranchId, status: { $in: ['pending_home', 'pending_office'] } })) {
+    throw new ShiftError(409, 'כבר יש בקשת תעריף פתוחה לעובדת הזו');
+  }
+  const rate = Number(proposedRate);
+  const r = await BranchRateRequest.create({
+    employee_id: emp._id, home_branch_id: emp.branch_id, host_branch_id: hostBranchId,
+    proposed_rate: rate > 0 ? rate : null, requested_by: user.id, requested_by_name: user.full_name || '',
+  });
+  const hostName = (await Branch.findById(hostBranchId).select('name').lean())?.name || '';
+  await notify(await managersOf(emp.branch_id), {
+    type: 'rate_request', ref_collection: 'BranchRateRequest', ref_id: r._id,
+    title: `בקשה לשבץ את ${emp.full_name} ב${hostName}`, body: 'נדרש אישור שלך לפני שהמשרד קובע תעריף', url: '/shifts',
+  });
+  return r;
+}
+
+async function decideRateRequest({ user, id, approve, reason, finalRate }) {
+  const r = await loadOr404(id);
+  const atHome = r.status === 'pending_home';
+  const atOffice = r.status === 'pending_office';
+  if (!atHome && !atOffice) throw new ShiftError(409, 'הבקשה כבר טופלה');
+  if ((atHome && !canEdit(user, r.home_branch_id)) || (atOffice && !OFFICE.includes(user.role))) throw new ShiftError(403, 'אין הרשאה להחליט בשלב הזה');
+  const emp = await Employee.findById(r.employee_id);
+  if (!approve) {
+    const why = String(reason || '').trim();
+    if (!why) throw new ShiftError(400, 'יש לכתוב סיבה לדחייה');
+    r.status = 'rejected'; r.reject_reason = why.slice(0, 500);
+    if (atHome) r.home_decided_by = user.id; else r.office_decided_by = user.id;
+    await r.save();
+    await notify([r.requested_by], {
+      type: 'rate_request_decision', ref_collection: 'BranchRateRequest', ref_id: r._id,
+      title: `בקשת התעריף ל${emp ? emp.full_name : 'עובדת'} נדחתה`, body: r.reject_reason, url: '/shifts',
+    });
+    return r;
+  }
+  if (atHome) {
+    r.status = 'pending_office'; r.home_decided_by = user.id;
+    await r.save();
+    await notify(await officeIds(), {
+      type: 'rate_request', ref_collection: 'BranchRateRequest', ref_id: r._id,
+      title: `תעריף לסניף אחר — ${emp ? emp.full_name : ''}`, body: r.proposed_rate ? `הוצע ${r.proposed_rate} ₪ לשעה` : 'יש לקבוע תעריף לשעה', url: '/shifts',
+    });
+    return r;
+  }
+  const rate = Number(finalRate ?? r.proposed_rate);
+  if (!(rate > 0)) throw new ShiftError(400, 'יש להזין תעריף לשעה');
+  const rows = emp.branch_rates || [];
+  const row = rows.find(x => String(x.branch_id) === String(r.host_branch_id));
+  if (row) row.hourly_rate = rate; else rows.push({ branch_id: r.host_branch_id, hourly_rate: rate });
+  emp.branch_rates = rows;
+  await emp.save();
+  r.status = 'approved'; r.final_rate = rate; r.office_decided_by = user.id;
+  await r.save();
+  await notify([r.requested_by], {
+    type: 'rate_request_decision', ref_collection: 'BranchRateRequest', ref_id: r._id,
+    title: `נקבע תעריף ל${emp.full_name}`, body: `${rate} ₪ לשעה — אפשר לשבץ אותה`, url: '/shifts',
+  });
+  return r;
+}
+
+async function listRateRequests({ user }) {
+  const isOffice = OFFICE.includes(user.role);
+  const managed = (user.managed_branch_ids && user.managed_branch_ids.length ? user.managed_branch_ids : [user.branch_id]).filter(Boolean).map(String);
+  const filter = isOffice ? { status: { $in: ['pending_home', 'pending_office'] } }
+    : { status: { $in: ['pending_home', 'pending_office'] }, $or: [{ home_branch_id: { $in: managed } }, { host_branch_id: { $in: managed } }] };
+  const list = await BranchRateRequest.find(filter).sort({ created_at: -1 }).lean();
+  const emps = new Map((await Employee.find({ _id: { $in: list.map(r => r.employee_id) } }).select('full_name').lean()).map(e => [String(e._id), e.full_name]));
+  const branches = new Map((await Branch.find({ _id: { $in: list.flatMap(r => [r.home_branch_id, r.host_branch_id]) } }).select('name').lean()).map(b => [String(b._id), b.name]));
+  return list.map(r => ({
+    ...r,
+    employee_name: emps.get(String(r.employee_id)) || '',
+    home_branch_name: branches.get(String(r.home_branch_id)) || '',
+    host_branch_name: branches.get(String(r.host_branch_id)) || '',
+    can_decide: (r.status === 'pending_home' && canEdit(user, r.home_branch_id)) || (r.status === 'pending_office' && isOffice),
+  }));
+}
+
+module.exports = { createRateRequest, decideRateRequest, listRateRequests };

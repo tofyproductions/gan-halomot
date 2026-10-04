@@ -22,6 +22,9 @@ const entrySchema = new mongoose.Schema({
   alternating: { type: Boolean, default: false },
   // Placed in a class that was not hers before this week — shown to the manager.
   new_class: { type: Boolean, default: false },
+  // An employee of another branch (phase 3). Server-derived on every save.
+  cross_branch: { type: Boolean, default: false },
+  cross_status: { type: String, enum: ['pending', 'approved', null], default: null },
 });
 
 const shiftWeekSchema = new mongoose.Schema({

@@ -30,6 +30,8 @@ const Holiday = require('./Holiday');
 const ShiftWeek = require('./ShiftWeek');
 const ShiftConstraint = require('./ShiftConstraint');
 const ShiftEditRequest = require('./ShiftEditRequest');
+const BranchRateRequest = require('./BranchRateRequest');
+const CrossBranchArrangement = require('./CrossBranchArrangement');
 const SupplyList = require('./SupplyList');
 const Activity = require('./Activity');
 const Discount = require('./Discount');
@@ -171,6 +173,8 @@ const real = {
   ShiftWeek,
   ShiftConstraint,
   ShiftEditRequest,
+  BranchRateRequest,
+  CrossBranchArrangement,
   SupplyList,
   Activity,
   Discount,

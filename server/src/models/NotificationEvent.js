@@ -45,6 +45,9 @@ const notificationEventSchema = new mongoose.Schema({
       'shift_edit_request', 'shift_edit_decision',
       // אילוצים (docs/superpowers/specs/2026-10-04-shifts-phase2-constraints-design.md).
       'constraint_decision', 'constraint_cancelled',
+      // סניפים אחרים (docs/superpowers/specs/2026-10-04-shifts-phase3-crossbranch-design.md).
+      'rate_request', 'rate_request_decision', 'cross_placement_request', 'cross_placement_decision',
+      'cross_arrangement', 'shift_attendance_report', 'shift_attendance_report_office',
       'swap_request', 'swap_response', 'swap_offer', 'swap_picked',
     ],
     required: true,
