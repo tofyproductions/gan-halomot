@@ -9,6 +9,7 @@ import { useUrlState } from '../../hooks/useUrlState';
 import useFetchSeq from '../../hooks/useFetchSeq';
 import PageHeader from '../ui/PageHeader';
 import ShiftGrid from './ShiftGrid';
+import EmployeeSidebar from './EmployeeSidebar';
 import EntryDialog from './EntryDialog';
 import PrimaryClassDialog from './PrimaryClassDialog';
 import ShiftSettingsDialog from './ShiftSettingsDialog';
@@ -20,9 +21,12 @@ import RateRequestDialog from './RateRequestDialog';
 import AttendanceReportDialog from './AttendanceReportDialog';
 import { describe } from './constraintLabels';
 import { exportPdf, exportPng } from './shiftExport';
-import { buildRows, buildAwayRow, switchedSet, fmtDate } from './shiftRows';
+import { buildRows, buildAwayRow, switchedSet, fmtDate, rowKeyOf } from './shiftRows';
 
 const NO_DEFAULTS = {};
+const newTmp = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+const entryRowKey = (e) => rowKeyOf({ ...e, classroom_id: e.classroom_id ? String(e.classroom_id) : null });
+const weekdayOf = (ymd) => new Date(`${ymd}T12:00`).getDay();
 
 /** The Sunday of the week containing `date` (local), as YYYY-MM-DD. */
 function sundayOf(date = new Date()) {
@@ -137,13 +141,51 @@ export default function ShiftsScreen() {
   const saveEntry = (form) => {
     const next = form._id || form.tmp
       ? shown.map(e => (sameEntry(e, form) ? form : e))
-      : [...shown, { ...form, tmp: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}` }];
+      : [...shown, { ...form, tmp: newTmp() }];
     closeDlg();
     persist(next);
   };
   const deleteEntry = (entry) => {
     closeDlg();
     persist(shown.filter(e => !sameEntry(e, entry)));
+  };
+  // Drag and drop on the board: move a shift (Shift = her whole week in that
+  // row), or drop someone from the side list (Shift = every open day she is
+  // committed to). Saved through persist like any other edit.
+  const onDropToCell = (row, date, payload, { shiftKey } = {}) => {
+    const target = { area: row.area, classroom_id: row.area === 'class' ? row.classroom_id : null };
+    const targetKey = entryRowKey(target);
+    if (payload.kind === 'entry') {
+      const dragged = shown.find(e => String(e._id || e.tmp) === payload.key);
+      if (!dragged) return;
+      if (shiftKey) {
+        const fromKey = entryRowKey(dragged);
+        if (fromKey === targetKey) return;
+        const next = shown.map(e => (String(e.employee_id) === String(dragged.employee_id) && entryRowKey(e) === fromKey ? { ...e, ...target } : e));
+        persist(next);
+      } else {
+        if (dragged.date === date && entryRowKey(dragged) === targetKey) return;
+        persist(shown.map(e => (e === dragged ? { ...e, ...target, date } : e)));
+      }
+      return;
+    }
+    if (payload.kind === 'employee') {
+      const emp = (board.employees || []).find(e => String(e._id) === String(payload.employee_id));
+      if (!emp) return;
+      const commitment = emp.commitment || {};
+      const make = (d) => {
+        const hours = commitment[weekdayOf(d)] || { start_hhmm: '07:00', end_hhmm: '16:00' };
+        return { employee_id: emp._id, employee_name: emp.full_name, date: d, ...target, start_hhmm: hours.start_hhmm, end_hhmm: hours.end_hhmm, tmp: newTmp() };
+      };
+      if (shiftKey) {
+        const has = new Set(shown.filter(e => String(e.employee_id) === String(emp._id)).map(e => e.date));
+        const added = board.dates.filter(d => !closed.has(d) && commitment[weekdayOf(d)] && !has.has(d)).map(make);
+        if (!added.length) { toast.info('אין ימי התחייבות פנויים לשבץ אותה השבוע'); return; }
+        persist([...shown, ...added]);
+      } else {
+        persist([...shown, make(date)]);
+      }
+    }
   };
   const toggleClosed = async (date, closedNow) => {
     if (!closedNow && !window.confirm('סגירת היום תמחק את כל השיבוצים בו. להמשיך?')) return;
@@ -219,12 +261,23 @@ export default function ShiftsScreen() {
       {board && <CrossBranchPanel board={board} onChanged={load} />}
       {board && <ConstraintsPanel constraints={board.constraints} canEdit={!!board.can_edit} onChanged={load} />}
       {board && (
-        <ShiftGrid
-          dates={board.dates} rows={gridRows} closedDates={closed} warnings={board.warnings}
-          switched={switched} editable={editable} alerts={alerts}
-          onCellClick={(row, date) => setDlg({ open: true, entry: null, defaults: { date, area: row.area, classroom_id: row.classroom_id } })}
-          onEntryClick={(entry) => setDlg({ open: true, entry, defaults: null })}
-        />
+        <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 1.5, alignItems: { md: 'flex-start' }, minWidth: 0 }}>
+          {editable && (
+            <Box sx={{ width: { xs: '100%', md: 220 }, flexShrink: 0, minWidth: 0 }}>
+              <EmployeeSidebar employees={board.employees} entries={shown} dates={board.dates}
+                onRequestRate={board.can_edit ? () => { setRateEmployeeId(null); setRateOpen(true); } : undefined} />
+            </Box>
+          )}
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <ShiftGrid
+              dates={board.dates} rows={gridRows} closedDates={closed} warnings={board.warnings}
+              switched={switched} editable={editable} alerts={alerts}
+              onCellClick={(row, date) => setDlg({ open: true, entry: null, defaults: { date, area: row.area, classroom_id: row.classroom_id } })}
+              onEntryClick={(entry) => setDlg({ open: true, entry, defaults: null })}
+              onDropToCell={onDropToCell}
+            />
+          </Box>
+        </Box>
       )}
 
       <EntryDialog open={dlg.open} onClose={closeDlg}
