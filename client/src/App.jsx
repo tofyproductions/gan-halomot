@@ -51,6 +51,7 @@ const ContactInbox = lazy(() => import('./components/admin/ContactInbox'));
 const Announcements = lazy(() => import('./components/announcements/Announcements'));
 const ArchiveList = lazy(() => import('./components/archive/ArchiveList'));
 const AttendanceMonitor = lazy(() => import('./components/attendance/AttendanceMonitor'));
+const ShiftsScreen = lazy(() => import('./components/shifts/ShiftsScreen'));
 const BranchCertificationsPage = lazy(() => import('./components/compliance/BranchCertificationsPage'));
 const BranchManager = lazy(() => import('./components/branches/BranchManager'));
 const BranchPayslips = lazy(() => import('./components/payroll/BranchPayslips'));
@@ -259,6 +260,7 @@ function AppRoutes() {
         <Route path="products/matches" element={<ProductMatches />} />
         <Route path="employees" element={<EmployeeManager />} />
         <Route path="attendance" element={<AttendanceMonitor />} />
+        <Route path="shifts" element={<ShiftsScreen />} />
         <Route path="payroll" element={
           <ProtectedRoute roles={['system_admin', 'admin_viewer', 'accountant']}>
             <PayrollPage />
