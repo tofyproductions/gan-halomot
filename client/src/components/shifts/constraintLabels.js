@@ -16,9 +16,9 @@ export const STATUS_COLOR = {
 };
 
 export function describe(c) {
-  const parts = [TYPE_LABEL[c.type] || c.type, fmtDate(c.date)];
-  if (c.type === 'partial') parts.push(`${c.from_hhmm}–${c.to_hhmm}`);
-  if (c.target_date) parts.push(`במקום: ${fmtDate(c.target_date)}`);
+  const parts = [TYPE_LABEL[c.type] || c.type, `⁦${fmtDate(c.date)}⁩`];
+  if (c.type === 'partial') parts.push(`⁦${c.from_hhmm}–${c.to_hhmm}⁩`);
+  if (c.target_date) parts.push(`במקום: ⁦${fmtDate(c.target_date)}⁩`);
   if (c.type === 'swap') parts.push(c.swap_mode === 'mutual' ? 'החלפה הדדית' : 'מסירת משמרת');
   return parts.join(' · ');
 }
