@@ -9,6 +9,8 @@ import LockOpenIcon from '@mui/icons-material/LockOpen';
 import LogoutIcon from '@mui/icons-material/Logout';
 import api from '../../api/client';
 import NurseryBoard from './NurseryBoard';
+import { ThemeProvider } from '@mui/material/styles';
+import { useBoardColorMode } from '../../theme/boardColorMode';
 
 /**
  * לוח כיתה — the tablet on the wall of one room.
@@ -41,6 +43,7 @@ const bufToB64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)))
   .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 export default function BoardKiosk() {
+  const colorMode = useBoardColorMode();
   const { token: linkToken } = useParams();
   const [info, setInfo] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -199,8 +202,8 @@ export default function BoardKiosk() {
   };
 
   if (signedIn) {
-    return (
-      <Box sx={{ p: { xs: 1.5, sm: 3 }, minHeight: '100vh', bgcolor: 'background.default' }}>
+    const page = (
+      <Box sx={{ p: { xs: 1.5, sm: 3 }, minHeight: '100vh', bgcolor: 'background.default', color: 'text.primary', colorScheme: colorMode.dark ? 'dark' : undefined }}>
         {offerBiometric && (
           <Alert
             severity="info" sx={{ mb: 2 }}
@@ -214,7 +217,7 @@ export default function BoardKiosk() {
             להיכנס בפעם הבאה עם טביעת אצבע במקום סיסמה?
           </Alert>
         )}
-        <NurseryBoard />
+        <NurseryBoard embedded />
         <Stack direction="row" justifyContent="center" sx={{ mt: 4, opacity: 0.5 }}>
           <Tooltip title="יציאה מלוח הכיתה">
             <IconButton size="small" onClick={leave} aria-label="יציאה מלוח הכיתה">
@@ -224,6 +227,8 @@ export default function BoardKiosk() {
         </Stack>
       </Box>
     );
+    // The tablet's whole page goes dark with the board, not just the board.
+    return colorMode.theme ? <ThemeProvider theme={colorMode.theme}>{page}</ThemeProvider> : page;
   }
 
   return (

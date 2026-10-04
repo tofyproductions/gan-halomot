@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Card, CardContent, Box, Stack, Typography, IconButton, Chip, TextField, Divider,
   Alert, Button, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions,
@@ -108,6 +108,13 @@ export default function ChildDayCard({
 
   const [picker, setPicker] = useState(null); // { kind, path, title, ... }
   const [note, setNote] = useState(log.staff_note || '');
+  // The board refreshes itself now, so the note another teacher saved can
+  // arrive while this card is on screen. Take it — unless this field is the
+  // one being typed in, where the person's own draft wins until they leave it.
+  const editingNote = useRef(false);
+  useEffect(() => {
+    if (!editingNote.current) setNote(log.staff_note || '');
+  }, [log.staff_note]);
 
   const open = (e, spec) => {
     if (readOnly) return;
@@ -435,7 +442,11 @@ export default function ChildDayCard({
           onChange={(e) => setNote(e.target.value)}
           // Saved on blur, not on every keystroke: a note typed one-handed
           // would otherwise be a request per character over the gan's wifi.
-          onBlur={() => { if (note !== (log.staff_note || '')) patch('staff_note', note); }}
+          onFocus={() => { editingNote.current = true; }}
+          onBlur={() => {
+            editingNote.current = false;
+            if (note !== (log.staff_note || '')) patch('staff_note', note);
+          }}
           disabled={readOnly}
           fullWidth
           multiline

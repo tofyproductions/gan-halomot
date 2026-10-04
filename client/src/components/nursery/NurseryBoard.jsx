@@ -1,18 +1,22 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Stack, Typography, Card, CardContent, TextField, MenuItem, Alert,
   CircularProgress, Accordion, AccordionSummary, AccordionDetails, Chip,
   Button, Snackbar, Dialog, DialogTitle, DialogContent, DialogActions, List, ListItemButton,
-  ListItemText,
+  ListItemText, IconButton, Tooltip,
 } from '@mui/material';
+import { ThemeProvider } from '@mui/material/styles';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import RestaurantIcon from '@mui/icons-material/Restaurant';
 import SettingsIcon from '@mui/icons-material/Settings';
+import DarkModeIcon from '@mui/icons-material/DarkMode';
+import LightModeIcon from '@mui/icons-material/LightMode';
 import api from '../../api/client';
 import { useAuth } from '../../hooks/useAuth';
 import ChildDayCard from './ChildDayCard';
+import { useBoardColorMode } from '../../theme/boardColorMode';
 
 /**
  * לוח עדכונים — the gan's day.
@@ -40,7 +44,7 @@ import ChildDayCard from './ChildDayCard';
  * touches anything — but nothing is batched on the way back, so two teachers
  * working the same room overwrite a value rather than each other's day.
  */
-export default function NurseryBoard() {
+function Board({ colorMode }) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const mayEditSettings = ['system_admin', 'branch_manager'].includes(user?.role);
@@ -63,13 +67,55 @@ export default function NurseryBoard() {
   const [activitySaving, setActivitySaving] = useState(false);
   const [activitySaved, setActivitySaved] = useState(false);
 
+  /**
+   * The board keeps itself current.
+   *
+   * It used to load once, when the screen opened, and the classroom tablet
+   * opens it at 07:00 and leaves it there all day. Everything a parent sent
+   * after that — the wake-up time, the bottle at home, "she's not coming",
+   * and every row the Google Sheet sync brings in every two minutes — sat in
+   * the database and never reached the room until somebody happened to
+   * change the date and back.
+   *
+   * So a quiet reload runs on a timer and whenever the screen comes back into
+   * view. Quiet means it swaps the data underneath and touches nothing the
+   * person in the room is holding: not the room or the date they picked, not
+   * the activity line they are halfway through typing. And it is thrown away
+   * if any save started or finished while it was in flight — its answer may
+   * have been read before that save landed, and folding it in would put the
+   * old value back on screen until the next tick, which reads as "the tap
+   * didn't take".
+   */
+  const writeSeq = useRef(0);
+  const view = useRef({ classroomId: '', date: '' });
+  view.current = { classroomId, date };
+  // What the server last said the activity line was. The draft is somebody's
+  // unsaved sentence whenever it differs, and a refresh leaves it alone.
+  const serverActivity = useRef('');
+  const activityRef = useRef('');
+  activityRef.current = activity;
+
   const load = useCallback(async (opts = {}) => {
-    setError('');
+    if (!opts.quiet) setError('');
+    const seq = writeSeq.current;
+    const cur = opts.quiet ? view.current : { classroomId, date };
     try {
       const params = {};
-      if (opts.classroom ?? classroomId) params.classroom = opts.classroom ?? classroomId;
-      if (opts.date ?? date) params.date = opts.date ?? date;
+      if (opts.classroom ?? cur.classroomId) params.classroom = opts.classroom ?? cur.classroomId;
+      if (opts.date ?? cur.date) params.date = opts.date ?? cur.date;
       const res = await api.get('/nursery/board', { params });
+      if (opts.quiet) {
+        if (seq !== writeSeq.current) return;
+        // The room or the date changed while this was in flight.
+        if (String(res.data.classroom?.id || '') !== String(view.current.classroomId)
+          || res.data.date !== view.current.date) return;
+        setData(res.data);
+        const next = res.data.activity || '';
+        if (activityRef.current === serverActivity.current) setActivity(next);
+        serverActivity.current = next;
+        return;
+      }
+      serverActivity.current = res.data.activity || '';
       setData(res.data);
       setClassroomId(String(res.data.classroom?.id || ''));
       // Read back rather than set on click: the first load picks the room for
@@ -79,13 +125,32 @@ export default function NurseryBoard() {
       setActivity(res.data.activity || '');
       setActivitySaved(false);
     } catch (err) {
-      setError(err.response?.data?.error || 'לא הצלחנו לטעון את הלוח');
+      // A background refresh that fails says nothing: what is on screen is
+      // still the last good board, and the next tick tries again.
+      if (!opts.quiet) setError(err.response?.data?.error || 'לא הצלחנו לטעון את הלוח');
     } finally {
-      setLoading(false);
+      if (!opts.quiet) setLoading(false);
     }
   }, [classroomId, date]);
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState !== 'visible' || !view.current.classroomId) return;
+      loadRef.current({ quiet: true });
+    };
+    const timer = setInterval(refresh, 30 * 1000);
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  }, []);
 
   const isToday = data && data.date === data.today;
 
@@ -97,6 +162,7 @@ export default function NurseryBoard() {
    * only version the kitchen and the parents will see.
    */
   const patchChild = async (childId, fields) => {
+    writeSeq.current += 1;
     try {
       const res = await api.patch(`/nursery/log/${childId}`, { ...fields, date: data.date });
       setData(d => ({
@@ -105,6 +171,8 @@ export default function NurseryBoard() {
       }));
     } catch (err) {
       setToast(err.response?.data?.error || 'השמירה נכשלה');
+    } finally {
+      writeSeq.current += 1;
     }
   };
 
@@ -159,6 +227,7 @@ export default function NurseryBoard() {
 
   const saveActivity = async () => {
     setActivitySaving(true);
+    writeSeq.current += 1;
     try {
       await api.put('/nursery/classroom-day', {
         classroom_id: data.classroom.id,
@@ -166,10 +235,12 @@ export default function NurseryBoard() {
         activity,
       });
       setActivitySaved(true);
+      serverActivity.current = activity;
       setData(d => ({ ...d, activity }));
     } catch (err) {
       setToast(err.response?.data?.error || 'השמירה נכשלה');
     } finally {
+      writeSeq.current += 1;
       setActivitySaving(false);
     }
   };
@@ -181,6 +252,7 @@ export default function NurseryBoard() {
     const selections = { ...data.menu_selections, [key]: next };
 
     setData(d => ({ ...d, menu_selections: selections }));
+    writeSeq.current += 1;
     try {
       await api.put('/nursery/menu', {
         date: data.date,
@@ -190,6 +262,8 @@ export default function NurseryBoard() {
     } catch (err) {
       setToast(err.response?.data?.error || 'שמירת התפריט נכשלה');
       load();
+    } finally {
+      writeSeq.current += 1;
     }
   };
 
@@ -216,11 +290,22 @@ export default function NurseryBoard() {
     <Box sx={{ maxWidth: 1200, mx: 'auto', pb: 6 }}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
         <Typography variant="h5" fontWeight={700}>לוח יומי</Typography>
-        {mayEditSettings && (
-          <Button size="small" startIcon={<SettingsIcon />} onClick={() => navigate('/nursery/settings')}>
-            הגדרות
-          </Button>
-        )}
+        <Stack direction="row" spacing={1} alignItems="center">
+          <Tooltip title={colorMode.dark ? 'מצב יום' : 'מצב לילה'}>
+            <IconButton
+              onClick={colorMode.toggle}
+              aria-label={colorMode.dark ? 'מעבר למצב יום' : 'מעבר למצב לילה'}
+              size="small"
+            >
+              {colorMode.dark ? <LightModeIcon fontSize="small" /> : <DarkModeIcon fontSize="small" />}
+            </IconButton>
+          </Tooltip>
+          {mayEditSettings && (
+            <Button size="small" startIcon={<SettingsIcon />} onClick={() => navigate('/nursery/settings')}>
+              הגדרות
+            </Button>
+          )}
+        </Stack>
       </Stack>
 
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
@@ -414,5 +499,37 @@ export default function NurseryBoard() {
         message={toast}
       />
     </Box>
+  );
+}
+
+/**
+ * The board, in the light the room asked for.
+ *
+ * `embedded` is the kiosk, which paints the whole page itself and only needs
+ * the theme passed down. Inside the app shell the board paints its own
+ * ground instead, bled out over the shell's padding so the dark reaches the
+ * edges of the workspace rather than sitting in it as a dark card on cream.
+ */
+export default function NurseryBoard({ embedded = false }) {
+  const colorMode = useBoardColorMode();
+  const board = <Board colorMode={colorMode} />;
+  if (!colorMode.theme) return board;
+  return (
+    <ThemeProvider theme={colorMode.theme}>
+      <Box sx={{
+        bgcolor: 'background.default',
+        color: 'text.primary',
+        colorScheme: 'dark',
+        ...(embedded ? {} : {
+          mx: { xs: -2, md: -3 },
+          mb: { xs: -2, md: -2.5 },
+          px: { xs: 2, md: 3 },
+          pt: 2,
+          minHeight: '100dvh',
+        }),
+      }}>
+        {board}
+      </Box>
+    </ThemeProvider>
   );
 }
