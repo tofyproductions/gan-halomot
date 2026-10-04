@@ -18,8 +18,14 @@ function canView(user, branchId) {
   if (VIEW_ALL.includes(user.role)) return true;
   return user.role === 'branch_manager' && managedBranches(user).includes(String(branchId));
 }
+// The owner (system_admin) runs every branch, so she edits any branch's rota
+// directly — opens, edits, publishes and decides like the branch manager
+// (decided 2026-10-04). The accountant stays "office": she changes a rota only
+// through a ShiftEditRequest; admin_viewer only looks.
 function canEdit(user, branchId) {
-  return !!user && user.role === 'branch_manager' && managedBranches(user).includes(String(branchId));
+  if (!user) return false;
+  if (user.role === 'system_admin') return true;
+  return user.role === 'branch_manager' && managedBranches(user).includes(String(branchId));
 }
 function assertView(user, branchId) { if (!canView(user, branchId)) throw new ShiftError(403, 'אין הרשאה לסניף הזה'); }
 function assertEdit(user, branchId) { if (!canEdit(user, branchId)) throw new ShiftError(403, 'רק מנהלת הסניף עורכת את הסידור'); }

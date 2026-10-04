@@ -38,6 +38,8 @@ async function throwsStatus(fn, status, label, message) {
   const empUser = await mk('teacher', { branch_id: branch._id });
   const manager = { id: String(managerUser._id), role: 'branch_manager', managed_branch_ids: [String(branch._id)], full_name: 'מנהלת' };
   const admin = { id: String(adminUser._id), role: 'system_admin', full_name: 'אדמין' };
+  const accountantUser = await mk('accountant');
+  const accountant = { id: String(accountantUser._id), role: 'accountant', full_name: 'הנה״ח' };
 
   const infants = await M.Classroom.create({ name: 'תינוקייה 20', category: 'תינוקייה', academic_year: '2026-2027', branch_id: branch._id });
   const young = await M.Classroom.create({ name: 'צעירים א', category: 'צעירים', academic_year: '2026-2027', branch_id: branch._id });
@@ -56,7 +58,9 @@ async function throwsStatus(fn, status, label, message) {
   console.log('\nהרשאות');
   eq(svc.canEdit(manager, branch._id), true, 'מנהלת עורכת את הסניף שלה');
   eq(svc.canEdit(manager, other._id), false, 'ולא סניף אחר');
-  eq(svc.canEdit(admin, branch._id), false, 'אדמין לא עורך ישירות');
+  eq(svc.canEdit(admin, branch._id), true, 'אדמין עורך');
+  eq(svc.canEdit(admin, other._id), true, 'אדמין עורך כל סניף');
+  eq(svc.canEdit(accountant, branch._id), false, 'הנה״ח לא עורכת ישירות');
   eq(svc.canView(admin, other._id), true, 'אבל רואה הכל');
 
   // Last year's class, still active with its children — must not reach the rota.
@@ -79,7 +83,15 @@ async function throwsStatus(fn, status, label, message) {
   eq(week.entries.length, 5, 'נזרע מההתחייבות');
   await throwsStatus(() => svc.createWeek({ user: manager, branchId: String(branch._id), weekStart: WEEK }), 409, 'פתיחה כפולה נדחית');
   await throwsStatus(() => svc.createWeek({ user: manager, branchId: String(branch._id), weekStart: '2026-10-12' }), 400, 'שבוע חייב להתחיל בראשון');
-  await throwsStatus(() => svc.createWeek({ user: admin, branchId: String(branch._id), weekStart: '2026-10-18' }), 403, 'אדמין לא פותח');
+  await throwsStatus(() => svc.createWeek({ user: accountant, branchId: String(branch._id), weekStart: '2026-10-18' }), 403, 'הנה״ח לא פותחת', 'רק מנהלת הסניף עורכת את הסידור');
+  const adminWeek = await svc.createWeek({ user: admin, branchId: String(branch._id), weekStart: '2027-01-03' });
+  eq(adminWeek.week_start, '2027-01-03', 'אדמין פותח שבוע');
+  const adminBoard = await svc.getBoard({ user: admin, branchId: String(branch._id), weekStart: '2027-01-03' });
+  eq([adminBoard.can_edit, adminBoard.can_request], [true, false], 'אדמין: עריכה ישירה, לא בקשה');
+  const accBoard = await svc.getBoard({ user: accountant, branchId: String(branch._id), weekStart: '2027-01-03' });
+  eq([accBoard.can_edit, accBoard.can_request], [false, true], 'הנה״ח: בקשת שינוי בלבד');
+  eq(adminBoard.employees.find(e => e._id === String(dana._id)).commitment, { 0: { start_hhmm: '07:00', end_hhmm: '15:00' }, 1: { start_hhmm: '07:00', end_hhmm: '15:00' }, 2: { start_hhmm: '07:00', end_hhmm: '15:00' }, 3: { start_hhmm: '07:00', end_hhmm: '15:00' }, 4: { start_hhmm: '07:00', end_hhmm: '15:00' } }, 'שעות ההתחייבות בלוח (לגרירה)');
+  eq(adminBoard.employees.find(e => e._id === String(ruth._id)).commitment, { 0: { start_hhmm: '08:00', end_hhmm: '16:00' } }, 'רק ימים עם שעות');
   await M.ShiftWeek.init();
   const realExists = M.ShiftWeek.exists;
   M.ShiftWeek.exists = async () => null; // two clicks racing past the pre-check
@@ -302,8 +314,10 @@ async function throwsStatus(fn, status, label, message) {
   // M3: only her home manager may decide.
   const boardHome = await svc.getBoard({ user: otherMgr, branchId: String(other._id), weekStart: WF });
   eq(boardHome.cross_pending.map(p => p.can_decide), [true], 'M3: מנהלת הבית יכולה להחליט');
+  const boardAcc = await svc.getBoard({ user: accountant, branchId: String(other._id), weekStart: WF });
+  eq(boardAcc.cross_pending.map(p => p.can_decide), [false], 'M3: הנה״ח רואה ולא מחליטה');
   const boardAdmin = await svc.getBoard({ user: admin, branchId: String(other._id), weekStart: WF });
-  eq(boardAdmin.cross_pending.map(p => p.can_decide), [false], 'M3: המשרד רואה ולא מחליט');
+  eq(boardAdmin.cross_pending.map(p => p.can_decide), [true], 'M3: אדמין מחליט כמו מנהלת הבית');
   // F2: the home seed skips what overlaps her placement elsewhere.
   eq(boardHome.preview.filter(e => String(e.employee_id) === String(guest._id)).map(e => e.date), ['2026-11-18'], 'F2: תצוגה מקדימה — בלי שני (חופף למארח) ובלי שלישי (אילוץ מאושר)');
   const wkOF = await svc.createWeek({ user: otherMgr, branchId: String(other._id), weekStart: WF });

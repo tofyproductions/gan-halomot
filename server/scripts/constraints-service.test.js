@@ -39,6 +39,7 @@ async function throws(fn, status, message, label) {
   const mgrUser = await mkUser('branch_manager', { managed_branch_ids: [branch._id], branch_id: branch._id });
   const manager = { id: String(mgrUser._id), role: 'branch_manager', managed_branch_ids: [String(branch._id)], full_name: 'מנהלת' };
   const admin = { id: String((await mkUser('system_admin'))._id), role: 'system_admin', full_name: 'אדמין' };
+  const accountant = { id: String((await mkUser('accountant'))._id), role: 'accountant', full_name: 'הנה״ח' };
   const mkEmp = async (name, b = branch) => {
     const u = await mkUser('teacher', { branch_id: b._id });
     return M.Employee.create({ full_name: name, israeli_id: String(idn++), branch_id: b._id, user_id: u._id, is_active: true });
@@ -128,7 +129,7 @@ async function throws(fn, status, message, label) {
 
   console.log('\nהחלטת מנהלת');
   await throws(() => svc.decide({ user: manager, id: String(c1._id), accept: false, reason: ' ', now: NOW }), 400, 'יש לכתוב סיבה לדחייה', 'דחייה בלי סיבה');
-  await throws(() => svc.decide({ user: admin, id: String(c1._id), accept: true, now: NOW }), 403, 'רק מנהלת הסניף עורכת את הסידור', 'אדמין לא מחליט');
+  await throws(() => svc.decide({ user: accountant, id: String(c1._id), accept: true, now: NOW }), 403, 'רק מנהלת הסניף עורכת את הסידור', 'הנה״ח לא מחליטה');
   const acc = await svc.decide({ user: manager, id: String(c1._id), accept: true, now: NOW });
   const er = await M.EmployeeRequest.findById(acc.employee_request_id).lean();
   eq([acc.status, er.type, er.status, er.from_date, er.to_date, String(er.employee_id)], ['accepted', 'vacation', 'pending_accountant', '2026-10-13', '2026-10-13', String(dana._id)], 'אושר → בקשת חופשה להנה״ח');

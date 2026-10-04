@@ -132,6 +132,8 @@ async function confirmArrangement({ user, id }) {
   const a = await loadArr(id);
   if (a.status !== 'proposed') throw new ShiftError(409, 'הסידור כבר לא ממתין לאישור');
   const isHost = canEdit(user, a.host_branch_id); const isHome = canEdit(user, a.home_branch_id);
+  // A system admin edits every branch, so she satisfies both sides at once and
+  // the arrangement activates on her single confirm — acceptable for the owner.
   if (!isHost && !isHome) throw new ShiftError(403, 'רק אחת משתי המנהלות מאשרת');
   // Atomic: two managers confirming at the same moment both count, and the second flag activates it.
   const set = {};

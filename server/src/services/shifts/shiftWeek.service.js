@@ -81,6 +81,16 @@ async function seedRespectingConstraints(branchId, dates, closedDates) {
   return seeded.filter(e => !locked.some(c => blocksEntry(c, e)) && !crossOverlaps([e], elsewhere).length);
 }
 
+/** Her contracted hours per weekday (0-5) — the drag-and-drop default for a new shift. Days off and blank days are left out. */
+function commitmentHours(commitment) {
+  const out = {};
+  for (const d of (commitment && commitment.days) || []) {
+    if (d.is_off || !d.start_hhmm || !d.end_hhmm) continue;
+    out[d.day] = { start_hhmm: padHHMM(d.start_hhmm), end_hhmm: padHHMM(d.end_hhmm) };
+  }
+  return out;
+}
+
 async function getBoard({ user, branchId, weekStart }) {
   if (!mongoose.isValidObjectId(branchId)) throw new ShiftError(404, 'סניף לא נמצא');
   if (!isSunday(weekStart)) throw new ShiftError(400, 'שבוע מתחיל ביום ראשון');
@@ -128,8 +138,8 @@ async function getBoard({ user, branchId, weekStart }) {
     closed_dates: [...closed],
     classrooms,
     inactive_classrooms: inactive.map(r => ({ _id: String(r._id), name: r.name, academic_year: r.academic_year })),
-    employees: employees.map(e => ({ _id: String(e._id), full_name: e.full_name, primary_classroom_id: e.primary_classroom_id ? String(e.primary_classroom_id) : null, extra_classroom_ids: (e.extra_classroom_ids || []).map(String) }))
-      .concat(foreignCandidates.filter(c => c.has_rate).map(c => ({ _id: String(c._id), full_name: `${c.full_name} (${c.branch_name})`, primary_classroom_id: null, extra_classroom_ids: [], foreign: true }))),
+    employees: employees.map(e => ({ _id: String(e._id), full_name: e.full_name, primary_classroom_id: e.primary_classroom_id ? String(e.primary_classroom_id) : null, extra_classroom_ids: (e.extra_classroom_ids || []).map(String), commitment: commitmentHours(commitmentOf.get(String(e._id))) }))
+      .concat(foreignCandidates.filter(c => c.has_rate).map(c => ({ _id: String(c._id), full_name: `${c.full_name} (${c.branch_name})`, primary_classroom_id: null, extra_classroom_ids: [], foreign: true, commitment: {} }))),
     ratios,
     // What the branch itself set, blank where it follows the city default —
     // the settings form edits these, not the effective values above.
@@ -141,7 +151,9 @@ async function getBoard({ user, branchId, weekStart }) {
     pending_primary,
     edit_requests: editRequests,
     can_edit: canEdit(user, branchId),
-    can_request: OFFICE.includes(user.role),
+    // The admin edits directly now (can_edit); only the accountant goes through
+    // an edit request.
+    can_request: user.role === 'accountant',
     branch_id: String(branch._id),
     branch_name: branch.name,
     foreign_candidates: foreignCandidates,
