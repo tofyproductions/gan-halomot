@@ -91,7 +91,13 @@ export default function PageHeader({
           )}
         </Box>
 
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0, flexWrap: 'wrap' }}>
+        {/* Shrinkable, so the wrap below can happen. With flexShrink: 0 the
+            row kept its one-line width — on מעקב החתמות that was 751px on a
+            393px phone — and the page grew sideways to hold it. iOS then
+            zoomed the whole page out to fit, and at that zoom WebKit stopped
+            painting the grid's sticky cells: no names, no totals, a blank
+            column where the employee should be. */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, maxWidth: '100%', flexWrap: 'wrap' }}>
           {visibleActions.map((a) => (
             <Tooltip key={a.label} title={a.hint || ''} disableHoverListener={!a.hint}>
               <span>
