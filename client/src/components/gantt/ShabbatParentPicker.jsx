@@ -26,6 +26,7 @@ export default function ShabbatParentPicker({
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(null);
+  const [showOther, setShowOther] = useState(false);
 
   const isFather = role === 'father';
   const title = isFather ? 'אבא של שבת' : 'אמא של שבת';
@@ -39,7 +40,7 @@ export default function ShabbatParentPicker({
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { if (open) load(); }, [open, classroomId]);
+  useEffect(() => { if (open) { load(); setShowOther(false); } }, [open, classroomId]);
 
   const group = isFather ? state?.boys : state?.girls;
 
@@ -85,6 +86,9 @@ export default function ShabbatParentPicker({
     </Box>
   );
 
+  // The other rotation — where a child recorded with the wrong gender sits
+  // (רני רחל אילוז, 10.2026: ClickTac said זכר). One tap moves her over.
+  const otherChildren = (isFather ? state?.girls?.children : state?.boys?.children) || [];
   const waiting = group?.waiting || [];
   const served = (group?.children || []).filter(c => c.served_this_round);
   const round = group?.round || { done: 0, total: 0 };
@@ -165,6 +169,30 @@ export default function ShabbatParentPicker({
                     </Box>
                   ))}
                 </Stack>
+              </Box>
+            )}
+            {otherChildren.length > 0 && (
+              <Box>
+                <Divider sx={{ my: 0.5 }} />
+                <Button size="small" color="inherit" onClick={() => setShowOther(v => !v)} sx={{ px: 0.5 }}>
+                  {showOther ? 'הסתר' : `חסר/ה מישהו? ${otherChildren.length} רשומים כ${isFather ? 'בת' : 'בן'}`}
+                </Button>
+                {showOther && (
+                  <Stack spacing={0.5} sx={{ mt: 0.5 }}>
+                    {otherChildren.map(c => (
+                      <Box key={c.id} sx={{
+                        display: 'flex', alignItems: 'center', gap: 0.8, px: 1.2, py: 0.6,
+                        borderRadius: 2, border: '1px dashed #cbd5e1',
+                      }}>
+                        <Typography sx={{ fontSize: '0.9rem', flex: 1 }}>{c.name}</Typography>
+                        <Button size="small" disabled={busy === c.id}
+                          onClick={() => setGender(c, isFather ? 'boy' : 'girl')}>
+                          {isFather ? 'זה בן — העבר' : 'זו בת — העבר'}
+                        </Button>
+                      </Box>
+                    ))}
+                  </Stack>
+                )}
               </Box>
             )}
           </Stack>
