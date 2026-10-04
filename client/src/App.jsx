@@ -83,6 +83,7 @@ const LeadsPage = lazy(() => import('./components/leads/LeadsPage'));
 const MaintenancePage = lazy(() => import('./components/maintenance/MaintenancePage'));
 const MyAccount = lazy(() => import('./components/account/MyAccount'));
 const MyAttendance = lazy(() => import('./components/employee-portal/MyAttendance'));
+const MyShifts = lazy(() => import('./components/employee-portal/MyShifts'));
 const MyDocuments = lazy(() => import('./components/employee-portal/MyDocuments'));
 const MyPayslips = lazy(() => import('./components/employee-portal/MyPayslips'));
 const MyVacation = lazy(() => import('./components/employee-portal/MyVacation'));
@@ -370,6 +371,7 @@ function AppRoutes() {
         <Route path="my-payslips" element={<MyPayslips />} />
         <Route path="my-documents" element={<MyDocuments />} />
         <Route path="my-attendance" element={<MyAttendance />} />
+        <Route path="my-shifts" element={<MyShifts />} />
         <Route path="my-vacation" element={<MyVacation />} />
         <Route path="my-updates" element={<Updates />} />
         <Route path="contact-office" element={<ContactOffice />} />
