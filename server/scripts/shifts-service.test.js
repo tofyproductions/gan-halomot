@@ -116,13 +116,13 @@ async function throwsStatus(fn, status, label, message) {
   eq(saved.closed_days, ['2026-10-15'], 'ונשמרת');
 
   console.log('\nפרסום');
-  let pub = await svc.publishWeek({ user: manager, weekId: String(week._id) });
+  let pub = await svc.publishWeek({ user: manager, weekId: String(week._id), now: new Date('2026-10-08T16:00:00Z') });
   eq(pub.notified, 1, 'פרסום ראשון: דנה (לרות אין משתמש)');
   eq(await M.NotificationEvent.countDocuments({ type: 'shift_published', recipient_id: empUser._id }), 1, 'התראה לדנה');
   const again = pub.week.entries.map(e => e.toObject());
   again.find(e => String(e.employee_id) === String(ruth._id)).end_hhmm = '15:00';
   await svc.saveEntries({ user: manager, weekId: String(week._id), entries: again });
-  pub = await svc.publishWeek({ user: manager, weekId: String(week._id) });
+  pub = await svc.publishWeek({ user: manager, weekId: String(week._id), now: new Date('2026-10-08T16:00:00Z') });
   eq(pub.notified, 0, 'פרסום חוזר: רק מי שהשתנה לה (רות, בלי משתמש) — דנה לא');
 
   console.log('\nמה העובדת רואה');
@@ -212,6 +212,26 @@ async function throwsStatus(fn, status, label, message) {
   eq([rejected.status, rejected.reject_reason], ['rejected', 'לא מתאים'], 'דחייה עם סיבה נשמרת');
   await throwsStatus(() => svc.decideEditRequest({ user: manager, requestId: String(rej._id), approve: true }), 409, 'החלטה שנייה נדחית');
   await throwsStatus(() => svc.getBoard({ user: manager, branchId: 'bad', weekStart: WEEK }), 404, 'מזהה סניף לא תקין — 404');
+
+  console.log('\nאילוצים בסידור');
+  const NEXT = '2026-10-18';
+  const wk2 = await svc.createWeek({ user: manager, branchId: String(branch._id), weekStart: NEXT });
+  const accepted = await M.ShiftConstraint.create({ employee_id: dana._id, employee_name: 'דנה', branch_id: branch._id, type: 'day_off', date: '2026-10-19', week_start: NEXT, details: 'x', status: 'accepted' });
+  const blockedEntries = wk2.entries.map(e => e.toObject()).filter(e => !(String(e.employee_id) === String(dana._id) && e.date === '2026-10-19'));
+  blockedEntries.push({ employee_id: dana._id, date: '2026-10-19', area: 'class', classroom_id: infants._id, start_hhmm: '07:00', end_hhmm: '15:00' });
+  await throwsStatus(() => svc.saveEntries({ user: manager, weekId: String(wk2._id), entries: blockedEntries }), 400, 'שיבוץ על אילוץ מאושר נדחה');
+  const boardC = await svc.getBoard({ user: manager, branchId: String(branch._id), weekStart: NEXT });
+  eq(boardC.constraints.map(c => String(c._id)), [String(accepted._id)], 'הלוח מחזיר את אילוצי השבוע');
+  const openRespected = await M.ShiftConstraint.create({ employee_id: ruth._id, employee_name: 'רות', branch_id: branch._id, type: 'day_off', date: '2026-10-22', week_start: NEXT, details: 'x', status: 'open' });
+  const openOther = await M.ShiftConstraint.create({ employee_id: ruth._id, employee_name: 'רות', branch_id: branch._id, type: 'other', date: '2026-10-20', week_start: NEXT, details: 'x', status: 'open' });
+  await throwsStatus(() => svc.publishWeek({ user: manager, weekId: String(wk2._id), now: new Date('2026-10-14T09:00:00Z') }), 409, 'פרסום לפני סגירת חלון ההגשה נחסם', 'אי אפשר לסגור את הסידור לפני שהגשת האילוצים נסגרת (יום חמישי ב-18:00)');
+  eq((await M.ShiftConstraint.findById(openRespected._id)).status, 'open', 'ולא אישר כלום כשהחלון פתוח');
+  const AFTER = new Date('2026-10-15T16:00:00Z');
+  await throwsStatus(() => svc.publishWeek({ user: manager, weekId: String(wk2._id), now: AFTER }), 409, 'פרסום נחסם כשיש אילוץ לא מטופל');
+  eq((await M.ShiftConstraint.findById(openRespected._id)).status, 'open', 'ולא אישר כלום בינתיים');
+  await M.ShiftConstraint.updateOne({ _id: openOther._id }, { $set: { status: 'rejected', reject_reason: 'x' } });
+  const pub2 = await svc.publishWeek({ user: manager, weekId: String(wk2._id), now: AFTER });
+  eq([pub2.auto_accepted, (await M.ShiftConstraint.findById(openRespected._id)).status, (await M.ShiftConstraint.findById(openRespected._id)).decided_auto], [1, 'accepted', true], 'מה שהסידור כבר מכבד — מתקבל אוטומטית בפרסום');
 
   await new Promise(r => setTimeout(r, 500)); // let in-flight notification pushes settle
   await mongoose.disconnect();

@@ -15,6 +15,8 @@ const { branchManagerFilter } = require('../branch-recipients.service');
 const { closureDateSet } = require('../fixedSchedule');
 const { effectiveRatios, ratioWarnings } = require('./ratio');
 const { buildSeedEntries } = require('./seed');
+const constraints = require('./constraints.service');
+const { blocksEntry, submissionWindow } = require('./constraintRules');
 const { ShiftError, OFFICE, canView, canEdit, assertView, assertEdit } = require('./access');
 const {
   schoolYearOf, weekDays, isSunday, padHHMM, findOverlaps, affectedEmployeeIds, suggestPrimary, needsPrimaryPrompt,
@@ -89,8 +91,11 @@ async function getBoard({ user, branchId, weekStart }) {
       return { employee_id: String(e._id), full_name: e.full_name, commitment_text: text, ...suggestPrimary({ commitmentText: text, classrooms }) };
     });
 
+  const weekConstraints = await constraints.forBoard({ branchId, dates, entries });
+
   return {
     week: week ? week.toObject() : null,
+    constraints: weekConstraints,
     preview,
     dates,
     closed_dates: [...closed],
@@ -202,6 +207,12 @@ async function prepareEntries(week, raw) {
       e.new_class = true;
     }
   }
+  // An accepted constraint is final: the employee cannot be put back on it.
+  const locked = await constraints.acceptedFor({ branchId: week.branch_id, dates });
+  for (const e of entries) {
+    const hit = locked.find(c => blocksEntry(c, e));
+    if (hit) throw new ShiftError(400, `${e.employee_name || 'עובדת'} — יש לה אילוץ מאושר ב-${e.date}`);
+  }
   return { entries, additions };
 }
 
@@ -239,9 +250,13 @@ async function userIdsOf(employeeIds) {
   return rows.map(r => r.user_id);
 }
 
-async function publishWeek({ user, weekId }) {
+async function publishWeek({ user, weekId, now = new Date() }) {
   const week = await loadWeekOr404(weekId);
   assertEdit(user, week.branch_id);
+  if (submissionWindow([week.week_start], now).ok) {
+    throw new ShiftError(409, 'אי אפשר לסגור את הסידור לפני שהגשת האילוצים נסגרת (יום חמישי ב-18:00)');
+  }
+  const autoAccepted = await constraints.resolveForPublish({ user, week, entries: week.entries.map(e => e.toObject()) });
   const first = !week.published_at;
   const affected = [...affectedEmployeeIds(first ? [] : week.published, week.entries)];
   week.published = week.entries.map(e => e.toObject());
@@ -259,7 +274,7 @@ async function publishWeek({ user, weekId }) {
     body: first ? 'אפשר לראות את המשמרות שלך ושל כל הסניף' : 'יש שינוי במשמרות שלך — כדאי להציץ',
     url: `/my-shifts?week=${week.week_start}`,
   }).catch(err => console.error('[shifts] notify failed:', err.message))));
-  return { week, notified: recipients.length };
+  return { week, notified: recipients.length, auto_accepted: autoAccepted };
 }
 
 async function setPrimaryClassroom({ user, employeeId, classroomId }) {
