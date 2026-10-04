@@ -16,8 +16,15 @@ export default function ConstraintsPanel({ constraints, canEdit, onChanged }) {
 
   const post = async (c, url, body, ok) => {
     setBusy(b => ({ ...b, [c._id]: true }));
-    try { await api.post(url, body); toast.success(ok); onChanged(); }
-    catch (err) { toast.error(err.response?.data?.error || 'הפעולה נכשלה'); }
+    try {
+      try { await api.post(url, body); } catch (err) {
+        // A far-off week: the server asks for an explicit "this is final" first.
+        if (err.response?.status !== 409 || !err.response?.data?.needs_confirm) throw err;
+        if (!window.confirm('הפעולה סופית — העובדת תקבל הודעה ולא יהיה אפשר לשבץ אותה ביום הזה. לאשר?')) return;
+        await api.post(url, { ...body, confirm_far: true });
+      }
+      toast.success(ok); onChanged();
+    } catch (err) { toast.error(err.response?.data?.error || 'הפעולה נכשלה'); }
     finally { setBusy(b => ({ ...b, [c._id]: false })); }
   };
 

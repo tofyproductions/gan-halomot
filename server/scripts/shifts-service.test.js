@@ -230,8 +230,29 @@ async function throwsStatus(fn, status, label, message) {
   await throwsStatus(() => svc.publishWeek({ user: manager, weekId: String(wk2._id), now: AFTER }), 409, 'פרסום נחסם כשיש אילוץ לא מטופל');
   eq((await M.ShiftConstraint.findById(openRespected._id)).status, 'open', 'ולא אישר כלום בינתיים');
   await M.ShiftConstraint.updateOne({ _id: openOther._id }, { $set: { status: 'rejected', reject_reason: 'x' } });
+  // The week was opened before Dana's day off was accepted, so the seed still has her on 2026-10-19.
+  eq(wk2.entries.some(e => String(e.employee_id) === String(dana._id) && e.date === '2026-10-19'), true, 'השבוע נפתח לפני האישור — דנה עדיין משובצת ב-19/10');
+  await throwsStatus(() => svc.publishWeek({ user: manager, weekId: String(wk2._id), now: AFTER }), 409, 'פרסום נחסם כשמישהי משובצת על אילוץ מאושר', 'דנה משובצת ב-2026-10-19 למרות אילוץ מאושר — יש להסיר את השיבוץ לפני הסגירה');
+  eq([(await M.ShiftWeek.findById(wk2._id)).published_at, (await M.ShiftConstraint.findById(openRespected._id)).status], [null, 'open'], 'ולא פורסם ולא אושר כלום');
+  const withoutDanaOff = (await M.ShiftWeek.findById(wk2._id)).entries.map(e => e.toObject()).filter(e => !(String(e.employee_id) === String(dana._id) && e.date === '2026-10-19'));
+  await svc.saveEntries({ user: manager, weekId: String(wk2._id), entries: withoutDanaOff });
   const pub2 = await svc.publishWeek({ user: manager, weekId: String(wk2._id), now: AFTER });
   eq([pub2.auto_accepted, (await M.ShiftConstraint.findById(openRespected._id)).status, (await M.ShiftConstraint.findById(openRespected._id)).decided_auto], [1, 'accepted', true], 'מה שהסידור כבר מכבד — מתקבל אוטומטית בפרסום');
+  eq(pub2.week.published.some(e => String(e.employee_id) === String(dana._id) && e.date === '2026-10-19'), false, 'הסידור שפורסם מכבד את האילוץ המאושר');
+
+  console.log('\nפתיחת שבוע מול אילוץ מאושר');
+  const WEEK_NOV = '2026-11-01';
+  await M.ShiftConstraint.create({ employee_id: dana._id, employee_name: 'דנה', branch_id: branch._id, type: 'day_off', date: '2026-11-02', week_start: WEEK_NOV, details: 'x', status: 'accepted' });
+  const boardNov = await svc.getBoard({ user: manager, branchId: String(branch._id), weekStart: WEEK_NOV });
+  eq(boardNov.preview.some(e => String(e.employee_id) === String(dana._id) && e.date === '2026-11-02'), false, 'התצוגה המקדימה לא משבצת על אילוץ מאושר');
+  eq(boardNov.preview.filter(e => String(e.employee_id) === String(dana._id)).length, 4, 'ושאר הימים של דנה נזרעים');
+  const wkNov = await svc.createWeek({ user: manager, branchId: String(branch._id), weekStart: WEEK_NOV });
+  eq(wkNov.entries.some(e => String(e.employee_id) === String(dana._id) && e.date === '2026-11-02'), false, 'פתיחת שבוע לא זורעת שיבוץ על אילוץ מאושר');
+  eq(wkNov.entries.filter(e => String(e.employee_id) === String(dana._id)).length, 4, 'ושאר הימים שלה נזרעים');
+
+  console.log('\nשבוע שעבר');
+  const pubPast = await svc.publishWeek({ user: manager, weekId: String(week._id), now: new Date('2026-11-01T09:00:00Z') });
+  eq(!!pubPast.week.published_at, true, 'שבוע שעבר עדיין אפשר לסגור');
 
   await new Promise(r => setTimeout(r, 500)); // let in-flight notification pushes settle
   await mongoose.disconnect();

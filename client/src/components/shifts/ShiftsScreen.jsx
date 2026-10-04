@@ -194,7 +194,7 @@ export default function ShiftsScreen() {
         </Stack>
       )}
       {board?.can_edit && <EditRequestsPanel requests={board.edit_requests} onDecided={load} />}
-      {board?.week && <ConstraintsPanel constraints={board.constraints} canEdit={!!board.can_edit} onChanged={load} />}
+      {board && <ConstraintsPanel constraints={board.constraints} canEdit={!!board.can_edit} onChanged={load} />}
       {board && (
         <ShiftGrid
           dates={board.dates} rows={rows} closedDates={closed} warnings={board.warnings}

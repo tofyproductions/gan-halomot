@@ -13,7 +13,8 @@ const { branchManagerFilter } = require('../branch-recipients.service');
 const storage = require('../storage.service');
 const { weekStart } = require('../parentVisibility');
 const { ShiftError, canView, assertEdit } = require('./access');
-const { TYPES, FINAL, ACTIONABLE, addDays, ilNow, submissionWindow, isFarFuture, respected } = require('./constraintRules');
+const { weekDays } = require('./rules');
+const { TYPES, FINAL, ACTIONABLE, addDays, ilNow, submissionWindow, isFarFuture, respected, blocksEntry } = require('./constraintRules');
 
 const MAX_FILES = 3;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -71,6 +72,7 @@ const YMD = /^\d{4}-\d{2}-\d{2}$/;
 
 async function createConstraint({ employee, body, files, now = new Date() }) {
   const b = body || {};
+  if (!employee.branch_id) throw new ShiftError(400, 'לכרטיס העובדת לא מוגדר סניף');
   if (!TYPES.includes(b.type)) throw new ShiftError(400, 'סוג אילוץ לא תקין');
   const details = String(b.details || '').trim().slice(0, 1000);
   const doc = {
@@ -88,6 +90,7 @@ async function createConstraint({ employee, body, files, now = new Date() }) {
     if (!b.target_date) throw new ShiftError(400, 'חסר היום שבו תעבדי במקום');
     if (!YMD.test(String(b.target_date))) throw new ShiftError(400, 'תאריך לא תקין');
     doc.target_date = String(b.target_date);
+    if (weekStart(doc.target_date) !== weekStart(doc.date)) throw new ShiftError(400, 'שני הימים צריכים להיות באותו שבוע');
     dates.push(doc.target_date);
   }
   if (b.type === 'swap') {
@@ -106,6 +109,8 @@ async function createConstraint({ employee, body, files, now = new Date() }) {
   const win = submissionWindow(dates, now);
   if (!win.ok) throw new ShiftError(400, win.error);
   doc.week_start = weekStart(doc.date);
+  const duplicate = await ShiftConstraint.exists({ employee_id: employee._id, type: doc.type, date: doc.date, status: { $nin: [...FINAL] } });
+  if (duplicate) throw new ShiftError(409, 'כבר הגשת אילוץ כזה לתאריך הזה');
   doc.files = await storeFiles(files);
   const c = await ShiftConstraint.create(doc);
   if (c.status === 'pending_colleague') {
@@ -148,10 +153,14 @@ async function colleaguesOf({ employee }) {
   return rows.map(r => ({ _id: String(r._id), full_name: r.full_name }));
 }
 
-async function respondColleague({ employee, id, accept }) {
+async function respondColleague({ employee, id, accept, now = new Date() }) {
   const c = await loadOr404(id);
   if (String(c.colleague_id) !== String(employee._id)) throw new ShiftError(403, 'הבקשה לא מיועדת לך');
   if (c.status !== 'pending_colleague') throw new ShiftError(409, 'הבקשה כבר טופלה');
+  // A week that has started, or whose rota is already out, has nothing left to swap into.
+  const started = weekStart(c.date) <= weekStart(ilNow(now).day);
+  const published = !started && await ShiftWeek.exists({ branch_id: c.branch_id, week_start: c.week_start, published_at: { $ne: null } });
+  if (started || published) throw new ShiftError(409, 'הבקשה כבר לא רלוונטית');
   c.status = accept ? 'open' : 'declined';
   await c.save();
   await notifyEmployee(c.employee_id, {
@@ -174,6 +183,7 @@ async function cancelConstraint({ employee, id }) {
   const c = await loadOr404(id);
   if (String(c.employee_id) !== String(employee._id)) throw new ShiftError(403, 'זה לא האילוץ שלך');
   if (['rejected', 'declined', 'cancelled'].includes(c.status)) throw new ShiftError(409, 'האילוץ כבר סגור');
+  const wasLive = ['accepted', 'open'].includes(c.status);
   if (c.employee_request_id) {
     const er = await EmployeeRequest.findById(c.employee_request_id);
     if (er && er.status === 'approved') throw new ShiftError(409, 'הבקשה כבר אושרה בהנהלת החשבונות — פני למשרד');
@@ -196,6 +206,12 @@ async function cancelConstraint({ employee, id }) {
       }).catch(err => console.error('[constraints] notify failed:', err.message));
     }
   }
+  if (c.type === 'swap' && c.colleague_id && wasLive) {
+    await notifyEmployee(c.colleague_id, {
+      type: 'swap_response', ref_collection: 'ShiftConstraint', ref_id: c._id,
+      title: `${c.employee_name} ביטלה את בקשת ההחלפה`, body: `ב-${label(c.date)}`, url: '/my-shifts?tab=constraints',
+    });
+  }
   return { constraint: publicView(c, employee._id), after_publish: afterPublish };
 }
 
@@ -205,10 +221,19 @@ async function acceptInto(c, user, auto) {
   const requestType = { day_off: 'vacation', sick_expected: 'sick' }[c.type];
   if (requestType && !c.employee_request_id) {
     const emp = await Employee.findById(c.employee_id).select('user_id branch_id').lean();
+    const medical = {};
+    const file = requestType === 'sick' && (c.files || [])[0];
+    if (file) {
+      medical.medical_file_data = file.storage_key
+        ? (await storage.getObject(file.storage_key)).toString('base64')
+        : file.file_data || null;
+      medical.medical_file_name = file.name;
+    }
     const er = await EmployeeRequest.create({
       user_id: emp ? emp.user_id || null : null, employee_id: c.employee_id, branch_id: c.branch_id,
       type: requestType, from_date: c.date, to_date: c.date, reason: `אילוץ: ${c.details}`.slice(0, 500),
       status: 'pending_accountant', manager_reviewed_by: user.id, manager_reviewed_at: new Date(),
+      ...medical,
     });
     c.employee_request_id = er._id;
   }
@@ -216,6 +241,16 @@ async function acceptInto(c, user, auto) {
   await notifyEmployee(c.employee_id, {
     type: 'constraint_decision', ref_collection: 'ShiftConstraint', ref_id: c._id,
     title: 'האילוץ שלך התקבל', body: `ב-${label(c.date)}`, url: '/my-shifts?tab=constraints',
+  });
+}
+
+/** A swap's other side hears the manager's decision too. */
+async function notifySwapColleague(c, accepted) {
+  if (c.type !== 'swap' || !c.colleague_id) return;
+  await notifyEmployee(c.colleague_id, {
+    type: 'constraint_decision', ref_collection: 'ShiftConstraint', ref_id: c._id,
+    title: accepted ? 'ההחלפה אושרה' : 'ההחלפה לא אושרה',
+    body: `ב-${label(c.date)} — ${c.employee_name}`, url: '/my-shifts?tab=constraints',
   });
 }
 
@@ -233,11 +268,13 @@ async function decide({ user, id, accept, reason, confirmFar, now = new Date() }
       type: 'constraint_decision', ref_collection: 'ShiftConstraint', ref_id: c._id,
       title: 'האילוץ שלך לא התקבל', body: c.reject_reason, url: '/my-shifts?tab=constraints',
     });
+    await notifySwapColleague(c, false);
     return withoutFileBytes(c);
   }
   if (c.status !== 'open') throw new ShiftError(409, 'בהחלפה פתוחה לכל הסניף יש לבחור מתנדבת');
   if (isFarFuture(c.date, now) && !confirmFar) throw new ShiftError(409, 'אילוץ לשבוע רחוק — יש לאשר שהפעולה סופית', { needs_confirm: true });
   await acceptInto(c, user, false);
+  await notifySwapColleague(c, true);
   return withoutFileBytes(c);
 }
 
@@ -260,6 +297,7 @@ async function pickVolunteer({ user, id, employeeId }) {
   assertEdit(user, c.branch_id);
   if (c.status !== 'broadcast') throw new ShiftError(409, 'אין הצעה פתוחה');
   if (!c.volunteers.some(v => String(v) === String(employeeId))) throw new ShiftError(400, 'העובדת לא התנדבה');
+  if (!await Employee.exists({ _id: employeeId, branch_id: c.branch_id, is_active: true })) throw new ShiftError(400, 'העובדת לא פעילה בסניף');
   c.colleague_id = employeeId;
   await acceptInto(c, user, false);
   await notifyEmployee(employeeId, {
@@ -310,6 +348,15 @@ async function resolveForPublish({ user, week, entries }) {
   const blocking = live.filter(c => !auto.includes(c));
   if (blocking.length) {
     throw new ShiftError(409, `יש ${blocking.length} אילוצים שלא טופלו — יש לאשר או לדחות לפני סגירת הסידור`, { open_constraints: blocking.map(c => String(c._id)) });
+  }
+  // An accepted constraint is a promise already made: the published rota must
+  // keep it. Checked before anything is auto-accepted, so a refused publish
+  // changes nothing.
+  const accepted = await acceptedFor({ branchId: week.branch_id, dates: weekDays(week.week_start) });
+  for (const e of entries) {
+    if (accepted.some(c => blocksEntry(c, e))) {
+      throw new ShiftError(409, `${e.employee_name || 'עובדת'} משובצת ב-${e.date} למרות אילוץ מאושר — יש להסיר את השיבוץ לפני הסגירה`);
+    }
   }
   for (const c of auto) await acceptInto(c, user, true);
   return auto.length;

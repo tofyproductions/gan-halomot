@@ -27,6 +27,16 @@ export default function FutureConstraintsDialog({ open, onClose, branchId, canEd
     finally { setBusy(b => ({ ...b, [c._id]: false })); }
   };
 
+  const approveBroadcast = async (c) => {
+    setBusy(b => ({ ...b, [c._id]: true }));
+    try {
+      await api.post(`/shifts/constraints/${c._id}/approve-broadcast`, {});
+      toast.success('ההצעה נשלחה לכל הסניף');
+      load();
+    } catch (err) { toast.error(err.response?.data?.error || 'הפעולה נכשלה'); }
+    finally { setBusy(b => ({ ...b, [c._id]: false })); }
+  };
+
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth dir="rtl">
       <DialogTitle>אילוצים עתידיים</DialogTitle>
@@ -42,9 +52,11 @@ export default function FutureConstraintsDialog({ open, onClose, branchId, canEd
                 {STATUS_LABEL[c.status] && <Chip size="small" label={STATUS_LABEL[c.status]} />}
               </Stack>
               {c.details && <Typography variant="body2" color="text.secondary">{c.details}</Typography>}
-              {canEdit && c.status === 'open' && (
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Button size="small" variant="contained" disabled={!!busy[c._id]} onClick={() => decide(c, true)}>אישור</Button>
+              {canEdit && ['open', 'pending_broadcast'].includes(c.status) && (
+                <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: 'wrap' }} useFlexGap>
+                  {c.status === 'open'
+                    ? <Button size="small" variant="contained" disabled={!!busy[c._id]} onClick={() => decide(c, true)}>אישור</Button>
+                    : <Button size="small" variant="contained" disabled={!!busy[c._id]} onClick={() => approveBroadcast(c)}>אישור שליחה לכל הסניף</Button>}
                   <TextField size="small" placeholder="סיבת דחייה" value={reason[c._id] || ''} onChange={e => setReason(s => ({ ...s, [c._id]: e.target.value }))} />
                   <Button size="small" color="error" disabled={!!busy[c._id] || !reason[c._id]?.trim()} onClick={() => decide(c, false)}>דחייה</Button>
                 </Stack>

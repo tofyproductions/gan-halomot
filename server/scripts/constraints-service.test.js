@@ -57,6 +57,16 @@ async function throws(fn, status, message, label) {
   eq([withFile.files.length, withFile.files[0].name, !!storedFile.file_data], [1, 'a.pdf', true], 'מסמך נשמר; שבוע רחוק פתוח גם אחרי חמישי');
   eq([withFile.files[0].file_data, withFile.files[0].storage_key], [undefined, undefined], 'ההחזרה למגישה בלי תוכן הקובץ');
   await throws(() => svc.createConstraint({ employee: dana, body: { type: 'day_off', date: 'abc', details: 'x' }, files: [], now: NOW }), 400, 'תאריך לא תקין', 'תאריך לא תקין');
+  await throws(() => svc.createConstraint({ employee: dana, body: { type: 'move_day', date: '2026-10-13', target_date: '2026-10-20' }, files: [], now: NOW }), 400, 'שני הימים צריכים להיות באותו שבוע', 'העברת יום לשבוע אחר — חסום');
+  await throws(() => svc.createConstraint({ employee: dana, body: { type: 'swap', swap_mode: 'mutual', date: '2026-10-14', target_date: '2026-10-21', colleague_id: String(ruth._id) }, files: [], now: NOW }), 400, 'שני הימים צריכים להיות באותו שבוע', 'החלפה הדדית בין שבועות — חסום');
+  await throws(() => svc.createConstraint({ employee: dana, body: { type: 'day_off', date: '2026-10-13', details: 'שוב' }, files: [], now: NOW }), 409, 'כבר הגשת אילוץ כזה לתאריך הזה', 'אותו אילוץ פעמיים — חסום');
+  const otherType = await svc.createConstraint({ employee: dana, body: { type: 'other', date: '2026-10-13', details: 'הערה' }, files: [], now: NOW });
+  eq(otherType.status, 'open', 'סוג אחר באותו תאריך — מותר');
+  await M.ShiftConstraint.updateOne({ _id: otherType._id }, { $set: { status: 'cancelled' } });
+  const again = await svc.createConstraint({ employee: dana, body: { type: 'other', date: '2026-10-13', details: 'שוב' }, files: [], now: NOW });
+  eq(again.status, 'open', 'אחרי ביטול — אפשר להגיש שוב');
+  await M.ShiftConstraint.updateOne({ _id: again._id }, { $set: { status: 'cancelled' } });
+  await throws(() => svc.createConstraint({ employee: { _id: dana._id, full_name: 'דנה', branch_id: null }, body: { type: 'day_off', date: '2026-10-12', details: 'x' }, files: [], now: NOW }), 400, 'לכרטיס העובדת לא מוגדר סניף', 'עובדת בלי סניף — חסום');
   await throws(() => svc.createConstraint({ employee: dana, body: { type: 'other', date: '2026-10-21', details: 'x' }, files: [{ originalname: 'a.exe', mimetype: 'application/x-msdownload', size: 3, buffer: Buffer.from('a') }], now: NOW }), 400, 'אפשר לצרף רק PDF או תמונה (JPG/PNG)', 'סוג קובץ לא מורשה');
 
   console.log('\nהחלפה עם עובדת שנבחרה');
@@ -64,10 +74,16 @@ async function throws(fn, status, message, label) {
   eq(sw.status, 'pending_colleague', 'ממתינה לעובדת השנייה');
   eq(await M.NotificationEvent.countDocuments({ type: 'swap_request' }), 1, 'רות קיבלה התראה');
   await throws(() => svc.createConstraint({ employee: dana, body: { type: 'swap', swap_mode: 'handover', date: '2026-10-14', colleague_id: String(far._id) }, files: [], now: NOW }), 400, 'העובדת לא נמצאה בסניף שלך', 'עובדת מסניף אחר — חסום');
-  await throws(() => svc.respondColleague({ employee: noa, id: String(sw._id), accept: true }), 403, 'הבקשה לא מיועדת לך', 'עובדת אחרת לא יכולה לענות');
-  const swOpen = await svc.respondColleague({ employee: ruth, id: String(sw._id), accept: true });
+  await throws(() => svc.respondColleague({ employee: noa, id: String(sw._id), accept: true, now: NOW }), 403, 'הבקשה לא מיועדת לך', 'עובדת אחרת לא יכולה לענות');
+  const swOpen = await svc.respondColleague({ employee: ruth, id: String(sw._id), accept: true, now: NOW });
   eq(swOpen.status, 'open', 'רות הסכימה — עובר למנהלת');
   eq((swOpen.files || []).some(f => f.file_data || f.storage_key), false, 'תשובת העובדת השנייה בלי תוכן קבצים');
+  const swLate = await svc.createConstraint({ employee: ruth, body: { type: 'swap', swap_mode: 'handover', date: '2026-10-12', colleague_id: String(noa._id) }, files: [], now: NOW });
+  await throws(() => svc.respondColleague({ employee: noa, id: String(swLate._id), accept: true, now: new Date('2026-10-12T06:00:00Z') }), 409, 'הבקשה כבר לא רלוונטית', 'תשובה כשהשבוע כבר התחיל — חסום');
+  eq((await M.ShiftConstraint.findById(swLate._id).lean()).status, 'pending_colleague', 'והבקשה לא השתנתה');
+  const swPub = await svc.createConstraint({ employee: ruth, body: { type: 'swap', swap_mode: 'handover', date: '2026-10-26', colleague_id: String(noa._id) }, files: [], now: NOW });
+  await M.ShiftWeek.create({ branch_id: branch._id, week_start: '2026-10-25', published_at: new Date() });
+  await throws(() => svc.respondColleague({ employee: noa, id: String(swPub._id), accept: true, now: NOW }), 409, 'הבקשה כבר לא רלוונטית', 'תשובה אחרי שהסידור פורסם — חסום');
 
   console.log('\nהצעה לכל הסניף');
   const bc = await svc.createConstraint({ employee: dana, body: { type: 'swap', swap_mode: 'handover', date: '2026-10-15', broadcast: true }, files: [], now: NOW });
@@ -84,6 +100,31 @@ async function throws(fn, status, message, label) {
   eq(mineRuth.offers.map(o => [String(o._id), o.i_volunteered, o.volunteer_count]), [[String(bc._id), true, undefined]], 'מתנדבת רואה שסימנה — בלי ספירה');
   const picked = await svc.pickVolunteer({ user: manager, id: String(bc._id), employeeId: String(noa._id) });
   eq([picked.status, String(picked.colleague_id)], ['accepted', String(noa._id)], 'המנהלת בחרה את נועה');
+  const bc3 = await svc.createConstraint({ employee: dana, body: { type: 'swap', swap_mode: 'handover', date: '2026-10-19', broadcast: true }, files: [], now: NOW });
+  await svc.approveBroadcast({ user: manager, id: String(bc3._id) });
+  await svc.volunteer({ employee: ruth, id: String(bc3._id) });
+  await svc.volunteer({ employee: noa, id: String(bc3._id) });
+  await M.Employee.updateOne({ _id: noa._id }, { $set: { is_active: false } });
+  await throws(() => svc.pickVolunteer({ user: manager, id: String(bc3._id), employeeId: String(noa._id) }), 400, 'העובדת לא פעילה בסניף', 'מתנדבת שעזבה לא נבחרת');
+  await M.Employee.updateOne({ _id: noa._id }, { $set: { is_active: true, branch_id: other._id } });
+  await throws(() => svc.pickVolunteer({ user: manager, id: String(bc3._id), employeeId: String(noa._id) }), 400, 'העובדת לא פעילה בסניף', 'מתנדבת שעברה סניף לא נבחרת');
+  await M.Employee.updateOne({ _id: noa._id }, { $set: { branch_id: branch._id } });
+  eq((await svc.pickVolunteer({ user: manager, id: String(bc3._id), employeeId: String(ruth._id) })).status, 'accepted', 'מתנדבת פעילה בסניף — נבחרת');
+
+  console.log('\nהחלפה — גם העובדת השנייה שומעת');
+  const swA = await svc.createConstraint({ employee: dana, body: { type: 'swap', swap_mode: 'handover', date: '2026-10-20', colleague_id: String(ruth._id) }, files: [], now: NOW });
+  await svc.respondColleague({ employee: ruth, id: String(swA._id), accept: true, now: NOW });
+  await svc.decide({ user: manager, id: String(swA._id), accept: true, confirmFar: true, now: NOW });
+  eq(await M.NotificationEvent.countDocuments({ type: 'constraint_decision', ref_id: swA._id }), 2, 'אישור החלפה — התראה למבקשת ולעובדת השנייה');
+  eq(await M.NotificationEvent.countDocuments({ type: 'constraint_decision', ref_id: swA._id, recipient_id: ruth.user_id, title: 'ההחלפה אושרה' }), 1, 'רות קיבלה "ההחלפה אושרה"');
+  const swR = await svc.createConstraint({ employee: dana, body: { type: 'swap', swap_mode: 'handover', date: '2026-10-21', colleague_id: String(ruth._id) }, files: [], now: NOW });
+  await svc.respondColleague({ employee: ruth, id: String(swR._id), accept: true, now: NOW });
+  await svc.decide({ user: manager, id: String(swR._id), accept: false, reason: 'אין כיסוי', now: NOW });
+  eq(await M.NotificationEvent.countDocuments({ type: 'constraint_decision', ref_id: swR._id }), 2, 'דחיית החלפה — התראה לשתיהן');
+  eq(await M.NotificationEvent.countDocuments({ type: 'constraint_decision', ref_id: swR._id, recipient_id: ruth.user_id, title: 'ההחלפה לא אושרה' }), 1, 'רות קיבלה "ההחלפה לא אושרה"');
+  eq(await M.NotificationEvent.countDocuments({ type: 'swap_response', ref_id: swA._id, recipient_id: ruth.user_id }), 0, 'לפני ביטול — לרות אין התראת ביטול');
+  await svc.cancelConstraint({ employee: dana, id: String(swA._id) });
+  eq(await M.NotificationEvent.countDocuments({ type: 'swap_response', ref_id: swA._id, recipient_id: ruth.user_id, title: 'דנה ביטלה את בקשת ההחלפה' }), 1, 'ביטול החלפה מאושרת — רות מקבלת הודעה');
 
   console.log('\nהחלטת מנהלת');
   await throws(() => svc.decide({ user: manager, id: String(c1._id), accept: false, reason: ' ', now: NOW }), 400, 'יש לכתוב סיבה לדחייה', 'דחייה בלי סיבה');
@@ -94,7 +135,9 @@ async function throws(fn, status, message, label) {
   eq(await M.NotificationEvent.countDocuments({ type: 'constraint_decision', ref_id: c1._id }), 1, 'דנה קיבלה התראה');
   await throws(() => svc.decide({ user: manager, id: String(withFile._id), accept: true, now: NOW }), 409, 'אילוץ לשבוע רחוק — יש לאשר שהפעולה סופית', 'שבוע רחוק בלי אישור סופי');
   const accFar = await svc.decide({ user: manager, id: String(withFile._id), accept: true, confirmFar: true, now: NOW });
-  eq((await M.EmployeeRequest.findById(accFar.employee_request_id).lean()).type, 'sick', 'מחלה צפויה → בקשת מחלה');
+  const sickEr = await M.EmployeeRequest.findById(accFar.employee_request_id).lean();
+  eq(sickEr.type, 'sick', 'מחלה צפויה → בקשת מחלה');
+  eq([sickEr.medical_file_name, sickEr.medical_file_data], ['a.pdf', Buffer.from('abc').toString('base64')], 'המסמך הרפואי עובר לבקשת המחלה');
   eq([accFar.files.length, accFar.files.some(f => f.file_data || f.storage_key)], [1, false], 'החלטת מנהלת — בלי תוכן קבצים');
   await throws(() => svc.decide({ user: manager, id: String(c1._id), accept: false, reason: 'x', now: NOW }), 409, 'האילוץ כבר טופל', 'החלטה כפולה');
 
@@ -108,6 +151,8 @@ async function throws(fn, status, message, label) {
   const late = await svc.cancelConstraint({ employee: dana, id: String(swOpen._id) });
   eq([late.after_publish, late.constraint.cancelled_after_publish], [true, true], 'ביטול אחרי פרסום — מסומן');
   eq(await M.NotificationEvent.countDocuments({ type: 'constraint_cancelled', recipient_id: mgrUser._id }), 1, 'המנהלת קיבלה התראה');
+  eq(await M.NotificationEvent.countDocuments({ type: 'swap_response', ref_id: swOpen._id, recipient_id: ruth.user_id }), 1, 'ביטול החלפה פתוחה — גם רות מקבלת הודעה');
+  eq(await M.NotificationEvent.countDocuments({ type: 'swap_response', ref_id: bc._id }), 0, 'הצעה לכל הסניף בלי עובדת שנייה — אין התראת ביטול');
 
   const bc2 = await svc.createConstraint({ employee: dana, body: { type: 'swap', swap_mode: 'handover', date: '2026-10-16', broadcast: true }, files: [], now: NOW });
   await svc.approveBroadcast({ user: manager, id: String(bc2._id) });

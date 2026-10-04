@@ -63,6 +63,15 @@ async function seedFor(branchId, dates, closedDates) {
   });
 }
 
+/** The seed for a new week, minus what an accepted constraint already rules out. */
+async function seedRespectingConstraints(branchId, dates, closedDates) {
+  const [seeded, locked] = await Promise.all([
+    seedFor(branchId, dates, closedDates),
+    constraints.acceptedFor({ branchId, dates }),
+  ]);
+  return seeded.filter(e => !locked.some(c => blocksEntry(c, e)));
+}
+
 async function getBoard({ user, branchId, weekStart }) {
   if (!mongoose.isValidObjectId(branchId)) throw new ShiftError(404, 'סניף לא נמצא');
   if (!isSunday(weekStart)) throw new ShiftError(400, 'שבוע מתחיל ביום ראשון');
@@ -74,7 +83,7 @@ async function getBoard({ user, branchId, weekStart }) {
   const closed = await closedDatesFor(branchId, dates, week);
   const classrooms = await classroomsWithCounts(branchId, schoolYearOf(weekStart));
   const ratios = effectiveRatios(branch);
-  const preview = week ? null : await seedFor(branchId, dates, closed);
+  const preview = week ? null : await seedRespectingConstraints(branchId, dates, closed);
   const entries = week ? week.entries.map(e => e.toObject()) : preview;
 
   const [employees, commitments, inactive, editRequests] = await Promise.all([
@@ -126,7 +135,7 @@ async function createWeek({ user, branchId, weekStart }) {
   if (await ShiftWeek.exists({ branch_id: branchId, week_start: weekStart })) throw new ShiftError(409, 'הסידור לשבוע הזה כבר נפתח');
   const dates = weekDays(weekStart);
   const closed = await closedDatesFor(branchId, dates, null);
-  const entries = await seedFor(branchId, dates, closed);
+  const entries = await seedRespectingConstraints(branchId, dates, closed);
   try {
     return await ShiftWeek.create({ branch_id: branchId, week_start: weekStart, entries, created_by: user.id });
   } catch (err) {
