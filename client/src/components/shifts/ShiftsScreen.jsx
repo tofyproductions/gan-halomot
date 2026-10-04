@@ -13,6 +13,9 @@ import EntryDialog from './EntryDialog';
 import PrimaryClassDialog from './PrimaryClassDialog';
 import ShiftSettingsDialog from './ShiftSettingsDialog';
 import EditRequestsPanel from './EditRequestsPanel';
+import ConstraintsPanel from './ConstraintsPanel';
+import FutureConstraintsDialog from './FutureConstraintsDialog';
+import { describe } from './constraintLabels';
 import { exportPdf, exportPng } from './shiftExport';
 import { buildRows, switchedSet, fmtDate } from './shiftRows';
 
@@ -61,6 +64,7 @@ export default function ShiftsScreen() {
   const [dlg, setDlg] = useState({ open: false, entry: null, defaults: null });
   const [primaryOpen, setPrimaryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [futureOpen, setFutureOpen] = useState(false);
   const primaryDismissed = useRef(new Set());         // branches where she chose "later"
   useEffect(() => { setDraft(board?.week ? board.week.entries : null); }, [board]);
   useEffect(() => {
@@ -73,6 +77,15 @@ export default function ShiftsScreen() {
   const dirty = !!(draft && board?.week && draft !== board.week.entries);
   const rows = useMemo(() => (board ? buildRows({ entries: shown, classrooms: board.classrooms }) : []), [board, shown]);
   const switched = useMemo(() => switchedSet(shown), [shown]);
+  const alerts = useMemo(() => {
+    const m = new Map();
+    for (const c of board?.constraints || []) {
+      if (!['open', 'accepted', 'pending_broadcast', 'broadcast'].includes(c.status)) continue;
+      const key = `${c.employee_id}|${c.date}`;
+      m.set(key, [...(m.get(key) || []), describe(c)]);
+    }
+    return m;
+  }, [board]);
   const closed = useMemo(() => new Set(board?.closed_dates || []), [board]);
 
   const exportArgs = board && { branchName: board.branch_name, dates: board.dates, rows, switched, closedDates: closed };
@@ -143,7 +156,10 @@ export default function ShiftsScreen() {
           : !board.week ? (board.can_edit ? { label: 'פתיחת סידור לשבוע', onClick: openWeek } : undefined)
           : board.can_edit ? { label: board.week.published_at ? 'סגירת סידור (פרסום שינויים)' : 'סגירת סידור ופרסום', onClick: publish, disabled: !board.has_unpublished_changes }
           : board.can_request ? { label: 'שליחת בקשת שינוי למנהלת', onClick: sendRequest, disabled: !dirty } : undefined}
-        actions={board?.can_edit ? [{ label: 'הגדרות', onClick: () => setSettingsOpen(true) }] : []}
+        actions={[
+          ...(board?.can_edit ? [{ label: 'הגדרות', onClick: () => setSettingsOpen(true) }] : []),
+          { label: 'אילוצים עתידיים', onClick: () => setFutureOpen(true) },
+        ]}
         menu={board ? [
           { label: board.has_unpublished_changes ? 'ייצוא PDF (כולל שינויים שלא פורסמו)' : 'ייצוא PDF להדפסה', onClick: () => exportPdf(exportArgs) },
           { label: 'ייצוא תמונה (PNG)', onClick: () => exportPng(exportArgs) },
@@ -178,10 +194,11 @@ export default function ShiftsScreen() {
         </Stack>
       )}
       {board?.can_edit && <EditRequestsPanel requests={board.edit_requests} onDecided={load} />}
+      {board?.week && <ConstraintsPanel constraints={board.constraints} canEdit={!!board.can_edit} onChanged={load} />}
       {board && (
         <ShiftGrid
           dates={board.dates} rows={rows} closedDates={closed} warnings={board.warnings}
-          switched={switched} editable={editable}
+          switched={switched} editable={editable} alerts={alerts}
           onCellClick={(row, date) => setDlg({ open: true, entry: null, defaults: { date, area: row.area, classroom_id: row.classroom_id } })}
           onEntryClick={(entry) => setDlg({ open: true, entry, defaults: null })}
         />
@@ -194,6 +211,7 @@ export default function ShiftsScreen() {
         onClose={() => { primaryDismissed.current.add(selectedBranch); setPrimaryOpen(false); }}
         pending={board.pending_primary} classrooms={board.classrooms}
         onDone={() => { primaryDismissed.current.add(selectedBranch); setPrimaryOpen(false); load(); }} />}
+      <FutureConstraintsDialog open={futureOpen} onClose={() => setFutureOpen(false)} branchId={board?.branch_id} canEdit={!!board?.can_edit} />
       <ShiftSettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} board={board} onChanged={load} />
     </Box>
   );

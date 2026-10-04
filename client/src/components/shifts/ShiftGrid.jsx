@@ -8,7 +8,7 @@ import { HEB_DAYS, fmtDate } from './shiftRows';
  * scrolling sideways inside its own box — the page itself never widens (see
  * PageHeader for what a wide page does to sticky cells on iOS).
  */
-export default function ShiftGrid({ dates, rows, closedDates, warnings = [], switched, editable, onCellClick, onEntryClick, highlightEmployeeId }) {
+export default function ShiftGrid({ dates, rows, closedDates, warnings = [], switched, editable, onCellClick, onEntryClick, highlightEmployeeId, alerts }) {
   const warnOf = (row, date) => warnings.find(w => w.date === date && String(w.classroom_id) === String(row.classroom_id));
   return (
     <Box component={Paper} sx={{ overflowX: 'auto', borderRadius: 3 }}>
@@ -61,6 +61,11 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                           </Box>
                           {editable && e.new_class && <Chip size="small" label="כיתה חדשה לה" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />}
                           {editable && e.alternating && <Chip size="small" label="יום מתחלף" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />}
+                          {alerts && alerts.get(`${e.employee_id}|${e.date}`) && (
+                            <Tooltip title={alerts.get(`${e.employee_id}|${e.date}`).join(' · ')}>
+                              <Chip size="small" color="warning" label="⚠ אילוץ" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />
+                            </Tooltip>
+                          )}
                         </Box>
                       );
                     })}
