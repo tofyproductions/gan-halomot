@@ -96,6 +96,7 @@ module.exports = {
     const f = await cs.readFile({ user: req.user, employee, id: req.params.id, index: req.params.index });
     res.setHeader('Content-Type', f.mimetype || 'application/octet-stream');
     res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(f.name)}`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.send(f.buffer);
   }),
 };

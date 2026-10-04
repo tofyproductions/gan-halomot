@@ -14,7 +14,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 function uploadErrors(err, _req, res, next) {
   if (err && err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'קובץ גדול מ-10MB' });
   if (err && err.code === 'LIMIT_FILE_COUNT') return res.status(400).json({ error: 'אפשר לצרף עד 3 קבצים' });
-  if (err) return res.status(400).json({ error: err.message });
+  if (err) return res.status(400).json({ error: 'העלאת הקבצים נכשלה' });
   next();
 }
 // The attachment is the employee's and her managers' — the service decides which.
