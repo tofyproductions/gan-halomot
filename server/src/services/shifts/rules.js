@@ -6,6 +6,19 @@ function weekDays(weekStart) {
   return weekDates(weekStart).slice(0, 6);
 }
 
+/**
+ * The gan year a date belongs to, 'YYYY-YYYY+1', September to August — the
+ * same shape Classroom.academic_year is stored in. Last year's classes stay
+ * is_active (their children too) until somebody archives them, so the rota
+ * picks the year from the week, not from what happens to be active.
+ */
+function schoolYearOf(ymd) {
+  const m = /^(\d{4})-(\d{2})/.exec(String(ymd || ''));
+  if (!m) return null;
+  const start = Number(m[2]) >= 9 ? Number(m[1]) : Number(m[1]) - 1;
+  return `${start}-${start + 1}`;
+}
+
 function isSunday(ymd) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(ymd))) return false;
   return new Date(`${ymd}T12:00:00.000Z`).getUTCDay() === 0;
@@ -93,4 +106,4 @@ function needsPrimaryPrompt(employee, commitment) {
   return areaFromCommitmentText(commitment.classroom) === null;
 }
 
-module.exports = { weekDays, isSunday, padHHMM, findOverlaps, affectedEmployeeIds, suggestPrimary, needsPrimaryPrompt };
+module.exports = { schoolYearOf, weekDays, isSunday, padHHMM, findOverlaps, affectedEmployeeIds, suggestPrimary, needsPrimaryPrompt };

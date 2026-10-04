@@ -17,7 +17,7 @@ const { effectiveRatios, ratioWarnings } = require('./ratio');
 const { buildSeedEntries } = require('./seed');
 const { ShiftError, OFFICE, canView, canEdit, assertView, assertEdit } = require('./access');
 const {
-  weekDays, isSunday, padHHMM, findOverlaps, affectedEmployeeIds, suggestPrimary, needsPrimaryPrompt,
+  schoolYearOf, weekDays, isSunday, padHHMM, findOverlaps, affectedEmployeeIds, suggestPrimary, needsPrimaryPrompt,
 } = require('./rules');
 
 async function loadWeekOr404(weekId) {
@@ -39,8 +39,8 @@ async function closedDatesFor(branchId, dates, week) {
   return new Set(dates.filter(d => set.has(d)));
 }
 
-async function classroomsWithCounts(branchId) {
-  const rooms = await Classroom.find({ branch_id: branchId, is_active: true }).select('name category').sort({ name: 1 }).lean();
+async function classroomsWithCounts(branchId, schoolYear) {
+  const rooms = await Classroom.find({ branch_id: branchId, is_active: true, academic_year: schoolYear }).select('name category').sort({ name: 1 }).lean();
   const counts = await Child.aggregate([
     { $match: { classroom_id: { $in: rooms.map(r => r._id) }, is_active: true } },
     { $group: { _id: '$classroom_id', n: { $sum: 1 } } },
@@ -53,7 +53,7 @@ async function seedFor(branchId, dates, closedDates) {
   const [employees, commitments, rooms] = await Promise.all([
     Employee.find({ branch_id: branchId, is_active: true }).select('full_name primary_classroom_id').lean(),
     EmployeeCommitment.find({ branch_id: branchId }).lean(),
-    Classroom.find({ branch_id: branchId, is_active: true }).select('_id').lean(),
+    Classroom.find({ branch_id: branchId, is_active: true, academic_year: schoolYearOf(dates[0]) }).select('_id').lean(),
   ]);
   return buildSeedEntries({
     dates, employees, commitments, closedDates,
@@ -70,7 +70,7 @@ async function getBoard({ user, branchId, weekStart }) {
   const dates = weekDays(weekStart);
   const week = await ShiftWeek.findOne({ branch_id: branchId, week_start: weekStart });
   const closed = await closedDatesFor(branchId, dates, week);
-  const classrooms = await classroomsWithCounts(branchId);
+  const classrooms = await classroomsWithCounts(branchId, schoolYearOf(weekStart));
   const ratios = effectiveRatios(branch);
   const preview = week ? null : await seedFor(branchId, dates, closed);
   const entries = week ? week.entries.map(e => e.toObject()) : preview;
@@ -78,7 +78,7 @@ async function getBoard({ user, branchId, weekStart }) {
   const [employees, commitments, inactive, editRequests] = await Promise.all([
     Employee.find({ branch_id: branchId, is_active: true }).select('full_name primary_classroom_id extra_classroom_ids').sort({ full_name: 1 }).lean(),
     EmployeeCommitment.find({ branch_id: branchId }).lean(),
-    Classroom.find({ branch_id: branchId, is_active: false }).select('name academic_year').sort({ academic_year: -1, name: 1 }).lean(),
+    Classroom.find({ branch_id: branchId, is_active: false, academic_year: schoolYearOf(weekStart) }).select('name academic_year').sort({ academic_year: -1, name: 1 }).lean(),
     week ? ShiftEditRequest.find({ shift_week_id: week._id, status: 'pending' }).sort({ created_at: -1 }).lean() : [],
   ]);
   const commitmentOf = new Map(commitments.map(c => [String(c.employee_id), c]));
@@ -175,7 +175,7 @@ async function prepareEntries(week, raw) {
     .select('full_name branch_id primary_classroom_id extra_classroom_ids');
   const byId = new Map(employees.map(e => [String(e._id), e]));
   const roomIds = [...new Set(entries.filter(e => e.area === 'class').map(e => String(e.classroom_id)))];
-  const rooms = roomIds.length ? await Classroom.find({ _id: { $in: roomIds }, branch_id: week.branch_id }).select('_id').lean() : [];
+  const rooms = roomIds.length ? await Classroom.find({ _id: { $in: roomIds }, branch_id: week.branch_id, academic_year: schoolYearOf(week.week_start) }).select('_id').lean() : [];
   const branchRooms = new Set(rooms.map(r => String(r._id)));
   // A placement already flagged in the stored week stays flagged until it is moved.
   const flagged = new Set(week.entries.filter(e => e.new_class).map(e => `${e.employee_id}|${e.classroom_id}`));

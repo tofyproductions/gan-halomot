@@ -21,7 +21,7 @@ function check(label, fn) {
 
 const { defaultRatios, effectiveRatios, ratioWarnings } = require('../src/services/shifts/ratio');
 const { buildSeedEntries, areaFromCommitmentText } = require('../src/services/shifts/seed');
-const { weekDays, isSunday, findOverlaps, affectedEmployeeIds, suggestPrimary, needsPrimaryPrompt, padHHMM } = require('../src/services/shifts/rules');
+const { schoolYearOf, weekDays, isSunday, findOverlaps, affectedEmployeeIds, suggestPrimary, needsPrimaryPrompt, padHHMM } = require('../src/services/shifts/rules');
 
 const DATES = weekDays('2026-10-11');
 
@@ -35,6 +35,13 @@ check("'07:30' stays", () => assert.strictEqual(padHHMM('07:30'), '07:30'));
 check("'24:00' → ''", () => assert.strictEqual(padHHMM('24:00'), ''));
 check("'7:60' → ''", () => assert.strictEqual(padHHMM('7:60'), ''));
 check("'ab' / '' / null → ''", () => { assert.strictEqual(padHHMM('ab'), ''); assert.strictEqual(padHHMM(''), ''); assert.strictEqual(padHHMM(null), ''); });
+
+check('schoolYearOf: September opens the year, August closes it', () => {
+  assert.strictEqual(schoolYearOf('2026-10-11'), '2026-2027');
+  assert.strictEqual(schoolYearOf('2027-08-29'), '2026-2027');
+  assert.strictEqual(schoolYearOf('2026-09-06'), '2026-2027');
+  assert.strictEqual(schoolYearOf('bad'), null);
+});
 
 console.log('\nratios');
 check('Kfar Saba defaults', () => assert.deepStrictEqual(defaultRatios('כפר סבא - קפלן'), { infants: 5, young: 7, older: 9 }));

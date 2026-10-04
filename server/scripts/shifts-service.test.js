@@ -59,6 +59,10 @@ async function throwsStatus(fn, status, label, message) {
   eq(svc.canEdit(admin, branch._id), false, 'אדמין לא עורך ישירות');
   eq(svc.canView(admin, other._id), true, 'אבל רואה הכל');
 
+  // Last year's class, still active with its children — must not reach the rota.
+  const oldRoom = await M.Classroom.create({ name: 'תינוקייה 20', category: 'תינוקייה', academic_year: '2025-2026', branch_id: branch._id });
+  await M.Child.create({ registration_id: reg._id, child_name: 'ילד ישן', academic_year: '2025-2026', classroom_id: oldRoom._id, is_active: true });
+
   console.log('\nלוח לפני פתיחה');
   let board = await svc.getBoard({ user: manager, branchId: String(branch._id), weekStart: WEEK });
   eq(board.week, null, 'אין שבוע עדיין');
@@ -66,6 +70,8 @@ async function throwsStatus(fn, status, label, message) {
   eq(board.pending_primary.map(p => p.full_name), ['רות'], 'רות בלי כיתה ראשית — נשאלת');
   eq(board.pending_primary[0].suggestion, String(young._id), 'הצעה: הכיתה היחידה בקטגוריה');
   eq(board.ratios, { infants: 5, young: 7, older: 9 }, 'יחסי כפר סבא');
+  eq(board.classrooms.map(c => c._id).includes(String(oldRoom._id)), false, 'כיתה משנה קודמת לא מופיעה בלוח');
+  eq(board.classrooms.length, 2, 'רק כיתות השנה של השבוע');
   eq(board.ratio_overrides, { infants: '', young: '', older: '' }, 'בלי יחס סניף — הכל ריק (ברירת מחדל עירונית)');
 
   console.log('\nפתיחת שבוע');
