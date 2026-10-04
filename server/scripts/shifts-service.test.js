@@ -183,14 +183,14 @@ async function throwsStatus(fn, status, label, message) {
   const w2 = await svc.createWeek({ user: manager, branchId: String(branch._id), weekStart: WEEK2 });
   const base2 = () => w2.entries.map(e => e.toObject());
   const foreignEntry = { employee_id: foreignEmp._id, date: '2026-10-26', area: 'floater', start_hhmm: '08:00', end_hhmm: '12:00' };
-  await throwsStatus(() => svc.saveEntries({ user: manager, weekId: String(w2._id), entries: [...base2(), foreignEntry] }), 400, 'עובדת מסניף אחר נדחית', 'זרה לא שייכת לסניף הזה');
+  await throwsStatus(() => svc.saveEntries({ user: manager, weekId: String(w2._id), entries: [...base2(), foreignEntry] }), 400, 'עובדת מסניף אחר נדחית', 'לזרה אין תעריף לסניף הזה — יש לשלוח בקשת תעריף');
   eq((await M.Employee.findById(foreignEmp._id)).extra_classroom_ids.length, 0, 'ולא נכתב דבר לכרטיס שלה');
   const isDana = e => String(e.employee_id) === String(dana._id);
   const danaE = base2().find(isDana);
   const swapRoom = base2().map(e => (isDana(e) && e.date === danaE.date ? { ...e, area: 'class', classroom_id: foreignRoom._id } : e));
   eq(swapRoom.length, w2.entries.length, 'הכיתה הזרה מחליפה את השורה, בלי כפילות');
   await throwsStatus(() => svc.saveEntries({ user: manager, weekId: String(w2._id), entries: swapRoom }), 400, 'כיתה מסניף אחר נדחית', 'הכיתה לא שייכת לסניף');
-  await throwsStatus(() => svc.createEditRequest({ user: admin, weekId: String(w2._id), entries: [...base2(), foreignEntry] }), 400, 'בקשת משרד עם עובדת זרה נדחית', 'זרה לא שייכת לסניף הזה');
+  await throwsStatus(() => svc.createEditRequest({ user: admin, weekId: String(w2._id), entries: [...base2(), foreignEntry] }), 400, 'בקשת משרד עם עובדת זרה נדחית', 'לזרה אין תעריף לסניף הזה — יש לשלוח בקשת תעריף');
 
   const spoof = base2().map(e => (isDana(e) && e.date === danaE.date ? { ...e, employee_name: 'מזויף' } : e));
   eq(spoof.find(e => e.employee_name === 'מזויף') !== undefined, true, 'השם המזויף אכן נשלח');
@@ -253,6 +253,35 @@ async function throwsStatus(fn, status, label, message) {
   console.log('\nשבוע שעבר');
   const pubPast = await svc.publishWeek({ user: manager, weekId: String(week._id), now: new Date('2026-11-01T09:00:00Z') });
   eq(!!pubPast.week.published_at, true, 'שבוע שעבר עדיין אפשר לסגור');
+
+  console.log('\nסניפים אחרים בסידור');
+  const otherMgrU = await M.User.create({ full_name: 'מנהלת הרצליה', id_number: '777000001', email: 'om@x.l', password_hash: 'x', role: 'branch_manager', is_active: true, managed_branch_ids: [other._id], branch_id: other._id });
+  const otherMgr = { id: String(otherMgrU._id), role: 'branch_manager', managed_branch_ids: [String(other._id)], full_name: 'מנהלת הרצליה' };
+  const guest = await M.Employee.create({ full_name: 'אורחת', israeli_id: '777000002', branch_id: other._id, is_active: true });
+  const WK = '2026-11-01';
+  const wkX = await M.ShiftWeek.findById(wkNov._id); // 2026-11-01 already opened above
+  const baseX = wkX.entries.map(e => e.toObject());
+  const guestEntry = { employee_id: guest._id, date: '2026-11-02', area: 'floater', start_hhmm: '13:00', end_hhmm: '17:00' };
+  await throwsStatus(() => svc.saveEntries({ user: manager, weekId: String(wkX._id), entries: [...baseX, guestEntry] }), 400, 'עובדת מסניף אחר בלי תעריף — נדחית');
+  await M.Employee.updateOne({ _id: guest._id }, { $set: { branch_rates: [{ branch_id: branch._id, hourly_rate: 50 }] } });
+  const savedX = await svc.saveEntries({ user: manager, weekId: String(wkX._id), entries: [...baseX, guestEntry] });
+  const gx = savedX.entries.find(e => String(e.employee_id) === String(guest._id));
+  eq([gx.cross_branch, gx.cross_status], [true, 'pending'], 'עם תעריף — נשמר וממתין לאישור סניף הבית');
+  eq(await M.NotificationEvent.countDocuments({ type: 'cross_placement_request', recipient_id: otherMgrU._id }), 1, 'מנהלת הבית קיבלה בקשה');
+  await throwsStatus(() => svc.publishWeek({ user: manager, weekId: String(wkX._id), now: new Date('2026-10-29T16:00:00Z') }), 409, 'פרסום נחסם בזמן שיבוץ ממתין');
+  // Home manager places her in her own branch at overlapping hours → refused.
+  const wkO = await svc.createWeek({ user: otherMgr, branchId: String(other._id), weekStart: WK });
+  await throwsStatus(() => svc.saveEntries({ user: otherMgr, weekId: String(wkO._id), entries: [...wkO.entries.map(e => e.toObject()), { employee_id: guest._id, date: '2026-11-02', area: 'floater', start_hhmm: '12:00', end_hhmm: '14:00' }] }), 400, 'חפיפה בין סניפים נדחית');
+  const okO = await svc.saveEntries({ user: otherMgr, weekId: String(wkO._id), entries: [...wkO.entries.map(e => e.toObject()), { employee_id: guest._id, date: '2026-11-02', area: 'floater', start_hhmm: '07:00', end_hhmm: '13:00' }] });
+  eq(okO.entries.some(e => String(e.employee_id) === String(guest._id)), true, 'שעות שונות באותו יום — מותר');
+  const boardO = await svc.getBoard({ user: otherMgr, branchId: String(other._id), weekStart: WK });
+  eq([boardO.away.length, boardO.cross_pending.length], [1, 1], 'מנהלת הבית רואה אותה בסניף האחר וממתין לה');
+  const C2 = require('../src/services/shifts/crossBranch.service');
+  await C2.decidePlacement({ user: otherMgr, weekId: String(wkX._id), entryId: String(gx._id), approve: true });
+  const resave = await svc.saveEntries({ user: manager, weekId: String(wkX._id), entries: (await M.ShiftWeek.findById(wkX._id)).entries.map(e => e.toObject()) });
+  eq(resave.entries.find(e => String(e.employee_id) === String(guest._id)).cross_status, 'approved', 'שמירה חוזרת שומרת על האישור');
+  const boardX = await svc.getBoard({ user: manager, branchId: String(branch._id), weekStart: WK });
+  eq(boardX.foreign_candidates.find(c => c._id === String(guest._id)).has_rate, true, 'הלוח מציע עובדות מסניפים אחרים');
 
   await new Promise(r => setTimeout(r, 500)); // let in-flight notification pushes settle
   await mongoose.disconnect();

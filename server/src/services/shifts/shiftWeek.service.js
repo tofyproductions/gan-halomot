@@ -16,6 +16,9 @@ const { closureDateSet } = require('../fixedSchedule');
 const { effectiveRatios, ratioWarnings } = require('./ratio');
 const { buildSeedEntries } = require('./seed');
 const constraints = require('./constraints.service');
+const cross = require('./crossBranch.service');
+const rateRequests = require('./rateRequests.service');
+const { hasBranchRate, placementKey, crossOverlaps, arrangementCovers } = require('./crossRules');
 const { blocksEntry, submissionWindow } = require('./constraintRules');
 const { ShiftError, OFFICE, canView, canEdit, assertView, assertEdit } = require('./access');
 const {
@@ -102,6 +105,15 @@ async function getBoard({ user, branchId, weekStart }) {
 
   const weekConstraints = await constraints.forBoard({ branchId, dates, entries });
 
+  const branchEmployeeIds = employees.map(e => String(e._id));
+  const [foreignCandidates, away, crossPending, arrangements, allRateRequests] = await Promise.all([
+    cross.foreignCandidates({ hostBranchId: branchId }),
+    cross.otherBranchEntries({ weekStart, employeeIds: branchEmployeeIds, excludeBranchId: branchId }),
+    cross.homePending({ branchId }),
+    cross.arrangementsFor({ user, branchId }),
+    rateRequests.listRateRequests({ user }),
+  ]);
+
   return {
     week: week ? week.toObject() : null,
     constraints: weekConstraints,
@@ -110,7 +122,8 @@ async function getBoard({ user, branchId, weekStart }) {
     closed_dates: [...closed],
     classrooms,
     inactive_classrooms: inactive.map(r => ({ _id: String(r._id), name: r.name, academic_year: r.academic_year })),
-    employees: employees.map(e => ({ _id: String(e._id), full_name: e.full_name, primary_classroom_id: e.primary_classroom_id ? String(e.primary_classroom_id) : null, extra_classroom_ids: (e.extra_classroom_ids || []).map(String) })),
+    employees: employees.map(e => ({ _id: String(e._id), full_name: e.full_name, primary_classroom_id: e.primary_classroom_id ? String(e.primary_classroom_id) : null, extra_classroom_ids: (e.extra_classroom_ids || []).map(String) }))
+      .concat(foreignCandidates.filter(c => c.has_rate).map(c => ({ _id: String(c._id), full_name: `${c.full_name} (${c.branch_name})`, primary_classroom_id: null, extra_classroom_ids: [], foreign: true }))),
     ratios,
     // What the branch itself set, blank where it follows the city default —
     // the settings form edits these, not the effective values above.
@@ -125,6 +138,11 @@ async function getBoard({ user, branchId, weekStart }) {
     can_request: OFFICE.includes(user.role),
     branch_id: String(branch._id),
     branch_name: branch.name,
+    foreign_candidates: foreignCandidates,
+    away,
+    cross_pending: crossPending,
+    arrangements,
+    rate_requests: allRateRequests.filter(r => String(r.home_branch_id) === String(branchId) || String(r.host_branch_id) === String(branchId) || ['system_admin', 'accountant'].includes(user.role)),
     has_unpublished_changes: week ? affectedEmployeeIds(week.published, week.entries).size > 0 || !week.published_at : false,
   };
 }
@@ -186,7 +204,7 @@ async function prepareEntries(week, raw) {
     throw new ShiftError(400, `${first.employee_name || 'עובדת'} משובצת בשעות חופפות ב-${first.date}`, { overlaps });
   }
   const employees = await Employee.find({ _id: { $in: [...new Set(entries.map(e => String(e.employee_id)))] } })
-    .select('full_name branch_id primary_classroom_id extra_classroom_ids');
+    .select('full_name branch_id primary_classroom_id extra_classroom_ids branch_rates');
   const byId = new Map(employees.map(e => [String(e._id), e]));
   const roomIds = [...new Set(entries.filter(e => e.area === 'class').map(e => String(e.classroom_id)))];
   const rooms = roomIds.length ? await Classroom.find({ _id: { $in: roomIds }, branch_id: week.branch_id, academic_year: schoolYearOf(week.week_start) }).select('_id').lean() : [];
@@ -197,7 +215,12 @@ async function prepareEntries(week, raw) {
   for (const e of entries) {
     const emp = byId.get(String(e.employee_id));
     if (!emp) throw new ShiftError(400, 'עובדת לא נמצאה');
-    if (String(emp.branch_id) !== String(week.branch_id)) throw new ShiftError(400, `${emp.full_name} לא שייכת לסניף הזה`);
+    const foreign = String(emp.branch_id) !== String(week.branch_id);
+    if (foreign && !hasBranchRate(emp, week.branch_id)) {
+      throw new ShiftError(400, `ל${emp.full_name} אין תעריף לסניף הזה — יש לשלוח בקשת תעריף`, { needs_rate: String(emp._id) });
+    }
+    e.cross_branch = foreign;
+    e.cross_status = null;
     if (e.area === 'class' && !branchRooms.has(String(e.classroom_id))) throw new ShiftError(400, 'הכיתה לא שייכת לסניף');
     e.employee_name = emp.full_name;
     // 'HH:MM' strings compare in time order.
@@ -216,6 +239,23 @@ async function prepareEntries(week, raw) {
       e.new_class = true;
     }
   }
+  // Cross-branch: approval carried over, or by a permanent arrangement; otherwise pending.
+  const foreignIds = [...new Set(entries.filter(e => e.cross_branch).map(e => String(e.employee_id)))];
+  const approvedBefore = new Set(week.entries.filter(e => e.cross_status === 'approved').map(e => placementKey(e)));
+  const arrangements = foreignIds.length ? await cross.activeArrangements({ hostBranchId: week.branch_id, employeeIds: foreignIds }) : [];
+  for (const e of entries) {
+    if (!e.cross_branch) continue;
+    e.cross_status = (approvedBefore.has(placementKey(e)) || arrangements.some(a => arrangementCovers(a, e))) ? 'approved' : 'pending';
+  }
+  // Nobody in two branches at once.
+  const allIds = [...new Set(entries.map(e => String(e.employee_id)))];
+  const elsewhere = await cross.otherBranchEntries({ weekStart: week.week_start, employeeIds: allIds, excludeBranchId: week.branch_id });
+  const clash = crossOverlaps(entries, elsewhere);
+  if (clash.length) {
+    const c = clash[0];
+    const where = elsewhere.find(o => o.branch_id === c.other_branch_id);
+    throw new ShiftError(400, `${c.employee_name} משובצת באותן שעות בסניף ${where ? where.branch_name : 'אחר'} ב-${c.date}`);
+  }
   // An accepted constraint is final: the employee cannot be put back on it.
   const locked = await constraints.acceptedFor({ branchId: week.branch_id, dates });
   for (const e of entries) {
@@ -228,11 +268,23 @@ async function prepareEntries(week, raw) {
 /** The shared write behind a manager's save and an approved office request. */
 async function applyEntries(week, raw) {
   const { entries, additions } = await prepareEntries(week, raw);
+  const prevPendingKeys = new Set(week.entries.filter(e => e.cross_status === 'pending').map(e => placementKey(e)));
   for (const [empId, rooms] of additions) {
     await Employee.updateOne({ _id: empId }, { $addToSet: { extra_classroom_ids: { $each: [...rooms] } } });
   }
   week.entries = entries;
   await week.save();
+  const newlyPending = week.entries.filter(e => e.cross_status === 'pending' && !prevPendingKeys.has(placementKey(e)));
+  if (newlyPending.length) {
+    const homes = await Employee.find({ _id: { $in: newlyPending.map(e => e.employee_id) } }).select('branch_id full_name').lean();
+    for (const h of homes) {
+      const ids = await cross.managersOf(h.branch_id);
+      await Promise.all(ids.map(recipient_id => notificationService.notifyOnce({
+        type: 'cross_placement_request', ref_collection: 'ShiftWeek', ref_id: week._id, recipient_id,
+        title: `${h.full_name} שובצה בסניף אחר`, body: 'נדרש אישור שלך לשיבוץ', url: '/shifts',
+      }).catch(err => console.error('[shifts] notify failed:', err.message))));
+    }
+  }
   return week;
 }
 
@@ -264,6 +316,9 @@ async function publishWeek({ user, weekId, now = new Date() }) {
   assertEdit(user, week.branch_id);
   if (submissionWindow([week.week_start], now).ok) {
     throw new ShiftError(409, 'אי אפשר לסגור את הסידור לפני שהגשת האילוצים נסגרת (יום חמישי ב-18:00)');
+  }
+  if (week.entries.some(e => e.cross_status === 'pending')) {
+    throw new ShiftError(409, 'יש שיבוצים מסניף אחר שממתינים לאישור מנהלת סניף הבית');
   }
   const autoAccepted = await constraints.resolveForPublish({ user, week, entries: week.entries.map(e => e.toObject()) });
   const first = !week.published_at;
