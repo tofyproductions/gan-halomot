@@ -65,6 +65,32 @@ function monthAmount(l, ym) {
   return p ? (Number(p.amount) || 0) : 0;
 }
 
+function addMonths(ym, n) {
+  let out = ym;
+  for (let i = 0; i < n; i++) out = nextMonth(out);
+  return out;
+}
+/**
+ * The last month any still-running loan deducts in (from `ym` on), or null.
+ * A new loan for someone already repaying one starts the month after — one
+ * deduction at a time, not two side by side.
+ */
+function lastActiveMonth(loans, ym) {
+  let last = null;
+  for (const l of loans) {
+    if (isMerged(l, ym)) continue;
+    let end = null;
+    if (isNew(l)) {
+      for (const p of l.payments) if ((Number(p.amount) || 0) > 0 && p.month >= ym && (!end || p.month > end)) end = p.month;
+    } else {
+      const left = (Number(l.installments_total) || 0) - (Number(l.installments_paid) || 0);
+      if (left > 0) end = addMonths(ym, left - 1);
+    }
+    if (end && (!last || end > last)) last = end;
+  }
+  return last;
+}
+
 export default function LoansDialog({ open, row, month, onClose, onSaved }) {
   const confirm = useConfirm();
   const ym = month || currentYearMonth();
@@ -78,8 +104,10 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
 
   useEffect(() => {
     if (!open || !row) return;
-    setLoans(row.loans_info?.loans || []);
-    setDraft({ total_amount: '', installment_amount: '', installments_total: '', start_month: ym, notes: '' });
+    const current = row.loans_info?.loans || [];
+    const runningUntil = lastActiveMonth(current, ym);
+    setLoans(current);
+    setDraft({ total_amount: '', installment_amount: '', installments_total: '', start_month: runningUntil ? nextMonth(runningUntil) : ym, notes: '' });
     setEditIdx(-1);
     setEditDraft(null);
   }, [open, row, ym]);
@@ -94,6 +122,14 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
       .finally(() => setSaving(false));
   };
 
+  // Count follows total ÷ monthly until the manager types her own.
+  const withCount = (d) => {
+    if (d.count_typed) return d;
+    const t = Number(d.total_amount); const i = Number(d.installment_amount);
+    return { ...d, installments_total: t > 0 && i > 0 ? String(Math.ceil(t / i)) : '' };
+  };
+  const runningUntil = lastActiveMonth(loans, ym);
+
   const addLoan = () => {
     const total = Number(draft.total_amount);
     const inst = Number(draft.installment_amount);
@@ -103,13 +139,17 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
       toast.error('חובה למלא: סכום כולל, תשלום חודשי, מספר תשלומים');
       return;
     }
+    // The last payment is whatever is left, so the schedule adds up to the
+    // total exactly (2,500 at 1,000 a month = 1,000 + 1,000 + 500).
+    const payments = buildSchedule(start, cnt, inst);
+    if (cnt === Math.ceil(total / inst) && cnt * inst > total) payments[cnt - 1].amount = total - inst * (cnt - 1);
     const next = [...loans, {
       total_amount: total,
       installment_amount: inst,
       installments_total: cnt,
       installments_paid: 0,
       start_month: start,
-      payments: buildSchedule(start, cnt, inst),
+      payments,
       started_at: new Date(),
       notes: draft.notes || '',
     }];
@@ -480,15 +520,15 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
           <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>הוסף הלוואה / מפרעה חדשה</Typography>
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
             <TextField size="small" type="number" label="סכום כולל"
-              value={draft.total_amount} onChange={e => setDraft({ ...draft, total_amount: e.target.value })}
+              value={draft.total_amount} onChange={e => setDraft(withCount({ ...draft, total_amount: e.target.value }))}
               sx={{ width: 130 }}
             />
             <TextField size="small" type="number" label="תשלום חודשי"
-              value={draft.installment_amount} onChange={e => setDraft({ ...draft, installment_amount: e.target.value })}
+              value={draft.installment_amount} onChange={e => setDraft(withCount({ ...draft, installment_amount: e.target.value }))}
               sx={{ width: 130 }}
             />
             <TextField size="small" type="number" label="מספר תשלומים"
-              value={draft.installments_total} onChange={e => setDraft({ ...draft, installments_total: e.target.value })}
+              value={draft.installments_total} onChange={e => setDraft({ ...draft, installments_total: e.target.value, count_typed: true })}
               sx={{ width: 130 }}
             />
             <TextField size="small" type="month" label="חודש התחלה" InputLabelProps={{ shrink: true }}
@@ -503,6 +543,11 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
               הוסף
             </Button>
           </Stack>
+          {runningUntil && (
+            <Alert severity="info" icon={false} sx={{ py: 0.5 }}>
+              יש הלוואה פעילה שמסתיימת ב-{runningUntil}, לכן ההלוואה החדשה מתחילה ב-{nextMonth(runningUntil)} — ממשיכה את רצף התשלומים ולא במקביל. אפשר לשנות את חודש ההתחלה ידנית.
+            </Alert>
+          )}
           <Typography variant="caption" color="text.secondary">
             מפרעה = סכום כולל + תשלום חודשי זהים + מספר תשלומים 1. תרד מהשכר בחודש ההתחלה.
           </Typography>
