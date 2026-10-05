@@ -38,6 +38,10 @@ router.use('/agent', require('./agent.routes'));
 // Bank feed from the bank-pi agent — HMAC-signed, not a user session.
 router.use('/finance/agent', require('./financeAgent.routes'));
 
+// המוח's read window — its own Bearer key (BRAIN_READ_KEY), GET only, closed
+// (503) while the key is unset. See routes/brain.routes.js.
+router.use('/brain', require('./brain.routes'));
+
 // Task-board sync — same idea as the agent above: its own shared-key + HMAC
 // scheme rather than the JWT flow, so it sits with the routes that authenticate
 // themselves. Read-only, and closed entirely when TASKS_SYNC_KEY is unset.
