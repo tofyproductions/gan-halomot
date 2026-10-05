@@ -1429,6 +1429,124 @@ function targetKey(r) {
   return `nm:${name}::${branch}`;
 }
 
+// ── Returned-but-unflagged payslips ────────────────────────────────────────
+// A correction round's PDF usually carries the whole branch, not only the
+// employees we flagged. "The rest came back unchanged" must be VERIFIED, not
+// assumed — the fields below are diffed against the payslip the original
+// audit parsed, so an unrequested change can't slip through in the crowd.
+
+const UNTOUCHED_COMPARE_FIELDS = [
+  ['net_to_pay', 'נטו לתשלום'],
+  ['net_salary', 'שכר נטו'],
+  ['total_payments', 'סה״כ תשלומים'],
+  ['total_deductions', 'סה״כ ניכויים'],
+  ['base_salary', 'שכר יסוד'],
+  ['paid_hours', 'שעות בתשלום'],
+  ['actual_hours', 'שעות בפועל'],
+  ['paid_days', 'ימים בתשלום'],
+  ['actual_days', 'ימים בפועל'],
+  ['hourly_rate', 'תעריף שעה'],
+  ['daily_rate', 'תעריף יום'],
+  ['item_ot_125_hours', 'שעות 125%'],
+  ['item_ot_150_hours', 'שעות 150%'],
+  ['global_ot_amount', 'ש״נ גלובלי'],
+  ['transport_value', 'נסיעות'],
+  ['meal_value', 'שווי ארוחות'],
+  ['vehicle_value', 'שווי רכב'],
+  ['gift_value', 'שי לחג'],
+  ['bonus_value', 'בונוס'],
+  ['recreation_value', 'הבראה'],
+  ['vacation.balance', 'יתרת חופשה'],
+  ['vacation.used', 'חופשה שנוצלה'],
+  ['sick.used', 'מחלה שנוצלה'],
+];
+
+function payslipPath(p, path) {
+  return path.split('.').reduce((o, k) => (o == null ? o : o[k]), p);
+}
+
+/** Diff two parsed payslips over the curated field list. A field counts only
+ * when BOTH sides parsed it — parser misses must not read as changes. */
+function diffParsedPayslips(before, after) {
+  const diffs = [];
+  let compared = 0;
+  for (const [path, label] of UNTOUCHED_COMPARE_FIELDS) {
+    const a = payslipPath(before, path);
+    const b = payslipPath(after, path);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+    compared += 1;
+    if (Math.abs(a - b) > 0.009) diffs.push({ field: path, label, before: a, after: b });
+  }
+  // Lump-sum line items, compared as sorted amount lists.
+  const amounts = (p) => (Array.isArray(p.items) ? p.items : [])
+    .map((it) => Number(it?.amount)).filter(Number.isFinite)
+    .sort((x, y) => x - y).map((n) => n.toFixed(2)).join(', ');
+  const ia = amounts(before); const ib = amounts(after);
+  if (ia || ib) {
+    compared += 1;
+    if (ia !== ib) diffs.push({ field: 'items', label: 'שורות תשלום (סכומים)', before: ia || '—', after: ib || '—' });
+  }
+  return { diffs, compared };
+}
+
+/** Normalized-name key for matching a round payslip to its original. */
+function plainName(name) {
+  return String(name || '').replace(/[()'"״׳.,-]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Classify the round's payslips that were NOT among the flagged employees:
+ *   unchanged   — verified identical to the original audit's payslip
+ *   changed     — differs although no correction was requested (loud)
+ *   no_baseline — nothing to compare against (not parsed in the original run)
+ */
+function classifyUnflaggedPayslips(doc, orphanPayslips, targetKeys) {
+  const origById = new Map();
+  const origByName = new Map();   // name -> result, or null when ambiguous
+  for (const r of (doc.full_result?.results || [])) {
+    if (!r?.payslip) continue;
+    const id = r.payslip.employee_id;
+    if (id && !origById.has(String(id))) origById.set(String(id), r);
+    const nm = plainName(r.payslip.employee_name || r.table_row?.employee_name);
+    if (nm) origByName.set(nm, origByName.has(nm) ? null : r);
+  }
+
+  const untouched = [];
+  for (const p of orphanPayslips || []) {
+    // A flagged employee whose new page failed the table match shows up as an
+    // orphan too; that case is already reported on its own item as unmatched.
+    const nm = plainName(p.employee_name);
+    const selfKey = p.employee_id ? `id:${p.employee_id}` : null;
+    if (selfKey && targetKeys.has(selfKey)) continue;
+
+    const orig = (p.employee_id && origById.get(String(p.employee_id))) || (nm && origByName.get(nm)) || null;
+    if (orig && targetKeys.has(targetKey(orig))) continue;
+
+    let verdict = 'no_baseline';
+    let diffs = [];
+    let compared = 0;
+    if (orig?.payslip) {
+      const d = diffParsedPayslips(orig.payslip, p);
+      compared = d.compared;
+      diffs = d.diffs;
+      verdict = compared === 0 ? 'no_baseline' : (diffs.length ? 'changed' : 'unchanged');
+    }
+    untouched.push({
+      key: orig ? targetKey(orig) : (selfKey || `nm:${nm}::${p.__round_branch || ''}`),
+      employee_name: p.employee_name || orig?.table_row?.employee_name || '—',
+      branch: (orig?.__source_branch || orig?.table_row?.branch || p.__round_branch || '').replace(/\s+/g, ' ').trim(),
+      employee_no: p.employee_no ?? null,
+      employee_id: p.employee_id || '',
+      page_index: p.page_index || null,
+      round_branch: p.__round_branch || null,
+      verdict,
+      compared_fields: compared,
+      diffs,
+    });
+  }
+  return untouched;
+}
+
 /**
  * Re-check one round of corrected payslips against the notes that were sent.
  *
@@ -1469,7 +1587,10 @@ async function runFixRound(doc, entries, { source = 'internal', user = null, not
   for (const fr of fresh.results) if (fr.table_row) byRow.set(fr.table_row, fr);
 
   const items = [];
-  const summary = { employees: 0, notes: 0, fixed: 0, not_fixed: 0, manual: 0, unmatched: 0, new_issues: 0 };
+  const summary = {
+    employees: 0, notes: 0, fixed: 0, not_fixed: 0, manual: 0, unmatched: 0, new_issues: 0,
+    unflagged_unchanged: 0, unflagged_changed: 0, unflagged_unverified: 0,
+  };
 
   for (const t of targets) {
     const fr = t.result.table_row ? byRow.get(t.result.table_row) : null;
@@ -1543,6 +1664,16 @@ async function runFixRound(doc, entries, { source = 'internal', user = null, not
     });
   }
 
+  // The rest of the returned file — employees nobody flagged. Verify each one
+  // against its original payslip so "came back untouched" is a checked fact.
+  const targetKeys = new Set(targets.map((t) => targetKey(t.result)));
+  const untouched = classifyUnflaggedPayslips(doc, fresh.orphan_payslips, targetKeys);
+  for (const u of untouched) {
+    if (u.verdict === 'unchanged') summary.unflagged_unchanged += 1;
+    else if (u.verdict === 'changed') summary.unflagged_changed += 1;
+    else summary.unflagged_unverified += 1;
+  }
+
   // Keep the re-check in ordinary audit shape too. The verdict list answers
   // "was it fixed"; seeing the corrected payslip next to the numbers is a
   // different question, and the review screen already does that well.
@@ -1570,6 +1701,7 @@ async function runFixRound(doc, entries, { source = 'internal', user = null, not
     note: String(note || '').slice(0, 2000),
     uploaded_files: entries.map((e) => ({ branch: e.branch, filename: e.file.originalname })),
     items,
+    untouched,
     summary,
   });
   await doc.save();
@@ -3824,6 +3956,10 @@ module.exports = {
   // decides whether a payslip is attributed to an employee at all.
   padId9,
   payslipIdCandidates,
+  // Exported for scripts/payslip-untouched.test.js — the verified "came back
+  // unchanged" classification of unflagged payslips in a correction round.
+  diffParsedPayslips,
+  classifyUnflaggedPayslips,
   listBranches,
   emailAudit,
   previewAuditEmail,

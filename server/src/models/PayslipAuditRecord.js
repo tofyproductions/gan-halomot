@@ -123,6 +123,32 @@ const payslipAuditSchema = new mongoose.Schema(
           }],
           default: [],
         },
+        // Payslips that came back in the round's files WITHOUT having been
+        // flagged for correction. Each is diffed against the payslip the
+        // original audit parsed, so "nothing changed" is a verified statement
+        // rather than an assumption — and a payslip that DID change without
+        // being asked to stands out.
+        untouched: {
+          type: [{
+            key: String,
+            employee_name: String,
+            branch: String,
+            employee_no: mongoose.Schema.Types.Mixed,
+            employee_id: String,
+            page_index: Number,
+            round_branch: String,
+            // 'unchanged' — verified identical to the original payslip.
+            // 'changed'   — differs although no correction was requested.
+            // 'no_baseline' — no original payslip to compare against.
+            verdict: String,
+            compared_fields: { type: Number, default: 0 },
+            diffs: {
+              type: [{ field: String, label: String, before: mongoose.Schema.Types.Mixed, after: mongoose.Schema.Types.Mixed }],
+              default: [],
+            },
+          }],
+          default: [],
+        },
         // The re-check in the same shape as an ordinary audit result, so the
         // round can be opened in the main review screen instead of a list.
         // Reading a verdict without the payslip in front of you is guesswork —
@@ -144,6 +170,10 @@ const payslipAuditSchema = new mongoose.Schema(
           manual:     { type: Number, default: 0 },
           unmatched:  { type: Number, default: 0 },
           new_issues: { type: Number, default: 0 },
+          // Returned-but-unflagged payslips, by comparison verdict.
+          unflagged_unchanged:  { type: Number, default: 0 },
+          unflagged_changed:    { type: Number, default: 0 },
+          unflagged_unverified: { type: Number, default: 0 },
         },
       }],
       default: [],

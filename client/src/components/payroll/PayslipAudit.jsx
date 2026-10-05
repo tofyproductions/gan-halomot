@@ -401,6 +401,8 @@ function PerEmployeePairedView({
                 {!!roundView.summary.not_fixed && <Chip size="small" color="error" label={`${roundView.summary.not_fixed} לא תוקנו`} />}
                 {!!roundView.summary.manual && <Chip size="small" color="warning" label={`${roundView.summary.manual} להכרעה`} />}
                 {!!roundView.summary.new_issues && <Chip size="small" color="error" variant="outlined" label={`${roundView.summary.new_issues} ממצאים חדשים`} />}
+                {!!roundView.summary.unflagged_unchanged && <Chip size="small" color="success" variant="outlined" label={`${roundView.summary.unflagged_unchanged} חזרו ללא שינוי ✓`} />}
+                {!!roundView.summary.unflagged_changed && <Chip size="small" color="error" label={`${roundView.summary.unflagged_changed} השתנו בלי שנתבקש`} />}
               </Stack>
             )}
 
@@ -2338,6 +2340,8 @@ export function FixRoundDialog({ open, auditId, branches = [], onClose, onOpenRo
                     {!!s.manual && <Chip size="small" color="warning" label={`${s.manual} להכרעה`} />}
                     {!!s.new_issues && <Chip size="small" color="error" variant="outlined" label={`${s.new_issues} ממצאים חדשים`} />}
                     {!!s.unmatched && <Chip size="small" variant="outlined" label={`${s.unmatched} לא בקובץ`} />}
+                    {!!s.unflagged_unchanged && <Chip size="small" color="success" variant="outlined" label={`${s.unflagged_unchanged} חזרו ללא שינוי ✓`} />}
+                    {!!s.unflagged_changed && <Chip size="small" color="error" label={`${s.unflagged_changed} השתנו בלי שנתבקש`} />}
                     {onOpenRound && r.audit_view && (
                       <Button size="small" variant="outlined" startIcon={<DescriptionIcon />}
                         onClick={(ev) => { ev.stopPropagation(); onOpenRound(r); }}>
@@ -2413,6 +2417,49 @@ export function FixRoundDialog({ open, auditId, branches = [], onClose, onOpenRo
                           </Stack>
                         </Paper>
                       ))}
+
+                      {/* Payslips that came back although no correction was asked —
+                          each verified against the original audit's payslip. */}
+                      {!!(r.untouched || []).length && (
+                        <>
+                          <Divider sx={{ my: 1 }}>
+                            <Typography variant="caption" sx={{ fontWeight: 800 }}>
+                              תלושים שחזרו ללא דרישת תיקון ({r.untouched.length})
+                            </Typography>
+                          </Divider>
+                          {[...r.untouched].sort((a, b) => (a.verdict === 'changed' ? -1 : 1) - (b.verdict === 'changed' ? -1 : 1)).map((u, ui) => (
+                            <Paper key={`u${ui}`} variant="outlined"
+                              sx={{ p: 1, mb: 1, borderColor: u.verdict === 'changed' ? 'error.light' : 'divider',
+                                bgcolor: u.verdict === 'changed' ? 'error.soft' : 'transparent' }}>
+                              <Stack direction="row" alignItems="center" spacing={1} sx={{ flexWrap: 'wrap' }}>
+                                <Typography sx={{ fontWeight: 700, fontSize: 14 }}>{u.employee_name}</Typography>
+                                {u.branch && <Typography variant="caption" color="text.secondary">{u.branch}</Typography>}
+                                {u.verdict === 'unchanged' && (
+                                  <Chip size="small" color="success" variant="outlined"
+                                    label={`✓ אומת — ללא שינוי (${u.compared_fields} שדות)`} />
+                                )}
+                                {u.verdict === 'changed' && (
+                                  <Chip size="small" color="error" label="⚠ השתנה בלי שנתבקש תיקון" sx={{ fontWeight: 700 }} />
+                                )}
+                                {u.verdict === 'no_baseline' && (
+                                  <Chip size="small" variant="outlined" label="אין תלוש מקורי להשוואה" />
+                                )}
+                                <Box sx={{ flex: 1 }} />
+                                {u.page_index && (
+                                  <Button size="small" startIcon={<DescriptionIcon />} onClick={() => showPage(r.round_no, u)}>
+                                    תלוש
+                                  </Button>
+                                )}
+                              </Stack>
+                              {u.verdict === 'changed' && (u.diffs || []).map((d, di) => (
+                                <Typography key={di} variant="caption" sx={{ display: 'block', color: 'error.dark', mt: 0.25 }}>
+                                  {d.label}: היה <b>{String(d.before)}</b> · עכשיו <b>{String(d.after)}</b>
+                                </Typography>
+                              ))}
+                            </Paper>
+                          ))}
+                        </>
+                      )}
                     </Box>
                   </Collapse>
                 </Paper>
