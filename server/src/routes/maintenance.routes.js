@@ -1,10 +1,11 @@
 const express = require('express');
 const router = express.Router();
-const { authMiddleware, requireRole } = require('../middleware/auth');
+const { authMiddleware, requireTab } = require('../middleware/auth');
 const c = require('../controllers/maintenance.controller');
 
 router.use(authMiddleware);
-router.use(requireRole('system_admin', 'branch_manager', 'accountant', 'class_leader'));
+// By TAB — same reason as stock.routes: a granted אחזקה tab must work.
+router.use(requireTab('maintenance', 'system_admin', 'branch_manager', 'accountant', 'class_leader'));
 
 router.get('/', c.list);
 router.post('/', c.create);

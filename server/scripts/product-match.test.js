@@ -426,8 +426,10 @@ async function main() {
 
     // The review controller's role gate lives in the ROUTES (requireRole) — assert the route file wires it.
     const routesSrc = require('fs').readFileSync(require.resolve('../src/routes/product.routes'), 'utf8');
-    ok(/matches\/review'[^\n]*system_admin|adminOnly[^\n]*review/.test(routesSrc), '8g הנתיב review מוגן ל-system_admin');
-    ok(/matches\/scan'[^\n]*(system_admin|adminOnly)/.test(routesSrc), '8h וגם scan');
+    // Guarded by the product-matches TAB gate (admin by default; a granted
+    // tab — e.g. אב הבית — works too), not by a bare system_admin check.
+    ok(/matches\/review'[^\n]*matchesTab/.test(routesSrc), '8g הנתיב review מוגן בשער הטאב');
+    ok(/matches\/scan'[^\n]*matchesTab/.test(routesSrc), '8h וגם scan');
     ok(routesSrc.indexOf("'/matches'") < routesSrc.indexOf("'/:id/image'"), '8i נתיבי matches לפני /:id/image');
 
     svc._resetThrottle();
@@ -548,7 +550,7 @@ async function main() {
     eq([okRoute.status, okRoute.body.match.products[0].pack_qty], [200, null], '10f null = לא ידוע, מותר');
     await svc.setPacks(Gid, { pack_qty: { [String(p1._id)]: 1 } });
     const routesSrc = require('fs').readFileSync(require.resolve('../src/routes/product.routes'), 'utf8');
-    ok(/matches\/:id\/packs'[^\n]*adminOnly/.test(routesSrc), '10g הנתיב packs למנהל מערכת בלבד');
+    ok(/matches\/:id\/packs'[^\n]*matchesTab/.test(routesSrc), '10g הנתיב packs מוגן בשער הטאב');
 
     // Confirm validates the same way.
     const prNaN = await ProductMatch.create({

@@ -1,10 +1,13 @@
 const router = require('express').Router();
-const { authMiddleware, requireRole } = require('../middleware/auth');
+const { authMiddleware, requireTab } = require('../middleware/auth');
 const ctrl = require('../controllers/stock.controller');
 
 const STOCK_ROLES = ['system_admin', 'branch_manager', 'class_leader', 'cook'];
 
-router.use(authMiddleware, requireRole(...STOCK_ROLES));
+// By TAB, not by hardcoded role: the permissions screen can hand מעקב מלאי
+// to anyone (אב הבית), and a tab that opens a screen whose API refuses it
+// is a grant that does not work.
+router.use(authMiddleware, requireTab('stock', ...STOCK_ROLES));
 
 // Categories
 router.get('/categories', ctrl.listCategories);
