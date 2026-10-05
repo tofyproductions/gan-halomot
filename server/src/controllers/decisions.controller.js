@@ -104,7 +104,17 @@ async function myDecisions(req, res, next) {
     // screen that is NOT about a request she made. Accounting/admin approving
     // an employee's self-report directly (skipping her stage-1 review) is
     // still her business: it's her staff's hours, decided without her.
-    const managedBranches = managedBranchIds(req.user);
+    //
+    // MANAGERS ONLY. managedBranchIds falls back to the user's own branch_id,
+    // so without the role gate every ordinary employee "managed" her own
+    // branch here and was shown her colleagues' punch decisions by name —
+    // נרי אביב opened the app and read אליה חבאז's approvals (04.10.2026).
+    // actual_role first: a viewer's GET arrives presented as system_admin,
+    // and it is the real role that decides whether she manages branches.
+    const role = req.user?.actual_role || req.user?.role;
+    const managedBranches = (role === 'branch_manager' || role === 'admin_viewer')
+      ? managedBranchIds(req.user)
+      : [];
     const overrides = managedBranches.length
       ? await Punch.find({
         branch_id: { $in: managedBranches },
