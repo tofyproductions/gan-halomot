@@ -989,7 +989,13 @@ const DIFF_FIELDS = [
   { key: 'gift',         label: 'כרטיס מתנה',          tableKey: 'gift_card',           payslipKey: 'gift_value',      tolerance: 1, currency: true, note: 'מושווה לשורת "שווי שי לחג" בתלוש' },
   { key: 'reserve',      label: 'מילואים',              tableKey: 'reserve_duty',        payslipKey: null,              days: true, infoOnly: true },
   { key: 'vacation_used', label: 'חופשה — ימי ניצול',   tableKey: 'vacation_days',       payslipPath: ['vacation', 'used'], tolerance: 1, days: true, absVal: true, costInfo: (t) => costLine(t?.vacation_day_value, t?.vacation_pay_total) },
-  { key: 'sick_used',    label: 'מחלה — ימי ניצול',    tableKey: 'sick_days',           payslipPath: ['sick', 'used'],     tolerance: 0.5, days: true, costInfo: (t) => costLine(t?.sick_day_value, t?.sick_pay_total) },
+  { key: 'sick_used',    label: 'מחלה — ימי ניצול',    tableKey: 'sick_days',           payslipPath: ['sick', 'used'],     tolerance: 0.5, days: true, costInfo: (t) => {
+    // The ladder pays fewer days than were used — say how many actually paid.
+    const paid = Number(t?.sick_paid_days);
+    const base = costLine(t?.sick_day_value, t?.sick_pay_total);
+    const paidTxt = (Number.isFinite(paid) && paid !== Number(t?.sick_days)) ? `${paid} ימים בתשלום` : null;
+    return [paidTxt, base].filter(Boolean).join(' · ') || null;
+  } },
   { key: 'holidays',     label: 'דמי חגים — ימים',      tableKey: 'holiday_days',        payslipKey: null,              days: true, infoOnly: true, costInfo: (t) => costLine(t?.holiday_day_value, t?.holiday_pay_total) },
 ];
 

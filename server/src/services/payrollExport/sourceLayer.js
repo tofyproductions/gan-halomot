@@ -214,6 +214,13 @@ function toCanonicalEmployee(row) {
       ot_150_hours: num(b.hours?.ot_150),
       days_worked: num(b.hours?.days_worked),
       sick_days: num(manual.sick_days),
+      // ימי מחלה בתשלום — the statutory ladder (day 1 = 0%, days 2-3 = 50%,
+      // day 4+ = 100%) pays FEWER days than were drawn from the balance.
+      // הדר, 09.2026: 14 days used, 6.5 paid. The money row (code 34) must
+      // carry the paid count, or the payslip reads 14 × a rate that never
+      // multiplies out to the amount. Null when sick_info is absent, so the
+      // adapter falls back to the used count instead of filing zero.
+      sick_paid_days: row.sick_info?.paid_days != null ? num(row.sick_info.paid_days) : null,
       // ימי מילואים — the count. `earnings.miluim` is the ₪; this is the days,
       // and שקלולית keeps them as separate figures in separate tables.
       miluim_days: num(manual.miluim_days),

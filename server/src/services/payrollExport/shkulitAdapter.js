@@ -142,7 +142,12 @@ const COMPONENTS = [
     get: (ce) => ce.earnings.extra_hours_pay, units: (ce) => ce.quantities.extra_hours },
   { key: 'travel', code: 3, label: 'נסיעות', get: (ce) => ce.earnings.travel },
   { key: 'holiday_pay', code: HOLIDAY_CODE, label: 'ימי חג', unit: 'ימים', get: (ce) => ce.earnings.holiday_pay, units: (ce) => ce.quantities.holiday_days },
-  { key: 'sick_pay', code: 34, label: 'ימי מחלה', unit: 'ימים', get: (ce) => ce.earnings.sick_pay, units: (ce) => ce.quantities.sick_days },
+  // ימי מחלה — the money rides the PAID count: the statutory ladder (day 1 =
+  // 0%, days 2-3 = 50%, day 4+ = 100%) pays fewer days than were drawn from
+  // the balance, and rate × quantity must reproduce the amount. The balance
+  // draw (all the days) is the attendance row, not this one.
+  { key: 'sick_pay', code: 34, label: 'ימי מחלה', unit: 'ימים', get: (ce) => ce.earnings.sick_pay,
+    units: (ce) => (ce.quantities.sick_paid_days != null ? ce.quantities.sick_paid_days : ce.quantities.sick_days) },
   // בונוס — code 35, and בונוס אוגוסט rides the SAME code.
   //
   // 39 "בונוס מיוחד" exists in the אקסולוגיה and was the guess here, written
@@ -514,6 +519,17 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
     const sickDaysUsed = round2(Number(ce.quantities?.sick_days) || 0);
     if (sickDaysUsed > 0) {
       push(RECORD_TYPE.ATTENDANCE, ATTENDANCE.SICK_USED, 0, sickDaysUsed);
+      // Paid ≠ used happens on every multi-day sickness (the ladder), and the
+      // file now carries two different day counts about the same absence —
+      // said out loud so the accountant reads one file, not a riddle.
+      const sickPaid = ce.quantities?.sick_paid_days;
+      if (sickPaid != null && round2(Number(sickPaid)) !== sickDaysUsed) {
+        notes.push({
+          employee_number: empNo, full_name: ce.employee.full_name,
+          subject: 'ימי מחלה',
+          text: `${sickDaysUsed} ימי מחלה נוצלו מהמאזן; לפי המדרגה החוקית שולמו ${round2(Number(sickPaid))} ימים (שורת ימי מחלה, קוד 34). לנכות מהמאזן את מלוא ${sickDaysUsed} הימים.`,
+        });
+      }
     }
     // ימי מילואים: the count goes to the attendance table, the ₪ stays a
     // salary component (code 42). Two figures about the same absence, and
@@ -619,7 +635,8 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
     const daysPaid = round2(
       daysWorked
       + (Number(q.vacation_days) || 0)    // the FILED days, already capped
-      + (Number(q.sick_days) || 0)
+      // ימים משולמים means PAID — a sick day the ladder pays 0% for was not.
+      + (Number(q.sick_paid_days != null ? q.sick_paid_days : q.sick_days) || 0)
       + (Number(q.holiday_days) || 0)
       + (Number(q.miluim_days) || 0),
     );

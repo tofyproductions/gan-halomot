@@ -4528,8 +4528,14 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
     // The money behind every day-count: the accountant checks figures, not
     // trust — so each leave cell names the per-day value and the total.
     const sickDayVal = Number(r.sick_info?.daily_value) || 0;
+    // Used vs paid: the statutory ladder pays fewer days than leave the
+    // balance, and the card must not read as 14 days × a rate that never
+    // multiplies out to the amount.
+    const sickPaidDays = r.sick_info?.paid_days;
+    const sickPaidTxt = (sickPaidDays != null && n1(sickPaidDays) !== n1(sickDays))
+      ? ` · ${n1(sickPaidDays)} בתשלום` : '';
     const sickVal = sickDays
-      ? `${n1(sickDays)} ימים${sickPay ? ` · ${f(sickPay)}` : ''}${sickDayVal ? subLine(`${f(sickDayVal)} ליום`) : ''}`
+      ? `${n1(sickDays)} ימים${sickPaidTxt}${sickPay ? ` · ${f(sickPay)}` : ''}${sickDayVal ? subLine(`${f(sickDayVal)} ליום`) : ''}`
       : '';
     const holDays = Number(r.holiday_pay_auto?.total_days) || 0;
     const holidayCellVal = holiday
