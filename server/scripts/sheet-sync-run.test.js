@@ -711,6 +711,14 @@ scenario('a time and a portion go out as the numbers the old board formats', asy
   check('06:30 is 0.2708… of a day', () => assert.ok(Math.abs(byCol.get(0) - 390 / 1440) < 1e-9, String(byCol.get(0))));
   check('11:15 is 0.46875 of a day', () => assert.strictEqual(byCol.get(1), 675 / 1440));
   check('50% is 0.5', () => assert.strictEqual(byCol.get(2), 0.5));
+  // דקל שדמי, 04.10.2026: a time in a cell that had lost its time format
+  // reached the parent as "0.6145833333". Every time cell is formatted too.
+  check('the time cells ask to be formatted as a clock, the portion does not', () => {
+    const fmt = new Map(d.writes.map(w => [w.col, w.format]));
+    assert.strictEqual(fmt.get(0), 'time');
+    assert.strictEqual(fmt.get(1), 'time');
+    assert.strictEqual(fmt.get(2), undefined);
+  });
   check('the shadow keeps the strings the reader will produce from those numbers', () => {
     assert.strictEqual(d.state.shadowSaved['id-1']['home.wake_time'], '06:30');
     assert.strictEqual(d.state.shadowSaved['id-1']['meals.breakfast.amount'], '50%');

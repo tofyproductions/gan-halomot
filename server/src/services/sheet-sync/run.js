@@ -405,11 +405,15 @@ async function runPass({ branchId, sheetId, date, mode = 'dry', deps = null }) {
         continue;
       }
 
+      const kind = FIELD_MAP[normalizeFieldName(COLUMN_FOR_PATH[path])]?.kind;
+      const cell = cellForBoard(kind, value);
       cellWrites.push({
         tab: SHEET.today,
         row: pair.row,
         col,
-        value: cellForBoard(FIELD_MAP[normalizeFieldName(COLUMN_FOR_PATH[path])]?.kind, value),
+        value: cell,
+        // A day-fraction only reads as a clock in a time-formatted cell.
+        ...(kind === 'time' && typeof cell === 'number' ? { format: 'time' } : {}),
       });
       queued[path] = value;
       result.out += 1;

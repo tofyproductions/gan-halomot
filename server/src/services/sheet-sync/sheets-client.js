@@ -93,6 +93,7 @@ async function readGrids(sheetId) {
 async function writeCells(sheetId, updates) {
   if (!updates || updates.length === 0) return { written: 0 };
   const a = auth();
+  await formatTimeCells(a, sheetId, updates.filter(u => u.format === 'time'));
   const data = updates.map(u => ({ range: a1(u.tab, u.row, u.col), values: [[u.value]] }));
   await a.request({
     url: `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`,
@@ -100,6 +101,37 @@ async function writeCells(sheetId, updates) {
     data: { valueInputOption: 'RAW', data },
   });
   return { written: updates.length };
+}
+
+/**
+ * A time is written as a fraction of a day, and the old board shows it as a
+ * clock only when the CELL is formatted as a time — Apps Script's getValues()
+ * then hands it a Date. A cell that had lost that format (a row added without
+ * it) handed over the bare number, and a parent read "0.6145833333 - 12:45"
+ * for a 12:45–14:45 nap (דקל שדמי, 04.10.2026). So every time cell we write is
+ * formatted hh:mm first, whatever it held before.
+ */
+async function formatTimeCells(a, sheetId, cells) {
+  if (!cells.length) return;
+  const meta = await a.request({
+    url: `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties(sheetId,title)`,
+  });
+  const gidOf = new Map((meta.data.sheets || []).map(x => [x.properties.title, x.properties.sheetId]));
+  const requests = cells
+    .filter(u => gidOf.has(u.tab))
+    .map(u => ({
+      repeatCell: {
+        range: { sheetId: gidOf.get(u.tab), startRowIndex: u.row, endRowIndex: u.row + 1, startColumnIndex: u.col, endColumnIndex: u.col + 1 },
+        cell: { userEnteredFormat: { numberFormat: { type: 'TIME', pattern: 'hh:mm' } } },
+        fields: 'userEnteredFormat.numberFormat',
+      },
+    }));
+  if (!requests.length) return;
+  await a.request({
+    url: `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`,
+    method: 'POST',
+    data: { requests },
+  });
 }
 
 module.exports = { SCOPES, credentialsFromEnv, clientFor, tabNames, readTab, readGrids, writeCells, a1 };
