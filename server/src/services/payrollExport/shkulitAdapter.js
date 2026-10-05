@@ -411,9 +411,16 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
     }
 
     if (ce.employee.salary_is_net) {
+      // Spelled out per code after 09.2026: שקלולית's gilum is configured PER
+      // COMPONENT on the accountant's side, and payslips went out with code 8
+      // grossed up while code 44 on the same page paid flat — the leave rows
+      // simply weren't in the net basket. The note now names every code so a
+      // row left out of gilum is a disagreement with a written instruction,
+      // not a guess.
       notes.push({
         employee_number: empNo, full_name: ce.employee.full_name,
-        subject: 'עובד/ת נטו', text: 'הסכומים בקובץ הם נטו לתשלום — הגילום אצלכם.',
+        subject: 'עובד/ת נטו',
+        text: 'הסכומים בקובץ הם נטו לתשלום — הגילום אצלכם. חל על כל השורות, כולל תמורת חופשה (קוד 8), ימי חג (קוד 44), ימי מחלה (קוד 34), השלמות שכר (47/38) ונסיעות (3).',
       });
     }
 
