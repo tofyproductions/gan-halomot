@@ -8,6 +8,7 @@ import RTLProvider from './components/layout/RTLProvider';
 import { AuthProvider } from './hooks/useAuth';
 import { UiVersionProvider } from './hooks/useUiVersion';
 import UpdateBanner from './components/shared/UpdateBanner';
+import AccessibilityWidget from './components/accessibility/AccessibilityWidget';
 
 // תמונות שממתינות בתור ממשיכות לעלות ברגע שיש רשת ושהאפליקציה פתוחה — גם
 // אם היא נסגרה באמצע ההעלאה אתמול, כי התור שמור על המכשיר.
@@ -41,6 +42,10 @@ ReactDOM.createRoot(document.getElementById('root')).render(
                 until somebody tells it otherwise. */}
             <UpdateBanner />
             <App />
+            {/* On every screen by construction — the regulations' adjustments
+                menu (תקנות התאמות נגישות לשירות, ת"י 5568), staff, parents
+                and public pages alike. */}
+            <AccessibilityWidget />
             <ToastContainer position="bottom-left" rtl />
           </RTLProvider>
         </UiVersionProvider>
