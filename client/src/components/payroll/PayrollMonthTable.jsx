@@ -1288,6 +1288,9 @@ function AccountantPreviewDialog({ open, month, branch, blocked, blockedCount, o
   const [selected, setSelected] = useState({});
   const [extra, setExtra] = useState([]);
   const [newEmail, setNewEmail] = useState('');
+  // A month with no Cibus anywhere needs a deliberate opt-in before it can
+  // leave — the checkbox is re-armed every time the dialog opens.
+  const [noCibusOk, setNoCibusOk] = useState(false);
   const iframeRef = useRef(null);
 
   // Find-an-employee inside the rendered report: the cards carry
@@ -1323,7 +1326,7 @@ function AccountantPreviewDialog({ open, month, branch, blocked, blockedCount, o
 
   useEffect(() => {
     if (!open) return;
-    setData(null); setExtra([]); setNewEmail('');
+    setData(null); setExtra([]); setNewEmail(''); setNoCibusOk(false);
     setLoading(true);
     const params = {};
     if (branch) params.branch = branch;
@@ -1345,12 +1348,14 @@ function AccountantPreviewDialog({ open, month, branch, blocked, blockedCount, o
     if (!chosen.includes(e)) setExtra(prev => [...prev, e]);
     setNewEmail('');
   };
+  const cibusMissing = !!data?.cibus_missing;
   const send = () => {
     if (chosen.length === 0) { toast.error('בחר לפחות נמען אחד'); return; }
+    if (cibusMissing && !noCibusOk) { toast.error('לא עודכן סיבוס לחודש זה — סמן את האישור או עדכן סיבוס קודם'); return; }
     setSending(true);
     const params = {};
     if (branch) params.branch = branch;
-    api.post(`/payroll-month/${month}/send-accountant`, { emails: chosen }, { params })
+    api.post(`/payroll-month/${month}/send-accountant`, { emails: chosen, confirm_no_cibus: cibusMissing && noCibusOk }, { params })
       .then(res => { toast.success(`השליחה יצאה ל-${res.data.sent_to}${res.data.cc ? ` (עותק: ${res.data.cc})` : ''} — הכרטיסים, המסמכים וקבצי הקליטה לשקלולית יגיעו תוך כמה דקות`, { autoClose: 6000 }); onClose(); })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה בשליחה'))
       .finally(() => setSending(false));
@@ -1368,6 +1373,15 @@ function AccountantPreviewDialog({ open, month, branch, blocked, blockedCount, o
         <Alert severity="error" sx={{ mx: 1.5, mt: 1, borderRadius: 2 }}>
           השליחה חסומה: {blockedCount} ימים עם יותר מ-2 החתמות ממתינים להחלטת הנה״ח.
           אפשר לעיין ולהדפיס — כפתור השליחה יישאר נעול עד שהימים ייפתרו ב"בעיות בהחתמה".
+        </Alert>
+      )}
+      {cibusMissing && (
+        <Alert severity="error" sx={{ mx: 1.5, mt: 1, borderRadius: 2, fontWeight: 700 }}>
+          ⚠️ לא עודכן סיבוס לאף עובד בחודש זה! ייבא את דוח הסיבוס לפני השליחה.
+          <FormControlLabel sx={{ display: 'flex', mt: 0.5, mr: 0 }}
+            control={<Checkbox size="small" color="error" checked={noCibusOk} onChange={e => setNoCibusOk(e.target.checked)} />}
+            label={<Typography variant="body2" sx={{ fontWeight: 700 }}>אני יודע שאין סיבוס ומאשר לשלוח בלעדיו (למשל לצורך בדיקה)</Typography>}
+          />
         </Alert>
       )}
       <DialogContent dividers sx={{ display: 'flex', gap: 1.5, p: 1.5 }}>
@@ -1429,8 +1443,8 @@ function AccountantPreviewDialog({ open, month, branch, blocked, blockedCount, o
         <Tooltip title={blocked ? 'חסום עד לפתרון ימי ההחתמה הממתינים — "בעיות בהחתמה"' : ''}>
           <span>
             <Button variant="contained" startIcon={sending ? <CircularProgress size={14} color="inherit" /> : <SendIcon />}
-              onClick={send} disabled={loading || sending || chosen.length === 0 || blocked}>
-              {blocked ? `שליחה חסומה (${blockedCount})` : 'שלח עכשיו'}
+              onClick={send} disabled={loading || sending || chosen.length === 0 || blocked || (cibusMissing && !noCibusOk)}>
+              {blocked ? `שליחה חסומה (${blockedCount})` : (cibusMissing && !noCibusOk) ? 'חסר סיבוס' : 'שלח עכשיו'}
             </Button>
           </span>
         </Tooltip>

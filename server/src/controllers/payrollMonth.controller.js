@@ -5054,6 +5054,23 @@ async function setPregnancySettings(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/**
+ * Has Cibus been entered anywhere in this month? Counts rows whose
+ * manual.cibus actually carries a value — an import (mailbox or file upload)
+ * and a hand-typed amount both count; the default empty shape does not.
+ * Zero means the month is about to leave without meal charges, which is
+ * almost always "forgot to run the import", so the send asks first.
+ */
+async function cibusEnteredCount(month) {
+  return PayrollMonth.countDocuments({
+    month,
+    $or: [
+      { 'manual.cibus.kind': 'number', 'manual.cibus.amount': { $ne: null } },
+      { 'manual.cibus.kind': 'text', 'manual.cibus.text': { $nin: [null, ''] } },
+    ],
+  });
+}
+
 // Build the accountant PDF HTML WITHOUT sending — drives the preview dialog.
 // Returns the rendered cards + the default recipients + supporting-file count.
 async function previewAccountant(req, res, next) {
@@ -5077,7 +5094,12 @@ async function previewAccountant(req, res, next) {
       $or: [{ employee_id: { $in: empIds } }, ...(userIds.length ? [{ user_id: { $in: userIds } }] : [])],
     });
     const docCount = await EmployeeDocument.countDocuments({ employee_id: { $in: empIds }, month });
-    res.json({ html, employees: rows.length, attachments: certCount + docCount, accountant_emails: toList, office_cc: officeCc });
+    const cibusCount = await cibusEnteredCount(month);
+    res.json({
+      html, employees: rows.length, attachments: certCount + docCount,
+      accountant_emails: toList, office_cc: officeCc,
+      cibus_entered: cibusCount, cibus_missing: cibusCount === 0,
+    });
   } catch (err) { next(err); }
 }
 
@@ -6166,6 +6188,19 @@ async function sendToAccountant(req, res, next) {
         duplicates: issues.duplicates,
         missing: issues.missing,
       });
+    }
+
+    // SOFT GATE: a month with no Cibus entered anywhere is almost always a
+    // forgotten import, not a decision. It may still go out — tests do it on
+    // purpose — but only with an explicit confirmation on this very send.
+    if (req.body?.confirm_no_cibus !== true) {
+      const cibusCount = await cibusEnteredCount(month);
+      if (cibusCount === 0) {
+        return res.status(409).json({
+          error: 'לא עודכן סיבוס לאף עובד בחודש זה. שליחה לרו״ח בלי סיבוס דורשת אישור מפורש.',
+          cibus_missing: true,
+        });
+      }
     }
 
     // Recipients: the saved contact list, OR an explicit per-send selection from
