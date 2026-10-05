@@ -26,14 +26,27 @@ import api from '../../api/client';
  * is under half a megabyte, released when the tab closes.
  */
 const cache = new Map();
+const versions = new Map();
 
 function load(id) {
   if (!cache.has(id)) {
-    cache.set(id, api.get(`/products/${id}/image`, { responseType: 'blob' })
+    // A version param only after an upload replaced the picture — the server
+    // says max-age=86400, and the browser must not serve yesterday's bytes.
+    const v = versions.get(id);
+    cache.set(id, api.get(`/products/${id}/image`, { responseType: 'blob', params: v ? { v } : undefined })
       .then((res) => URL.createObjectURL(res.data))
       .catch(() => null));
   }
   return cache.get(id);
+}
+
+/**
+ * After uploading or replacing a product's picture: forget the cached (or
+ * cached-as-missing) thumbnail so the next mount fetches the new bytes.
+ */
+export function invalidateProductThumb(id) {
+  cache.delete(id);
+  versions.set(id, Date.now());
 }
 
 export default function ProductThumb({ product, size = 36, radius = 1 }) {

@@ -1,29 +1,69 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box, Typography, Card, CardContent, TextField, Button, Stack,
   IconButton, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions,
-  Divider, Table, TableBody, TableCell, TableHead, TableRow, Chip, Alert,
+  Table, TableBody, TableCell, TableHead, TableRow, Chip, Alert,
+  InputAdornment,
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import UploadIcon from '@mui/icons-material/Upload';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import SearchIcon from '@mui/icons-material/Search';
+import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
-import ProductThumb from './ProductThumb';
+import ProductThumb, { invalidateProductThumb } from './ProductThumb';
 import QuoteImportDialog from './QuoteImportDialog';
 import { formatCurrency } from '../../utils/hebrewYear';
 import ConfirmDialog from '../shared/ConfirmDialog';
 
+/**
+ * A chosen picture file, shrunk to a thumbnail-sized data URL.
+ *
+ * Phone cameras hand over 4MB originals; what the order form shows is 36
+ * pixels. 512px JPEG keeps the product recognizable at any size the app
+ * draws it, and keeps the document small enough for Mongo to not care.
+ */
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const max = 512;
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
+      const ctx = canvas.getContext('2d');
+      // White behind transparent PNGs — catalogue shots sit on white anyway.
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', 0.82));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('לא ניתן לקרוא את הקובץ')); };
+    img.src = url;
+  });
+}
+
 export default function SupplierManager() {
   const [suppliers, setSuppliers] = useState([]);
   const [products, setProducts] = useState({});
+  const [selectedId, setSelectedId] = useState(null);
+  const [filter, setFilter] = useState('');
+  const [thumbTicks, setThumbTicks] = useState({});
   const [supplierDialog, setSupplierDialog] = useState({ open: false, mode: 'add', data: {} });
   const [productDialog, setProductDialog] = useState({ open: false, supplierId: null, data: {} });
   const [importDialog, setImportDialog] = useState({ open: false, supplierId: null, text: '' });
   const [quoteDialog, setQuoteDialog] = useState({ open: false, supplier: null });
   const [confirm, setConfirm] = useState({ open: false, type: '', id: null });
+  const fileInputRef = useRef(null);
+  const uploadTargetRef = useRef(null);
 
   const fetchSuppliers = useCallback(async () => {
     const res = await api.get('/suppliers');
@@ -39,6 +79,8 @@ export default function SupplierManager() {
   useEffect(() => {
     suppliers.forEach(s => fetchProducts(s._id || s.id));
   }, [suppliers, fetchProducts]);
+
+  const selected = suppliers.find(s => (s._id || s.id) === selectedId) || null;
 
   // Supplier CRUD
   const handleSaveSupplier = async () => {
@@ -79,6 +121,31 @@ export default function SupplierManager() {
     }
   };
 
+  // Product picture upload — the hidden input serves whichever row asked.
+  const askForImage = (product) => {
+    uploadTargetRef.current = product;
+    if (fileInputRef.current) fileInputRef.current.click();
+  };
+
+  const handleImageFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    const product = uploadTargetRef.current;
+    uploadTargetRef.current = null;
+    if (!file || !product) return;
+    const pid = product._id || product.id;
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      await api.put(`/products/${pid}`, { image_data: dataUrl });
+      invalidateProductThumb(pid);
+      setThumbTicks(prev => ({ ...prev, [pid]: Date.now() }));
+      toast.success('התמונה נשמרה');
+      fetchProducts(product.supplier_id || selectedId);
+    } catch (err) {
+      toast.error(err.response?.data?.error || err.message || 'שגיאה בהעלאת התמונה');
+    }
+  };
+
   // Bulk import
   const handleImport = async () => {
     const { supplierId, text } = importDialog;
@@ -86,7 +153,7 @@ export default function SupplierManager() {
     try {
       // Parse tab/comma separated: SKU, Category, Name, Price
       const lines = text.trim().split('\n').filter(l => l.trim());
-      const products = lines.map(line => {
+      const parsed = lines.map(line => {
         const parts = line.split(/[\t,]/).map(s => s.trim());
         return {
           sku: parts[0] || '',
@@ -96,10 +163,10 @@ export default function SupplierManager() {
         };
       }).filter(p => p.name);
 
-      if (products.length === 0) return toast.error('לא נמצאו מוצרים');
+      if (parsed.length === 0) return toast.error('לא נמצאו מוצרים');
 
-      await api.post('/products/import', { supplier_id: supplierId, products });
-      toast.success(`${products.length} מוצרים יובאו`);
+      await api.post('/products/import', { supplier_id: supplierId, products: parsed });
+      toast.success(`${parsed.length} מוצרים יובאו`);
       setImportDialog({ open: false, supplierId: null, text: '' });
       fetchProducts(supplierId);
     } catch (err) {
@@ -114,6 +181,7 @@ export default function SupplierManager() {
       if (type === 'supplier') {
         await api.delete(`/suppliers/${id}`);
         toast.success('ספק הוסר');
+        if (selectedId === id) setSelectedId(null);
         fetchSuppliers();
       } else {
         await api.delete(`/products/${id}`);
@@ -130,6 +198,183 @@ export default function SupplierManager() {
     setSupplierDialog(prev => ({ ...prev, data: { ...prev.data, [key]: value } }));
   };
 
+  const supplierActions = (supplier, sid) => (
+    <Stack direction="row" spacing={0.5} onClick={e => e.stopPropagation()}>
+      <Tooltip title="ערוך">
+        <IconButton size="small" onClick={() => setSupplierDialog({ open: true, mode: 'edit', data: supplier })}>
+          <EditIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
+      {/* The PDF first, and in the accent: a supplier sends a
+          quote, not a comma-separated list, and the paste box
+          beside it is the fallback for the ones who don't. */}
+      <Tooltip title="ייבוא מהצעת מחיר (PDF)">
+        <IconButton size="small" color="primary" onClick={() => setQuoteDialog({ open: true, supplier })}>
+          <PictureAsPdfIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
+      <Tooltip title="ייבוא מוצרים מטקסט">
+        <IconButton size="small" onClick={() => setImportDialog({ open: true, supplierId: sid, text: '' })}>
+          <UploadIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
+      <Tooltip title="מחק">
+        <IconButton size="small" color="error" onClick={() => setConfirm({ open: true, type: 'supplier', id: sid })}>
+          <DeleteIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
+    </Stack>
+  );
+
+  // ——— Supplier page: every product, a search box, pictures uploadable ———
+  if (selected) {
+    const sid = selected._id || selected.id;
+    const prods = products[sid] || [];
+    const q = filter.trim().toLowerCase();
+    const visible = q
+      ? prods.filter(p =>
+          (p.name || '').toLowerCase().includes(q) ||
+          (p.sku || '').toLowerCase().includes(q) ||
+          (p.category || '').toLowerCase().includes(q))
+      : prods;
+
+    return (
+      <Box dir="rtl" sx={{ maxWidth: 1000, mx: 'auto' }}>
+        <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={handleImageFile} />
+
+        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+          <Button startIcon={<ArrowForwardIcon />} onClick={() => { setSelectedId(null); setFilter(''); }}>
+            כל הספקים
+          </Button>
+        </Stack>
+
+        <Card sx={{ borderRight: '5px solid #10b981', mb: 3 }}>
+          <CardContent>
+            <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+              <Box>
+                <Typography variant="h5" sx={{ fontWeight: 800 }}>{selected.name}</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {selected.contact_name} | {selected.contact_phone}
+                </Typography>
+                <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+                  <Chip size="small" label={`${prods.length} מוצרים`} variant="outlined" />
+                  <Chip size="small" label={`מינימום: ${formatCurrency(selected.min_order_amount)}`} variant="outlined" />
+                  <Chip size="small" label={`מע״מ: ${Math.round((selected.vat_rate - 1) * 100)}%`} variant="outlined" />
+                </Stack>
+              </Box>
+              {supplierActions(selected, sid)}
+            </Stack>
+          </CardContent>
+        </Card>
+
+        <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={2} sx={{ mb: 1.5 }}>
+          <TextField
+            size="small" placeholder="חיפוש מוצר, מק״ט או קטגוריה..."
+            value={filter} onChange={e => setFilter(e.target.value)}
+            sx={{ flex: 1, maxWidth: 360 }}
+            InputProps={{
+              startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>,
+            }}
+          />
+          <Button size="small" variant="contained" startIcon={<AddIcon />}
+            onClick={() => setProductDialog({ open: true, supplierId: sid, data: {} })}
+          >
+            הוסף מוצר
+          </Button>
+        </Stack>
+
+        {prods.length === 0 ? (
+          <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+            אין מוצרים. ייבא מחירון או הוסף ידנית.
+          </Typography>
+        ) : (
+          <Card>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 700 }} width="60">תמונה</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>מק״ט</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>קטגוריה</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>שם</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }} align="center">יח׳ מידה</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }} align="center">מחיר + מע״מ</TableCell>
+                  <TableCell align="center"></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {visible.map(p => {
+                  const pid = p._id || p.id;
+                  return (
+                    <TableRow key={pid} hover>
+                      <TableCell>
+                        <Tooltip title={p.has_image || p.image_url ? 'החלף תמונה' : 'העלה תמונה'}>
+                          <Box
+                            onClick={() => askForImage(p)}
+                            sx={{
+                              cursor: 'pointer', display: 'inline-flex', position: 'relative',
+                              '&:hover .thumb-overlay': { opacity: 1 },
+                            }}
+                          >
+                            <ProductThumb key={`${pid}-${thumbTicks[pid] || 0}`} product={p} size={44} />
+                            <Box
+                              className="thumb-overlay"
+                              sx={{
+                                position: 'absolute', inset: 0, borderRadius: 1,
+                                bgcolor: 'rgba(0,0,0,0.45)', color: '#fff',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                opacity: 0, transition: 'opacity 120ms',
+                              }}
+                            >
+                              <PhotoCameraIcon sx={{ fontSize: 20 }} />
+                            </Box>
+                          </Box>
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell>{p.sku}</TableCell>
+                      <TableCell>{p.category}</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>
+                        {p.name}
+                        {p.standing_note && (
+                          <Box component="span" sx={{ display: 'block', color: '#b45309', fontSize: '0.75rem', fontWeight: 700 }}>
+                            ⚠️ {p.standing_note}
+                          </Box>
+                        )}
+                      </TableCell>
+                      <TableCell align="center" sx={{ color: 'text.secondary', fontSize: '0.8125rem' }}>{p.unit || '—'}</TableCell>
+                      <TableCell align="center" sx={{ fontWeight: 700 }}>{formatCurrency(p.price_with_vat)}</TableCell>
+                      <TableCell align="center" sx={{ whiteSpace: 'nowrap' }}>
+                        <IconButton size="small"
+                          onClick={() => setProductDialog({ open: true, supplierId: sid, data: { ...p } })}
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton size="small" color="error"
+                          onClick={() => setConfirm({ open: true, type: 'product', id: pid })}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {visible.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={7} sx={{ textAlign: 'center', color: 'text.secondary', py: 3 }}>
+                      אין מוצרים שמתאימים לחיפוש
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </Card>
+        )}
+
+        {renderDialogs()}
+      </Box>
+    );
+  }
+
+  // ——— Supplier list: closed cards, a click opens the supplier's page ———
   return (
     <Box dir="rtl" sx={{ maxWidth: 1000, mx: 'auto' }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
@@ -141,15 +386,23 @@ export default function SupplierManager() {
         </Button>
       </Stack>
 
-      <Stack spacing={3}>
+      <Stack spacing={2}>
         {suppliers.map(supplier => {
           const sid = supplier._id || supplier.id;
           const prods = products[sid] || [];
 
           return (
-            <Card key={sid} sx={{ borderRight: '5px solid #10b981' }}>
-              <CardContent>
-                <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+            <Card
+              key={sid}
+              onClick={() => { setSelectedId(sid); setFilter(''); }}
+              sx={{
+                borderRight: '5px solid #10b981', cursor: 'pointer',
+                transition: 'box-shadow 120ms, transform 120ms',
+                '&:hover': { boxShadow: 4, transform: 'translateY(-1px)' },
+              }}
+            >
+              <CardContent sx={{ '&:last-child': { pb: 2 } }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center">
                   <Box>
                     <Typography variant="h6" sx={{ fontWeight: 700 }}>{supplier.name}</Typography>
                     <Typography variant="body2" color="text.secondary">
@@ -161,205 +414,109 @@ export default function SupplierManager() {
                       <Chip size="small" label={`מע״מ: ${Math.round((supplier.vat_rate - 1) * 100)}%`} variant="outlined" />
                     </Stack>
                   </Box>
-                  <Stack direction="row" spacing={0.5}>
-                    <Tooltip title="ערוך">
-                      <IconButton size="small" onClick={() => setSupplierDialog({ open: true, mode: 'edit', data: supplier })}>
-                        <EditIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                    {/* The PDF first, and in the accent: a supplier sends a
-                        quote, not a comma-separated list, and the paste box
-                        beside it is the fallback for the ones who don't. */}
-                    <Tooltip title="ייבוא מהצעת מחיר (PDF)">
-                      <IconButton size="small" color="primary" onClick={() => setQuoteDialog({ open: true, supplier })}>
-                        <PictureAsPdfIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="ייבוא מוצרים מטקסט">
-                      <IconButton size="small" onClick={() => setImportDialog({ open: true, supplierId: sid, text: '' })}>
-                        <UploadIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="מחק">
-                      <IconButton size="small" color="error" onClick={() => setConfirm({ open: true, type: 'supplier', id: sid })}>
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    {supplierActions(supplier, sid)}
+                    <ChevronLeftIcon sx={{ color: 'text.disabled' }} />
                   </Stack>
                 </Stack>
-
-                <Divider sx={{ my: 2 }} />
-
-                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>מוצרים</Typography>
-                  <Button size="small" startIcon={<AddIcon />}
-                    onClick={() => setProductDialog({ open: true, supplierId: sid, data: {} })}
-                  >
-                    הוסף מוצר
-                  </Button>
-                </Stack>
-
-                {prods.length === 0 ? (
-                  <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
-                    אין מוצרים. ייבא מחירון או הוסף ידנית.
-                  </Typography>
-                ) : (
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell sx={{ fontWeight: 700 }} width="50">תמונה</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>מק״ט</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>קטגוריה</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>שם</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }} align="center">יח׳ מידה</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }} align="center">מחיר + מע״מ</TableCell>
-                        <TableCell align="center"></TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {prods.slice(0, 20).map(p => (
-                        <TableRow key={p._id || p.id} hover>
-                          <TableCell>
-                            <Box
-                              onClick={() => {
-                                if (p.has_image) return;   // it already has one
-                                const url = prompt('הכנס URL לתמונה:');
-                                if (!url) return;
-                                api.put(`/products/${p._id || p.id}`, { image_url: url })
-                                  .then(() => { toast.success('תמונה עודכנה'); fetchProducts(sid); })
-                                  .catch(() => toast.error('שגיאה'));
-                              }}
-                              title={p.has_image || p.image_url ? '' : 'לחץ להוספת תמונה'}
-                              sx={{ cursor: p.has_image || p.image_url ? 'default' : 'pointer', display: 'inline-flex' }}
-                            >
-                              <ProductThumb product={p} size={36} />
-                            </Box>
-                          </TableCell>
-                          <TableCell>{p.sku}</TableCell>
-                          <TableCell>{p.category}</TableCell>
-                          <TableCell sx={{ fontWeight: 600 }}>
-                            {p.name}
-                            {p.standing_note && (
-                              <Box component="span" sx={{ display: 'block', color: '#b45309', fontSize: '0.75rem', fontWeight: 700 }}>
-                                ⚠️ {p.standing_note}
-                              </Box>
-                            )}
-                          </TableCell>
-                          <TableCell align="center" sx={{ color: 'text.secondary', fontSize: '0.8125rem' }}>{p.unit || '—'}</TableCell>
-                          <TableCell align="center" sx={{ fontWeight: 700 }}>{formatCurrency(p.price_with_vat)}</TableCell>
-                          <TableCell align="center">
-                            <IconButton size="small"
-                              onClick={() => setProductDialog({ open: true, supplierId: sid, data: { ...p } })}
-                            >
-                              <EditIcon fontSize="small" />
-                            </IconButton>
-                            <IconButton size="small" color="error"
-                              onClick={() => setConfirm({ open: true, type: 'product', id: p._id || p.id })}
-                            >
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                      {prods.length > 20 && (
-                        <TableRow>
-                          <TableCell colSpan={5} sx={{ textAlign: 'center', color: 'text.secondary' }}>
-                            ...ועוד {prods.length - 20} מוצרים
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                )}
               </CardContent>
             </Card>
           );
         })}
       </Stack>
 
-      {/* Supplier Dialog */}
-      <Dialog open={supplierDialog.open} onClose={() => setSupplierDialog({ open: false, mode: 'add', data: {} })} dir="rtl" maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>
-          {supplierDialog.mode === 'add' ? 'הוסף ספק' : 'ערוך ספק'}
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <TextField label="שם הספק" value={supplierDialog.data.name || ''} onChange={e => updateField('name', e.target.value)} fullWidth required />
-            <TextField label="איש קשר" value={supplierDialog.data.contact_name || ''} onChange={e => updateField('contact_name', e.target.value)} fullWidth />
-            <TextField label="טלפון" value={supplierDialog.data.contact_phone || ''} onChange={e => updateField('contact_phone', e.target.value)} fullWidth inputProps={{ dir: 'ltr' }} />
-            <TextField label="אימייל" value={supplierDialog.data.contact_email || ''} onChange={e => updateField('contact_email', e.target.value)} fullWidth inputProps={{ dir: 'ltr' }} />
-            <TextField label="מינימום הזמנה (₪)" type="number" value={supplierDialog.data.min_order_amount || ''} onChange={e => updateField('min_order_amount', parseFloat(e.target.value) || 0)} fullWidth />
-            <TextField label="מע״מ (למשל 1.18)" type="number" value={supplierDialog.data.vat_rate || ''} onChange={e => updateField('vat_rate', parseFloat(e.target.value) || 1.18)} fullWidth inputProps={{ step: 0.01 }} />
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setSupplierDialog({ open: false, mode: 'add', data: {} })}>ביטול</Button>
-          <Button variant="contained" onClick={handleSaveSupplier}>שמור</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Product Dialog */}
-      <Dialog open={productDialog.open} onClose={() => setProductDialog({ open: false, supplierId: null, data: {} })} dir="rtl" maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>{(productDialog.data._id || productDialog.data.id) ? 'עריכת מוצר' : 'הוסף מוצר'}</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <TextField label="מק״ט" value={productDialog.data.sku || ''} onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, sku: e.target.value } }))} fullWidth />
-            <TextField label="קטגוריה" value={productDialog.data.category || ''} onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, category: e.target.value } }))} fullWidth />
-            <TextField label="שם המוצר" value={productDialog.data.name || ''} onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, name: e.target.value } }))} fullWidth required />
-            <TextField label="מחיר לפני מע״מ" type="number" value={productDialog.data.price_before_vat || ''} onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, price_before_vat: parseFloat(e.target.value) || 0 } }))} fullWidth />
-            <TextField
-              label="הערה קבועה להזמנה" multiline minRows={2}
-              value={productDialog.data.standing_note || ''}
-              onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, standing_note: e.target.value } }))}
-              helperText='תופיע אוטומטית בכל הזמנה שכוללת את המוצר — גם במייל וב-PDF לספק. למשל: "תבלינים של טעם וריח בלבד — אלרגיה לשומשום"'
-              fullWidth
-            />
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setProductDialog({ open: false, supplierId: null, data: {} })}>ביטול</Button>
-          <Button variant="contained" onClick={handleSaveProduct}>{(productDialog.data._id || productDialog.data.id) ? 'שמור' : 'הוסף'}</Button>
-        </DialogActions>
-      </Dialog>
-
-      <QuoteImportDialog
-        open={quoteDialog.open}
-        supplier={quoteDialog.supplier}
-        onClose={() => setQuoteDialog({ open: false, supplier: null })}
-        onImported={() => {
-          const s = quoteDialog.supplier;
-          if (s) fetchProducts(s._id || s.id);
-        }}
-      />
-
-      {/* Import Dialog */}
-      <Dialog open={importDialog.open} onClose={() => setImportDialog({ open: false, supplierId: null, text: '' })} dir="rtl" maxWidth="md" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>ייבוא מוצרים</DialogTitle>
-        <DialogContent>
-          <Alert severity="info" sx={{ mb: 2, borderRadius: 2 }}>
-            הדבק נתונים בפורמט: מק״ט, קטגוריה, שם מוצר, מחיר (לפני מע״מ)
-            <br />שורה לכל מוצר. מופרד בטאב או פסיק.
-          </Alert>
-          <TextField
-            fullWidth multiline rows={10} placeholder="מק״ט, קטגוריה, שם, מחיר..."
-            value={importDialog.text}
-            onChange={e => setImportDialog(prev => ({ ...prev, text: e.target.value }))}
-            inputProps={{ dir: 'rtl', style: { fontFamily: 'monospace' } }}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setImportDialog({ open: false, supplierId: null, text: '' })}>ביטול</Button>
-          <Button variant="contained" onClick={handleImport}>ייבא</Button>
-        </DialogActions>
-      </Dialog>
-
-      <ConfirmDialog
-        open={confirm.open}
-        onClose={() => setConfirm({ open: false, type: '', id: null })}
-        onConfirm={handleDelete}
-        title="אישור מחיקה"
-        message={confirm.type === 'supplier' ? 'למחוק את הספק?' : 'למחוק את המוצר?'}
-      />
+      {renderDialogs()}
     </Box>
   );
+
+  // Shared by both views — every dialog the screen can open.
+  function renderDialogs() {
+    return (
+      <>
+        {/* Supplier Dialog */}
+        <Dialog open={supplierDialog.open} onClose={() => setSupplierDialog({ open: false, mode: 'add', data: {} })} dir="rtl" maxWidth="sm" fullWidth>
+          <DialogTitle sx={{ fontWeight: 700 }}>
+            {supplierDialog.mode === 'add' ? 'הוסף ספק' : 'ערוך ספק'}
+          </DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <TextField label="שם הספק" value={supplierDialog.data.name || ''} onChange={e => updateField('name', e.target.value)} fullWidth required />
+              <TextField label="איש קשר" value={supplierDialog.data.contact_name || ''} onChange={e => updateField('contact_name', e.target.value)} fullWidth />
+              <TextField label="טלפון" value={supplierDialog.data.contact_phone || ''} onChange={e => updateField('contact_phone', e.target.value)} fullWidth inputProps={{ dir: 'ltr' }} />
+              <TextField label="אימייל" value={supplierDialog.data.contact_email || ''} onChange={e => updateField('contact_email', e.target.value)} fullWidth inputProps={{ dir: 'ltr' }} />
+              <TextField label="מינימום הזמנה (₪)" type="number" value={supplierDialog.data.min_order_amount || ''} onChange={e => updateField('min_order_amount', parseFloat(e.target.value) || 0)} fullWidth />
+              <TextField label="מע״מ (למשל 1.18)" type="number" value={supplierDialog.data.vat_rate || ''} onChange={e => updateField('vat_rate', parseFloat(e.target.value) || 1.18)} fullWidth inputProps={{ step: 0.01 }} />
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setSupplierDialog({ open: false, mode: 'add', data: {} })}>ביטול</Button>
+            <Button variant="contained" onClick={handleSaveSupplier}>שמור</Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Product Dialog */}
+        <Dialog open={productDialog.open} onClose={() => setProductDialog({ open: false, supplierId: null, data: {} })} dir="rtl" maxWidth="xs" fullWidth>
+          <DialogTitle sx={{ fontWeight: 700 }}>{(productDialog.data._id || productDialog.data.id) ? 'עריכת מוצר' : 'הוסף מוצר'}</DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <TextField label="מק״ט" value={productDialog.data.sku || ''} onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, sku: e.target.value } }))} fullWidth />
+              <TextField label="קטגוריה" value={productDialog.data.category || ''} onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, category: e.target.value } }))} fullWidth />
+              <TextField label="שם המוצר" value={productDialog.data.name || ''} onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, name: e.target.value } }))} fullWidth required />
+              <TextField label="מחיר לפני מע״מ" type="number" value={productDialog.data.price_before_vat || ''} onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, price_before_vat: parseFloat(e.target.value) || 0 } }))} fullWidth />
+              <TextField
+                label="הערה קבועה להזמנה" multiline minRows={2}
+                value={productDialog.data.standing_note || ''}
+                onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, standing_note: e.target.value } }))}
+                helperText='תופיע אוטומטית בכל הזמנה שכוללת את המוצר — גם במייל וב-PDF לספק. למשל: "תבלינים של טעם וריח בלבד — אלרגיה לשומשום"'
+                fullWidth
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setProductDialog({ open: false, supplierId: null, data: {} })}>ביטול</Button>
+            <Button variant="contained" onClick={handleSaveProduct}>{(productDialog.data._id || productDialog.data.id) ? 'שמור' : 'הוסף'}</Button>
+          </DialogActions>
+        </Dialog>
+
+        <QuoteImportDialog
+          open={quoteDialog.open}
+          supplier={quoteDialog.supplier}
+          onClose={() => setQuoteDialog({ open: false, supplier: null })}
+          onImported={() => {
+            const s = quoteDialog.supplier;
+            if (s) fetchProducts(s._id || s.id);
+          }}
+        />
+
+        {/* Import Dialog */}
+        <Dialog open={importDialog.open} onClose={() => setImportDialog({ open: false, supplierId: null, text: '' })} dir="rtl" maxWidth="md" fullWidth>
+          <DialogTitle sx={{ fontWeight: 700 }}>ייבוא מוצרים</DialogTitle>
+          <DialogContent>
+            <Alert severity="info" sx={{ mb: 2, borderRadius: 2 }}>
+              הדבק נתונים בפורמט: מק״ט, קטגוריה, שם מוצר, מחיר (לפני מע״מ)
+              <br />שורה לכל מוצר. מופרד בטאב או פסיק.
+            </Alert>
+            <TextField
+              fullWidth multiline rows={10} placeholder="מק״ט, קטגוריה, שם, מחיר..."
+              value={importDialog.text}
+              onChange={e => setImportDialog(prev => ({ ...prev, text: e.target.value }))}
+              inputProps={{ dir: 'rtl', style: { fontFamily: 'monospace' } }}
+            />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setImportDialog({ open: false, supplierId: null, text: '' })}>ביטול</Button>
+            <Button variant="contained" onClick={handleImport}>ייבא</Button>
+          </DialogActions>
+        </Dialog>
+
+        <ConfirmDialog
+          open={confirm.open}
+          onClose={() => setConfirm({ open: false, type: '', id: null })}
+          onConfirm={handleDelete}
+          title="אישור מחיקה"
+          message={confirm.type === 'supplier' ? 'למחוק את הספק?' : 'למחוק את המוצר?'}
+        />
+      </>
+    );
+  }
 }

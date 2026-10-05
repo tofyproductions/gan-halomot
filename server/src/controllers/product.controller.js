@@ -42,11 +42,28 @@ async function create(req, res, next) {
 
 async function update(req, res, next) {
   try {
-    const product = await Product.findById(req.params.id);
+    // +image_data so has_image in the response tells the truth even on an
+    // edit that doesn't touch the picture.
+    const product = await Product.findById(req.params.id).select('+image_data');
     if (!product) return res.status(404).json({ error: 'Product not found' });
 
     const fields = ['sku', 'category', 'name', 'price_before_vat', 'image_url', 'standing_note', 'unit'];
     fields.forEach(f => { if (req.body[f] !== undefined) product[f] = req.body[f]; });
+
+    // An uploaded picture arrives as a data URL, same shape a quote import
+    // brings. 700KB of base64 is a 512px JPEG with room to spare; anything
+    // bigger is a file the client failed to shrink.
+    if (req.body.image_data !== undefined) {
+      const v = req.body.image_data;
+      if (v === null || v === '') {
+        product.image_data = null;
+      } else if (typeof v === 'string' && /^data:image\/[\w.+-]+;base64,/.test(v) && v.length <= 700000) {
+        product.image_data = v;
+        product.image_url = '';
+      } else {
+        return res.status(400).json({ error: 'תמונה לא תקינה או גדולה מדי' });
+      }
+    }
 
     if (req.body.price_before_vat !== undefined) {
       const supplier = await Supplier.findById(product.supplier_id);
@@ -55,7 +72,8 @@ async function update(req, res, next) {
     }
 
     await product.save();
-    res.json({ product: { ...product.toObject(), id: product._id } });
+    const { image_data, ...obj } = product.toObject();
+    res.json({ product: { ...obj, id: product._id, has_image: !!image_data } });
   } catch (error) { next(error); }
 }
 
