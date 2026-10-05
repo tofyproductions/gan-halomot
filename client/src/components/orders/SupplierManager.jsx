@@ -3,7 +3,7 @@ import {
   Box, Typography, Card, CardContent, TextField, Button, Stack,
   IconButton, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions,
   Table, TableBody, TableCell, TableHead, TableRow, Chip, Alert,
-  InputAdornment,
+  InputAdornment, Menu, MenuItem, ListItemIcon, ListItemText,
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -64,6 +64,8 @@ export default function SupplierManager() {
   const [confirm, setConfirm] = useState({ open: false, type: '', id: null });
   const fileInputRef = useRef(null);
   const uploadTargetRef = useRef(null);
+  // The replace/delete menu a click on an EXISTING picture opens.
+  const [thumbMenu, setThumbMenu] = useState({ anchorEl: null, product: null });
 
   const fetchSuppliers = useCallback(async () => {
     const res = await api.get('/suppliers');
@@ -125,6 +127,19 @@ export default function SupplierManager() {
   const askForImage = (product) => {
     uploadTargetRef.current = product;
     if (fileInputRef.current) fileInputRef.current.click();
+  };
+
+  const handleDeleteImage = async (product) => {
+    const pid = product._id || product.id;
+    try {
+      await api.put(`/products/${pid}`, { image_data: '', image_url: '' });
+      invalidateProductThumb(pid);
+      setThumbTicks(prev => ({ ...prev, [pid]: Date.now() }));
+      toast.success('התמונה נמחקה');
+      fetchProducts(product.supplier_id || selectedId);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה במחיקת התמונה');
+    }
   };
 
   const handleImageFile = async (e) => {
@@ -307,9 +322,12 @@ export default function SupplierManager() {
                   return (
                     <TableRow key={pid} hover>
                       <TableCell>
-                        <Tooltip title={p.has_image || p.image_url ? 'החלף תמונה' : 'העלה תמונה'}>
+                        <Tooltip title={p.has_image || p.image_url ? 'החלף או מחק תמונה' : 'העלה תמונה'}>
                           <Box
-                            onClick={() => askForImage(p)}
+                            onClick={(e) => {
+                              if (p.has_image || p.image_url) setThumbMenu({ anchorEl: e.currentTarget, product: p });
+                              else askForImage(p);
+                            }}
                             sx={{
                               cursor: 'pointer', display: 'inline-flex', position: 'relative',
                               '&:hover .thumb-overlay': { opacity: 1 },
@@ -516,6 +534,30 @@ export default function SupplierManager() {
           title="אישור מחיקה"
           message={confirm.type === 'supplier' ? 'למחוק את הספק?' : 'למחוק את המוצר?'}
         />
+
+        {/* Replace / delete menu for an existing product picture */}
+        <Menu
+          open={!!thumbMenu.anchorEl}
+          anchorEl={thumbMenu.anchorEl}
+          onClose={() => setThumbMenu({ anchorEl: null, product: null })}
+        >
+          <MenuItem onClick={() => {
+            const p = thumbMenu.product;
+            setThumbMenu({ anchorEl: null, product: null });
+            if (p) askForImage(p);
+          }}>
+            <ListItemIcon><PhotoCameraIcon fontSize="small" /></ListItemIcon>
+            <ListItemText>החלף תמונה</ListItemText>
+          </MenuItem>
+          <MenuItem onClick={() => {
+            const p = thumbMenu.product;
+            setThumbMenu({ anchorEl: null, product: null });
+            if (p) handleDeleteImage(p);
+          }}>
+            <ListItemIcon><DeleteIcon fontSize="small" color="error" /></ListItemIcon>
+            <ListItemText sx={{ color: 'error.main' }}>מחק תמונה</ListItemText>
+          </MenuItem>
+        </Menu>
       </>
     );
   }
