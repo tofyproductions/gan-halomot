@@ -79,6 +79,7 @@ function parsePage(rawText, pageIndex) {
     vehicle_value: null,     // שווי שימוש ברכב
     transport_value: null,   // נסיעות — travel reimbursement
     bonus_value: null,       // בונוס — presence/amount as printed on the payslip
+    gift_value: null,        // שווי שי לחג — our כרטיס מתנה
     recreation_value: null,  // הבראה — presence only matters (accountant sets the exact ₪)
     // Hours worked from line-item qty (more reliable than the header for
     // hourly employees — those show 0/0 in the header but qty in items).
@@ -230,6 +231,18 @@ function parsePage(rawText, pageIndex) {
   result.vehicle_value =
     findValueForLabel(text, VEHICLE_GARBLED) ??
     findValueForLabel(text, 'שווי שימוש ברכב');
+  // שווי שי לחג — the payslip line behind our כרטיס מתנה column. Clean Hebrew
+  // first; failing that, any line carrying the stable garbled "שווי" suffix
+  // (¿ºº—) that is NOT the meal or vehicle line we already recognise.
+  result.gift_value = findValueForLabel(text, 'שי לחג');
+  if (result.gift_value == null) {
+    for (const line of text.split('\n')) {
+      if (!line.includes('¿ºº—')) continue;
+      if (line.includes(MEAL_GARBLED) || line.includes(VEHICLE_GARBLED)) continue;
+      const v = findValueForLabel(line, '¿ºº—');
+      if (v != null) { result.gift_value = v; break; }
+    }
+  }
   result.bonus_value = findValueForLabel(text, BONUS_GARBLED);
   // Amount is a rough reference only — הבראה rows print a day-rate column
   // that can differ slightly from the actual paid amount (rounding), and the
@@ -358,20 +371,28 @@ function parsePage(rawText, pageIndex) {
         if (!line.includes(tag)) continue;
         const nums = extractNumbers(line);
         if (nums.length < 2) continue;
-        const amount = Math.max(...nums);
+        // The amount is NOT necessarily the largest number on the line: with a
+        // tiny OT qty (0.28h × ₪60 = ₪17) the RATE is the largest. So try every
+        // (qty, rate, amount) assignment of three distinct numbers and accept
+        // the one where qty × rate ≈ amount, anchoring on the expected OT rate
+        // (base hourly × multiplier) to tell qty and rate apart.
+        let fallback = null;
         for (let i = 0; i < nums.length; i++) {
           for (let j = 0; j < nums.length; j++) {
             if (i === j) continue;
             const q = nums[i], r = nums[j];
-            if (q > 0 && r > 0 && q < 400 && Math.abs(q * r - amount) < 1.5) {
-              if (expRate != null) {
-                if (Math.abs(r - expRate) < 2) return q;
-                if (Math.abs(q - expRate) < 2) return r;
+            if (!(q > 0 && r > 0 && q < 400)) continue;
+            for (let k = 0; k < nums.length; k++) {
+              if (k === i || k === j) continue;
+              const a = nums[k];
+              if (Math.abs(q * r - a) < 1.5) {
+                if (expRate != null && Math.abs(r - expRate) < 2) return q;
+                if (fallback == null) fallback = Math.min(q, r); // hours are usually the smaller
               }
-              return Math.min(q, r); // hours are usually the smaller of the two
             }
           }
         }
+        if (fallback != null) return fallback;
       }
       return null;
     };

@@ -4525,7 +4525,16 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
       ? `<tr><td colspan="6" style="padding:4px 8px;background:#fef2f2;border-bottom:1px solid ${borderColor};font-size:10px;font-weight:700;color:#b91c1c">⛔ עובד לא פעיל${inactiveReasonTxt}</td></tr>`
       : '';
 
-    const sickVal = sickDays ? `${n1(sickDays)} ימים${sickPay ? ` · ${f(sickPay)}` : ''}` : '';
+    // The money behind every day-count: the accountant checks figures, not
+    // trust — so each leave cell names the per-day value and the total.
+    const sickDayVal = Number(r.sick_info?.daily_value) || 0;
+    const sickVal = sickDays
+      ? `${n1(sickDays)} ימים${sickPay ? ` · ${f(sickPay)}` : ''}${sickDayVal ? subLine(`${f(sickDayVal)} ליום`) : ''}`
+      : '';
+    const holDays = Number(r.holiday_pay_auto?.total_days) || 0;
+    const holidayCellVal = holiday
+      ? `${f(holiday)}${holDays ? subLine(`${n1(holDays)} ימים · ${f(holiday / holDays)} ליום`) : ''}`
+      : '';
     // בונוס אוגוסט — the accountant must see it or the total reads wrong.
     // For BOTH salary types the bonus days are outside ימי עבודה and שעות
     // (payrollCalc drops closure punches): global's bonus is carved out of the
@@ -4548,8 +4557,8 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
     // The pay row: teken already showed base/OT/completion above, so it only lists
     // allowances; hourly shows its single base + completion here.
     const payRow = isGlobal
-      ? `${cell('נסיעות', c.travel ? f(c.travel) : '')}${cell('דמי חגים', holiday ? f(holiday) : '')}${cell('בונוס', bonus ? f(bonus) : '')}${cell('מחלה', sickVal)}${cell('', '')}${cell('', '')}`
-      : `${cell('שכר בסיס', f(c.base_salary), { bold: true })}${cell('בונוס אוגוסט', augBonus?.amount ? f(augBonus.amount) : '')}${cell('נסיעות', c.travel ? f(c.travel) : '')}${cell('דמי חגים', holiday ? f(holiday) : '')}${cell('בונוס', bonus ? f(bonus) : '')}${cell('מחלה', sickVal)}`;
+      ? `${cell('נסיעות', c.travel ? f(c.travel) : '')}${cell('דמי חגים', holidayCellVal)}${cell('בונוס', bonus ? f(bonus) : '')}${cell('מחלה', sickVal)}${cell('', '')}${cell('', '')}`
+      : `${cell('שכר בסיס', f(c.base_salary), { bold: true })}${cell('בונוס אוגוסט', augBonus?.amount ? f(augBonus.amount) : '')}${cell('נסיעות', c.travel ? f(c.travel) : '')}${cell('דמי חגים', holidayCellVal)}${cell('בונוס', bonus ? f(bonus) : '')}${cell('מחלה', sickVal)}`;
 
     // The two completions, named apart, each SAYING WHAT IT IS FOR — the same
     // two the salary table and the שקלולית file distinguish (codes 47 and 38).
@@ -4680,6 +4689,15 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
             // A תקן employee's leave is paid now (code 8, carved from 47), so
             // the cell names the amount the file will carry.
             + (isGlobal && Number(r.vacation_pay) > 0 ? emphLine(`תמורת חופשה: ${f(r.vacation_pay)}`) : '')
+            // Hourly: her vacation days are paid on top — name what a day is
+            // worth and what the days total, not just how many there were.
+            + (!isGlobal && vac > 0 ? (() => {
+              const dv = Number(r.day_rates?.vacation_day_used)
+                || (Number(r.vacation_pay) > 0 ? r.vacation_pay / vac : 0);
+              return dv > 0
+                ? emphLine(`${f(dv)} ליום${Number(r.vacation_pay) > 0 ? ` · סה״כ ${f(r.vacation_pay)}` : ''}`)
+                : '';
+            })() : '')
             + (vacBalanceKnown
               ? (vacUse.capped || vacUse.overdraft ? '' : subLine(`יתרה ${n1(vacUse.available)} — מכסה`))
               : subLine('היתרה לא רשומה במערכת — לבדוק בתלוש לפני תשלום'))

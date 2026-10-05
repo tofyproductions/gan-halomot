@@ -2055,6 +2055,18 @@ function systemRowToTableRow(r) {
 
   // Full, ordered detail of every column shown in the system salary table, so the
   // preview can list each value the accountant was given (not just the compared ones).
+  // Per-day value and total cost for sick / vacation / holiday — the system
+  // computes these now, so the audit shows the money behind the day counts.
+  const sickDayValue = rnd(r.sick_info?.daily_value);
+  const sickPayTotal = rnd(r.sick_info?.pay);
+  const vacDays = _num(r.vacation_eff_days) ?? _num(r.manual?.vacation_days);
+  const vacPayTotal = rnd(r.vacation_pay);
+  const vacDayValue = rnd(r.day_rates?.vacation_day_used)
+    ?? ((vacPayTotal && vacDays) ? rnd(vacPayTotal / vacDays) : null);
+  const holDays = _num(r.holiday_pay_auto?.total_days);
+  const holPayTotal = rnd(r.holiday_pay_auto?.total_pay);
+  const holDayValue = (holPayTotal && holDays) ? rnd(holPayTotal / holDays) : null;
+
   const system_detail = [
     { label: 'ימי עבודה', value: _num(bd.hours?.days_worked) },
     { label: 'שעות רגילות', value: _num(bd.hours?.regular) },
@@ -2068,8 +2080,14 @@ function systemRowToTableRow(r) {
     { label: 'תוספת שכר', value: rnd(tb?.supplement_applied), currency: true },
     { label: 'נסיעות', value: rnd(comp.travel), currency: true },
     { label: 'מחלה (ימים)', value: _num(r.manual?.sick_days) },
-    { label: 'חופשה (ימים)', value: _num(r.vacation_eff_days) ?? _num(r.manual?.vacation_days) },
-    { label: 'דמי חגים (ימים)', value: _num(r.holiday_pay_auto?.total_days) },
+    { label: 'מחלה — שווי ליום', value: _num(r.manual?.sick_days) ? sickDayValue : null, currency: true },
+    { label: 'מחלה — סה"כ', value: _num(r.manual?.sick_days) ? sickPayTotal : null, currency: true },
+    { label: 'חופשה (ימים)', value: vacDays },
+    { label: 'חופשה — שווי ליום', value: vacDays ? vacDayValue : null, currency: true },
+    { label: 'חופשה — סה"כ', value: vacDays ? vacPayTotal : null, currency: true },
+    { label: 'דמי חגים (ימים)', value: holDays },
+    { label: 'דמי חגים — שווי ליום', value: holDays ? holDayValue : null, currency: true },
+    { label: 'דמי חגים — סה"כ', value: holDays ? holPayTotal : null, currency: true },
     { label: 'סיבוס', value: numKind(r.manual?.cibus), currency: true },
     { label: 'הבראה', value: numKind(r.manual?.recreation), currency: true },
     { label: 'כרטיס מתנה', value: numKind(r.manual?.gift_card), currency: true },
@@ -2103,9 +2121,15 @@ function systemRowToTableRow(r) {
     emuna_ks_global: null, emuna_ks_global_ot: null, emuna_hz_global: null, emuna_hz_global_ot: null,
     transport: _num(comp.travel),
     sick_days: _num(r.manual?.sick_days),
+    sick_day_value: sickDayValue,
+    sick_pay_total: sickPayTotal,
     absence: null,
-    vacation_days: _num(r.vacation_eff_days) ?? _num(r.manual?.vacation_days),
-    holiday_days: _num(r.holiday_pay_auto?.total_days),
+    vacation_days: vacDays,
+    vacation_day_value: vacDayValue,
+    vacation_pay_total: vacPayTotal,
+    holiday_days: holDays,
+    holiday_day_value: holDayValue,
+    holiday_pay_total: holPayTotal,
     holiday_pay_expected: rnd(r.holiday_pay_auto?.total_pay), // for amount-based payslip match
     advance_directive: r.manual?.advance_deduction_text || r.manual?.advance_deduction_preset?.label || null,
     gift_card: numKind(r.manual?.gift_card),

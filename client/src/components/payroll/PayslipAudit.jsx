@@ -985,12 +985,23 @@ const DIFF_FIELDS = [
   { key: 'recup',        label: 'הבראה — זכאות',       tableKey: 'recreation_eligible', payslipFn: (p) => p?.recreation_value != null, tolerance: 0, boolYesNo: true, note: 'משווה זכאות בלבד (כן/לא) — הסכום המדויק תמיד נקבע ע"י רו״ח' },
   { key: 'bonus',        label: 'בונוס',                tableKey: 'bonus',               payslipKey: 'bonus_value',     tolerance: 1, currency: true, note: 'כולל בונוס אישי + בונוס אוגוסט (סגירת קיץ)' },
   { key: 'cibus',        label: 'סיבוס / שווי ארוחות', tableKey: 'cibus',               payslipKey: 'meal_value',      tolerance: 0.5, currency: true },
-  { key: 'gift',         label: 'כרטיס מתנה',          tableKey: 'gift_card',           payslipKey: null,              currency: true, infoOnly: true },
+  // The payslip's "שווי שי לחג" line IS our כרטיס מתנה — compared directly.
+  { key: 'gift',         label: 'כרטיס מתנה',          tableKey: 'gift_card',           payslipKey: 'gift_value',      tolerance: 1, currency: true, note: 'מושווה לשורת "שווי שי לחג" בתלוש' },
   { key: 'reserve',      label: 'מילואים',              tableKey: 'reserve_duty',        payslipKey: null,              days: true, infoOnly: true },
-  { key: 'vacation_used', label: 'חופשה — ימי ניצול',   tableKey: 'vacation_days',       payslipPath: ['vacation', 'used'], tolerance: 1, days: true, absVal: true },
-  { key: 'sick_used',    label: 'מחלה — ימי ניצול',    tableKey: 'sick_days',           payslipPath: ['sick', 'used'],     tolerance: 0.5, days: true },
-  { key: 'holidays',     label: 'דמי חגים — ימים',      tableKey: 'holiday_days',        payslipKey: null,              days: true, infoOnly: true },
+  { key: 'vacation_used', label: 'חופשה — ימי ניצול',   tableKey: 'vacation_days',       payslipPath: ['vacation', 'used'], tolerance: 1, days: true, absVal: true, costInfo: (t) => costLine(t?.vacation_day_value, t?.vacation_pay_total) },
+  { key: 'sick_used',    label: 'מחלה — ימי ניצול',    tableKey: 'sick_days',           payslipPath: ['sick', 'used'],     tolerance: 0.5, days: true, costInfo: (t) => costLine(t?.sick_day_value, t?.sick_pay_total) },
+  { key: 'holidays',     label: 'דמי חגים — ימים',      tableKey: 'holiday_days',        payslipKey: null,              days: true, infoOnly: true, costInfo: (t) => costLine(t?.holiday_day_value, t?.holiday_pay_total) },
 ];
+
+// "₪X ליום · סה״כ ₪Y" — the money behind a day-count row, when the system
+// computed it. Null when neither figure exists, so the caption isn't rendered.
+function costLine(dayValue, total) {
+  const f = (n) => `₪${Number(n).toLocaleString('he-IL', { maximumFractionDigits: 2 })}`;
+  const parts = [];
+  if (Number(dayValue) > 0) parts.push(`${f(dayValue)} ליום`);
+  if (Number(total) > 0) parts.push(`סה״כ ${f(total)}`);
+  return parts.length ? parts.join(' · ') : null;
+}
 
 function getValueByPath(obj, path) {
   if (!obj || !path) return null;
@@ -1254,6 +1265,11 @@ function DiffPanel({ tableRow, payslip, cibusRow }) {
                     {r.field.suffixKey && tableRow?.[r.field.suffixKey] && tableRow[r.field.suffixKey] !== 'unknown' && (
                       <Typography component="span" variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
                         ({tableRow[r.field.suffixKey] === 'net' ? 'נטו' : 'ברוטו'})
+                      </Typography>
+                    )}
+                    {r.field.costInfo && r.tableVal != null && r.field.costInfo(tableRow) && (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10 }}>
+                        {r.field.costInfo(tableRow)}
                       </Typography>
                     )}
                   </TableCell>
