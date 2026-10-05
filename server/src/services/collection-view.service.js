@@ -46,14 +46,22 @@ function exitDateOf(exitMonth, academicYear) {
  *
  * Scope widens outward: a discount on this child, on their classroom, or on
  * the whole branch. `month` null means every month.
+ *
+ * A branch-wide discount is the branch's, not everyone's. Child and classroom
+ * discounts match by id and cannot land on a stranger, but `scope: 'branch'`
+ * names no one — so it is compared with the child's own branch here, not
+ * trusted to have been filtered upstream. The "all branches" collections view
+ * hands in every branch's discounts at once, and without this check branch A's
+ * April credit came off branch B's April too, understating what was owed and
+ * marking debts paid. A child whose branch is unknown gets no branch discount.
  */
-function discountFor(discounts, regId, classroomId, monthNum, baseFee) {
+function discountFor(discounts, regId, classroomId, monthNum, baseFee, branchId = null) {
   let total = 0;
   for (const d of discounts || []) {
     if (d.month && d.month !== monthNum) continue;
     if (d.scope === 'child' && String(d.registration_id) !== String(regId)) continue;
     if (d.scope === 'classroom' && String(d.classroom_id) !== String(classroomId)) continue;
-    // scope === 'branch' matches everyone.
+    if (d.scope === 'branch' && (branchId == null || String(d.branch_id) !== String(branchId))) continue;
     total += d.discount_type === 'percentage' ? baseFee * (d.value / 100) : d.value;
   }
   return Math.round(total);
@@ -160,6 +168,7 @@ function buildRegistrationMonths({
 
   const fee = parseFloat(reg.monthly_fee) || 0;
   const classroomObjId = reg.classroom_id?._id || reg.classroom_id;
+  const branchId = reg.branch_id?._id || reg.branch_id || reg.classroom_id?.branch_id || null;
   const endDate = exitDateOf(collection?.exit_month ?? null, academicYear);
 
   // A fee that changed mid-year: charge the old one up to the month it
@@ -187,7 +196,7 @@ function buildRegistrationMonths({
     const existing = monthsMap[m] || {};
     let expected = expectedFees[m] || 0;
 
-    const discount = expected > 0 ? discountFor(discounts, reg._id, classroomObjId, m, expected) : 0;
+    const discount = expected > 0 ? discountFor(discounts, reg._id, classroomObjId, m, expected, branchId) : 0;
     expected = Math.max(0, expected - discount);
 
     const hasFeeOverride = existing.fee_override != null;
