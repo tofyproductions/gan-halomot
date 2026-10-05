@@ -588,6 +588,7 @@ function PerEmployeePairedView({
                   priorNotes={priorNotes?.[resultKey(result)]}
                   previewKind={previewKind}
                   hasCarried={carriedHas(idx)}
+                  carriedNotes={(editableR?.findings || []).filter((f) => f.carried_from)}
                 />
                 {/* Left column (RTL second): per-employee editor.
                     Side stripe color reflects review state — green when all
@@ -1387,11 +1388,19 @@ function StatTile({ label, value, color = 'default' }) {
   );
 }
 
-function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onToggleReviewed, priorNotes, previewKind, hasCarried }) {
+function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onToggleReviewed, priorNotes, previewKind, hasCarried, carriedNotes }) {
   const name = result.table_row?.employee_name || result.payslip?.employee_name || '—';
   // Verified diff against the payslip the month's previous check parsed —
   // present only on a re-upload (stamped by the server).
   const pc = result.__prior_compare;
+  // Corrections this employee was sent for: carried notes (graded against the
+  // new file) win over the raw prior-notes feed, which would repeat them.
+  const asks = (carriedNotes?.length ? carriedNotes : (priorNotes || []).map((n) => ({
+    message: n.message, carry_verdict: n.verdict === 'manual' ? null : n.verdict,
+  })));
+  // Sent notes not already covered by a carried (freshly graded) copy.
+  const otherPriorNotes = (priorNotes || [])
+    .filter((n) => !(carriedNotes || []).some((c) => c.message === n.message));
   // Prefer __source_branch (set by /run-multi) — it's the canonical branch the
   // PDF was tagged with — over the table_row's branch column which may have
   // mid-name whitespace from the xlsx.
@@ -1555,6 +1564,24 @@ function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onTogg
         </Stack>
       </Box>
 
+      {/* The correction this employee was sent for — always visible, without
+          expanding. A card that needed a fix must say so and say which. */}
+      {asks.length > 0 && (
+        <Box sx={{ px: 2, pb: 1, mt: -0.5 }}>
+          {asks.map((n, i) => (
+            <Stack key={i} direction="row" spacing={0.75} alignItems="center" sx={{ mt: 0.5 }}>
+              <Chip size="small"
+                color={n.carry_verdict ? VERDICT_COLOR[n.carry_verdict] : 'warning'}
+                label={n.carry_verdict ? VERDICT_LABEL[n.carry_verdict] : '? להכרעה'}
+                sx={{ height: 20, fontSize: 10, fontWeight: 700, minWidth: 76 }} />
+              <Typography variant="caption" sx={{ fontWeight: 600, minWidth: 0 }} noWrap title={n.message}>
+                ✉️ {n.message}
+              </Typography>
+            </Stack>
+          ))}
+        </Box>
+      )}
+
       {/* PDF preview dialog — PDF iframe on the left, expected-vs-detected
           diff panel on the right so the user can verify the parser's reading
           against the actual payslip without flipping screens. */}
@@ -1662,16 +1689,40 @@ function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onTogg
                 )}
               </Box>
             )}
-            {/* Corrections already sent to the accountant this month — with the
-                correction round's verdict when one exists, so an ignored note
-                doesn't look like a note that was never written. */}
-            {priorNotes?.length > 0 && (
-              <Box sx={{ mb: 1.5, p: 1.25, bgcolor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 1 }}>
+            {/* The question this payslip has to answer: what was asked to be
+                fixed, and did the new file fix it. First, before any numbers. */}
+            {carriedNotes?.length > 0 && (
+              <Box sx={{ mb: 1.5, p: 1.25, bgcolor: '#fff7ed', border: '2px solid #fdba74', borderRadius: 1 }}>
                 <Typography variant="caption" sx={{ fontWeight: 800, display: 'block', mb: 0.5 }}>
-                  ✉️ תיקונים שכבר נשלחו לרו״ח לחודש הזה ({priorNotes.length})
+                  🔍 מה ביקשת לתקן — והאם תוקן בקובץ הזה
                 </Typography>
                 <Stack spacing={0.5}>
-                  {priorNotes.map((n, i) => (
+                  {carriedNotes.map((n, i) => (
+                    <Stack key={i} direction="row" spacing={0.75} alignItems="flex-start">
+                      <Chip size="small"
+                        color={n.carry_verdict ? VERDICT_COLOR[n.carry_verdict] : 'warning'}
+                        label={n.carry_verdict ? VERDICT_LABEL[n.carry_verdict] : '? להכרעה'}
+                        sx={{ height: 20, fontSize: 10, fontWeight: 700, minWidth: 76 }} />
+                      <Typography variant="body2" sx={{ fontSize: 12 }}>{n.message}</Typography>
+                    </Stack>
+                  ))}
+                </Stack>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                  "להכרעה" — אין בדיקה אוטומטית להערה הזו: השווה מול התלוש משמאל והכרע במסך הראשי.
+                </Typography>
+              </Box>
+            )}
+            {/* Corrections already sent to the accountant this month — with the
+                correction round's verdict when one exists, so an ignored note
+                doesn't look like a note that was never written. Carried notes
+                already show above with a fresher grade — don't repeat them. */}
+            {otherPriorNotes.length > 0 && (
+              <Box sx={{ mb: 1.5, p: 1.25, bgcolor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 1 }}>
+                <Typography variant="caption" sx={{ fontWeight: 800, display: 'block', mb: 0.5 }}>
+                  ✉️ תיקונים שכבר נשלחו לרו״ח לחודש הזה ({otherPriorNotes.length})
+                </Typography>
+                <Stack spacing={0.5}>
+                  {otherPriorNotes.map((n, i) => (
                     <Stack key={i} direction="row" spacing={0.75} alignItems="flex-start">
                       {n.verdict
                         ? <Chip size="small" color={VERDICT_COLOR[n.verdict]} label={VERDICT_LABEL[n.verdict]}
