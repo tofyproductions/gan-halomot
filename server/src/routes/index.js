@@ -133,6 +133,8 @@ router.use('/contracts', require('./contracts.routes'));
 router.use('/collections', require('./collections.routes'));
 router.use('/archives', require('./archive.routes'));
 router.use('/contacts', require('./contacts.routes'));
+// הכתובות המותאמות של מסך קישורים להפצה.
+router.use('/share-links', require('./shareLinks.routes'));
 router.use('/classrooms', require('./classroom.routes'));
 // לוח עדכונים יומי — the תינוקייה's day: meals, bottles, naps, what to bring
 // tomorrow. Infant rooms only; the older rooms have no use for it.

@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   Box, Paper, Typography, Stack, Chip, IconButton, Tooltip, TextField,
-  MenuItem, Alert, Divider, Button,
+  MenuItem, Alert, Divider, Button, Dialog, DialogTitle, DialogContent,
+  DialogActions,
 } from '@mui/material';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
@@ -11,8 +12,13 @@ import FamilyRestroomIcon from '@mui/icons-material/FamilyRestroom';
 import WorkOutlineIcon from '@mui/icons-material/WorkOutline';
 import BadgeIcon from '@mui/icons-material/Badge';
 import PhoneIphoneIcon from '@mui/icons-material/PhoneIphone';
+import LinkIcon from '@mui/icons-material/Link';
+import AddIcon from '@mui/icons-material/Add';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import ConfirmDialog from '../shared/ConfirmDialog';
 
 /**
  * קישורים להפצה — the public addresses, in one place to copy from.
@@ -125,6 +131,52 @@ function LinkCard({ icon, title, blurb, children }) {
 export default function ShareLinks() {
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState('');
+  // The office's own links — a form, a payment page — each with a
+  // description so the person copying knows what they are sending.
+  const [customLinks, setCustomLinks] = useState([]);
+  const [linkDialog, setLinkDialog] = useState({ open: false, data: {} });
+  const [confirmDel, setConfirmDel] = useState({ open: false, id: null });
+  const [savingLink, setSavingLink] = useState(false);
+
+  const fetchCustom = () => {
+    api.get('/share-links')
+      .then(res => setCustomLinks(res.data.links || []))
+      .catch(() => setCustomLinks([]));
+  };
+  useEffect(fetchCustom, []);
+
+  const saveLink = async () => {
+    const d = linkDialog.data;
+    if (!d.title?.trim()) return toast.error('חסר שם לקישור');
+    if (!/^https?:\/\/\S+$/i.test(String(d.url || '').trim())) {
+      return toast.error('כתובת לא תקינה — חייבת להתחיל ב-http או https');
+    }
+    setSavingLink(true);
+    try {
+      const body = { title: d.title, url: d.url, description: d.description || '' };
+      const res = d.id
+        ? await api.put(`/share-links/${d.id}`, body)
+        : await api.post('/share-links', body);
+      setCustomLinks(res.data.links || []);
+      setLinkDialog({ open: false, data: {} });
+      toast.success(d.id ? 'הקישור עודכן' : 'הקישור נוסף');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בשמירה');
+    } finally {
+      setSavingLink(false);
+    }
+  };
+
+  const deleteLink = async () => {
+    try {
+      const res = await api.delete(`/share-links/${confirmDel.id}`);
+      setCustomLinks(res.data.links || []);
+      toast.success('הקישור הוסר');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה במחיקה');
+    }
+    setConfirmDel({ open: false, id: null });
+  };
 
   /**
    * The address a PARENT would type, which is not always the one in this bar.
@@ -216,7 +268,93 @@ export default function ShareLinks() {
         >
           <LinkRow url={`${origin}/parents/login`} />
         </LinkCard>
+
+        <Paper variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+            <Box sx={{ color: 'primary.main', display: 'flex' }}><LinkIcon /></Box>
+            <Typography sx={{ fontWeight: 800, flex: 1 }}>קישורים נוספים</Typography>
+            <Button size="small" startIcon={<AddIcon />}
+              onClick={() => setLinkDialog({ open: true, data: {} })}
+            >
+              הוסף קישור
+            </Button>
+          </Stack>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            קישורים שהמשרד מוסיף בעצמו — טופס, דף תשלום, או כל כתובת אחרת ששולחים הרבה.
+          </Typography>
+          {customLinks.length === 0 ? (
+            <Typography variant="body2" color="text.disabled" sx={{ textAlign: 'center', py: 1.5 }}>
+              אין עדיין קישורים. ״הוסף קישור״ למעלה.
+            </Typography>
+          ) : (
+            <Stack spacing={1.2}>
+              {customLinks.map(l => (
+                <Box key={l.id} sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider', p: 1 }}>
+                  <Stack direction="row" alignItems="center" spacing={0.5}>
+                    <Box sx={{ flex: 1 }}>
+                      <Typography sx={{ fontWeight: 700, fontSize: '.92rem' }}>{l.title}</Typography>
+                      {l.description && (
+                        <Typography variant="caption" color="text.secondary">{l.description}</Typography>
+                      )}
+                    </Box>
+                    <Tooltip title="עריכה">
+                      <IconButton size="small" onClick={() => setLinkDialog({ open: true, data: { ...l } })}>
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="מחיקה">
+                      <IconButton size="small" color="error" onClick={() => setConfirmDel({ open: true, id: l.id })}>
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Stack>
+                  <LinkRow url={l.url} />
+                </Box>
+              ))}
+            </Stack>
+          )}
+        </Paper>
       </Stack>
+
+      {/* Add / edit a custom link */}
+      <Dialog open={linkDialog.open} onClose={() => setLinkDialog({ open: false, data: {} })} dir="rtl" maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>{linkDialog.data.id ? 'עריכת קישור' : 'הוספת קישור'}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="שם הקישור" required fullWidth
+              value={linkDialog.data.title || ''}
+              onChange={e => setLinkDialog(prev => ({ ...prev, data: { ...prev.data, title: e.target.value } }))}
+            />
+            <TextField
+              label="כתובת (URL)" required fullWidth inputProps={{ dir: 'ltr' }}
+              placeholder="https://..."
+              value={linkDialog.data.url || ''}
+              onChange={e => setLinkDialog(prev => ({ ...prev, data: { ...prev.data, url: e.target.value } }))}
+            />
+            <TextField
+              label="תיאור" multiline minRows={2} fullWidth
+              helperText="למה הקישור משמש — יוצג מתחת לשם"
+              value={linkDialog.data.description || ''}
+              onChange={e => setLinkDialog(prev => ({ ...prev, data: { ...prev.data, description: e.target.value } }))}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setLinkDialog({ open: false, data: {} })}>ביטול</Button>
+          <Button variant="contained" onClick={saveLink} disabled={savingLink}>
+            {linkDialog.data.id ? 'שמור' : 'הוסף'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <ConfirmDialog
+        open={confirmDel.open}
+        onClose={() => setConfirmDel({ open: false, id: null })}
+        onConfirm={deleteLink}
+        title="אישור מחיקה"
+        message="למחוק את הקישור?"
+      />
 
       <Alert severity="warning" sx={{ mt: 2.5 }} icon={false}>
         <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>שימו לב</Typography>
