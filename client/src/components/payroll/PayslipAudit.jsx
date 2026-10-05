@@ -381,6 +381,22 @@ function PerEmployeePairedView({
     return i >= 0 && (editableByAuditIdx(i)?.findings.length ?? 0) === 0;
   }).length;
 
+  // Re-upload grouping. On a re-uploaded month the server stamps each result
+  // with a verified diff vs the previous file (__prior_compare), so the list
+  // splits into: changed without being asked (loudest), flagged for
+  // correction (verify the fix), verified unchanged (receipt), and the rest.
+  const priorCompared = audit.results.some((r) => r.__prior_compare);
+  const carriedHas = (idx) => (editableByAuditIdx(idx)?.findings || []).some((f) => f.carried_from);
+  const pairOf = (result) => ({ result, idx: audit.results.indexOf(result) });
+  const changedPairs = !priorCompared ? [] : filteredResults.map(pairOf)
+    .filter(({ result, idx }) => idx >= 0 && !carriedHas(idx) && result.__prior_compare?.verdict === 'changed');
+  const carriedPairs = !priorCompared ? [] : filteredResults.map(pairOf)
+    .filter(({ idx }) => idx >= 0 && carriedHas(idx));
+  const groupedIdxSet = new Set([...changedPairs, ...carriedPairs].map((p) => p.idx));
+  const restPairs = auditPairs.filter((p) => !groupedIdxSet.has(p.idx));
+  const unchangedList = !priorCompared ? [] : filteredResults.map(pairOf)
+    .filter(({ result, idx }) => idx >= 0 && !groupedIdxSet.has(idx) && result.__prior_compare?.verdict === 'unchanged');
+
   return (
     <Box>
       {/* Viewing a correction round, not the original audit. Say so loudly —
@@ -445,6 +461,15 @@ function PerEmployeePairedView({
             )}
           </CardContent>
         </Card>
+      )}
+      {/* The payslip-vs-payslip verification verdict for a re-uploaded month. */}
+      {priorCompared && (
+        <Alert severity={changedPairs.length ? 'warning' : 'success'} sx={{ mb: 1.5 }}>
+          הקובץ הושווה תלוש-תלוש מול הבדיקה הקודמת של החודש:
+          {' '}<b style={{ color: '#2e7d32' }}>{unchangedList.length} חזרו ללא שינוי ✓</b>
+          {carriedPairs.length > 0 && <> · <b style={{ color: '#ed6c02' }}>{carriedPairs.length} נדרשו תיקון — ודא שתוקנו</b></>}
+          {changedPairs.length > 0 && <> · <b style={{ color: '#d32f2f' }}>{changedPairs.length} השתנו בלי שנתבקש תיקון</b></>}
+        </Alert>
       )}
       {/* This upload continues the month rather than starting it over. */}
       {carried.length > 0 && (
@@ -539,7 +564,8 @@ function PerEmployeePairedView({
         <Alert severity="info">אין תוצאות לפילטר זה</Alert>
       ) : (
         <Stack spacing={1.5}>
-          {auditPairs.map(({ result, idx }) => {
+          {(() => {
+          const renderPair = ({ result, idx }) => {
             const editableR = editableByAuditIdx(idx);
             return (
               <Box
@@ -561,6 +587,7 @@ function PerEmployeePairedView({
                   onToggleReviewed={onToggleReviewed ? () => onToggleReviewed(idx) : null}
                   priorNotes={priorNotes?.[resultKey(result)]}
                   previewKind={previewKind}
+                  hasCarried={carriedHas(idx)}
                 />
                 {/* Left column (RTL second): per-employee editor.
                     Side stripe color reflects review state — green when all
@@ -586,7 +613,52 @@ function PerEmployeePairedView({
                 </Paper>
               </Box>
             );
-          })}
+          };
+
+          if (!priorCompared) return auditPairs.map(renderPair);
+
+          return (
+            <>
+              {changedPairs.length > 0 && (
+                <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'error.dark', mt: 0.5 }}>
+                  ⚠ השתנו בלי שנתבקש תיקון ({changedPairs.length}) — חובה לבדוק
+                </Typography>
+              )}
+              {changedPairs.map(renderPair)}
+
+              {carriedPairs.length > 0 && (
+                <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'warning.dark', mt: 0.5 }}>
+                  🔍 נדרשו תיקון בבדיקה הקודמת ({carriedPairs.length}) — ודא שכל הערה טופלה
+                </Typography>
+              )}
+              {carriedPairs.map(renderPair)}
+
+              {unchangedList.length > 0 && (
+                <Paper variant="outlined" sx={{ p: 1.25, borderColor: 'success.light', bgcolor: 'rgba(46,125,50,0.04)' }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'success.dark', mb: 0.75 }}>
+                    ✓ חזרו ללא שינוי — אומתו מול הקובץ הקודם ({unchangedList.length})
+                  </Typography>
+                  <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 0.5 }}>
+                    {unchangedList.map(({ result, idx }) => (
+                      <Chip key={idx} size="small" variant="outlined" color="success"
+                        label={result.table_row?.employee_name || result.payslip?.employee_name || '—'} />
+                    ))}
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                    כל תלוש הושווה שדה-שדה (נטו, שעות, ימים, תוספות, יתרות) מול התלוש מהבדיקה הקודמת — לא נמצא שום הבדל.
+                  </Typography>
+                </Paper>
+              )}
+
+              {restPairs.length > 0 && (
+                <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'text.secondary', mt: 0.5 }}>
+                  שאר העובדים ({restPairs.length})
+                </Typography>
+              )}
+              {restPairs.map(renderPair)}
+            </>
+          );
+          })()}
 
           {/* Empty employees toggle — show employees with no current corrections
               so the user can add new ones in their context */}
@@ -1315,8 +1387,11 @@ function StatTile({ label, value, color = 'default' }) {
   );
 }
 
-function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onToggleReviewed, priorNotes, previewKind }) {
+function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onToggleReviewed, priorNotes, previewKind, hasCarried }) {
   const name = result.table_row?.employee_name || result.payslip?.employee_name || '—';
+  // Verified diff against the payslip the month's previous check parsed —
+  // present only on a re-upload (stamped by the server).
+  const pc = result.__prior_compare;
   // Prefer __source_branch (set by /run-multi) — it's the canonical branch the
   // PDF was tagged with — over the table_row's branch column which may have
   // mid-name whitespace from the xlsx.
@@ -1446,6 +1521,19 @@ function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onTogg
               onClick={(e) => { e.stopPropagation(); onToggleReviewed(); }}
               sx={{ fontWeight: 700, cursor: 'pointer' }}
             />
+          )}
+          {/* Re-upload verdict vs the previous file: a flagged employee whose
+              payslip didn't move at all is as loud as an unrequested change. */}
+          {pc?.verdict === 'unchanged' && !hasCarried && (
+            <Chip size="small" color="success" variant="outlined" label="✓ ללא שינוי" sx={{ fontWeight: 700 }} />
+          )}
+          {pc?.verdict === 'unchanged' && hasCarried && (
+            <Chip size="small" color="error" variant="outlined" label="התלוש לא שונה כלל" sx={{ fontWeight: 700 }} />
+          )}
+          {pc?.verdict === 'changed' && (
+            hasCarried
+              ? <Chip size="small" color="warning" label="עודכן — ודא שתוקן" sx={{ fontWeight: 700 }} />
+              : <Chip size="small" color="error" label="⚠ השתנה בלי שנתבקש" sx={{ fontWeight: 700 }} />
           )}
           {counts.critical > 0 && <Chip size="small" color="error"   label={counts.critical} />}
           {counts.warning > 0  && <Chip size="small" color="warning" label={counts.warning} />}
@@ -1600,6 +1688,30 @@ function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onTogg
                   ))}
                 </Stack>
               </Box>
+            )}
+            {/* What actually moved in the payslip since the previous file —
+                for a flagged employee this is how the fix is verified; for an
+                unflagged one it's a change nobody asked for. */}
+            {pc?.diffs?.length > 0 && (
+              <Box sx={{ mb: 1.5, p: 1.25, borderRadius: 1, border: '1px solid',
+                bgcolor: hasCarried ? '#fffbeb' : '#fef2f2',
+                borderColor: hasCarried ? '#fde68a' : '#fecaca' }}>
+                <Typography variant="caption" sx={{ fontWeight: 800, display: 'block', mb: 0.5 }}>
+                  {hasCarried ? '🔁 מה השתנה בתלוש מאז הקובץ הקודם' : '⚠ שינויים בתלוש שלא נתבקשו'}
+                </Typography>
+                <Stack spacing={0.25}>
+                  {pc.diffs.map((d, i) => (
+                    <Typography key={i} variant="body2" sx={{ fontSize: 12 }}>
+                      {d.label}: היה <b>{String(d.before)}</b> ← עכשיו <b>{String(d.after)}</b>
+                    </Typography>
+                  ))}
+                </Stack>
+              </Box>
+            )}
+            {pc?.verdict === 'unchanged' && hasCarried && (
+              <Alert severity="error" sx={{ mb: 1.5, fontSize: 12 }}>
+                ביקשת תיקון לעובד הזה, אבל התלוש שחזר זהה לקודם — אף שדה לא השתנה.
+              </Alert>
             )}
             <DiffPanel
               tableRow={result.table_row}

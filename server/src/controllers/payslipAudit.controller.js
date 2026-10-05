@@ -244,6 +244,11 @@ async function carryForwardNotes(audit) {
     .sort({ created_at: -1 }).limit(1).lean();
   if (!prior.length) return { carried: 0, fixed: 0 };
 
+  // Re-upload of a month that was already checked: stamp every payslip with a
+  // verified diff against the previous file, so the review screen separates
+  // "unchanged, verified" from "changed" as fact rather than guesswork.
+  attachPriorCompare(audit, prior[0]);
+
   const open = fixTargetsFrom(prior[0]);        // already excludes settled-fixed
   if (!open.length) return { carried: 0, fixed: 0 };
   const byKey = new Map(open.map((t) => [targetKey(t.result), t]));
@@ -1492,6 +1497,40 @@ function diffParsedPayslips(before, after) {
 /** Normalized-name key for matching a round payslip to its original. */
 function plainName(name) {
   return String(name || '').replace(/[()'"״׳.,-]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Stamp every result of a re-uploaded audit with `__prior_compare` — the
+ * verified diff against the payslip this month's previous check parsed:
+ *   { verdict: 'unchanged' | 'changed' | 'no_baseline', diffs, compared }
+ * Rides inside full_result (Mixed), so it reaches the client with the audit.
+ */
+function attachPriorCompare(audit, priorDoc) {
+  const priorById = new Map();
+  const priorByName = new Map();   // name -> result, or null when ambiguous
+  for (const pr of (priorDoc.full_result?.results || [])) {
+    if (!pr?.payslip) continue;
+    const id = pr.payslip.employee_id;
+    if (id && !priorById.has(String(id))) priorById.set(String(id), pr);
+    const nm = plainName(pr.payslip.employee_name || pr.table_row?.employee_name);
+    if (nm) priorByName.set(nm, priorByName.has(nm) ? null : pr);
+  }
+  for (const r of audit.results) {
+    if (!r?.payslip) continue;
+    const nm = plainName(r.payslip.employee_name || r.table_row?.employee_name);
+    const pr = (r.payslip.employee_id && priorById.get(String(r.payslip.employee_id)))
+      || (nm && priorByName.get(nm)) || null;
+    if (!pr?.payslip) {
+      r.__prior_compare = { verdict: 'no_baseline', diffs: [], compared: 0 };
+      continue;
+    }
+    const d = diffParsedPayslips(pr.payslip, r.payslip);
+    r.__prior_compare = {
+      verdict: d.compared === 0 ? 'no_baseline' : (d.diffs.length ? 'changed' : 'unchanged'),
+      diffs: d.diffs,
+      compared: d.compared,
+    };
+  }
 }
 
 /**
@@ -3960,6 +3999,7 @@ module.exports = {
   // unchanged" classification of unflagged payslips in a correction round.
   diffParsedPayslips,
   classifyUnflaggedPayslips,
+  attachPriorCompare,
   listBranches,
   emailAudit,
   previewAuditEmail,

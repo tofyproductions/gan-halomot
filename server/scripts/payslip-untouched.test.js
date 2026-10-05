@@ -12,7 +12,7 @@
  *   node scripts/payslip-untouched.test.js
  */
 
-const { diffParsedPayslips, classifyUnflaggedPayslips } =
+const { diffParsedPayslips, classifyUnflaggedPayslips, attachPriorCompare } =
   require('../src/controllers/payslipAudit.controller');
 
 let failures = 0;
@@ -102,6 +102,26 @@ console.log('classifyUnflaggedPayslips');
   const byName = { ...slip({ employee_id: null }), __round_branch: 'סניף רמות' };
   out = classifyUnflaggedPayslips(doc, [byName], new Set());
   check('זיהוי לפי שם כשאין ת"ז', out.length === 1 && out[0].verdict === 'unchanged');
+}
+
+console.log('attachPriorCompare — re-uploaded month vs its previous check');
+{
+  const priorDoc = { full_result: { results: [
+    { payslip: slip(), table_row: { employee_name: 'דנה כהן' } },
+    { payslip: slip({ employee_id: '045678912', employee_name: 'רות אשר', net_to_pay: 7000 }), table_row: { employee_name: 'רות אשר' } },
+  ] } };
+  const audit = { results: [
+    { payslip: slip(), table_row: { employee_name: 'דנה כהן' } },                                  // untouched
+    { payslip: slip({ employee_id: '045678912', employee_name: 'רות אשר', net_to_pay: 7555 }), table_row: { employee_name: 'רות אשר' } }, // changed
+    { payslip: slip({ employee_id: '011111111', employee_name: 'חדש לגמרי' }), table_row: null },  // no prior
+    { payslip: null, table_row: { employee_name: 'חסר תלוש' } },                                    // no payslip — skipped
+  ] };
+  attachPriorCompare(audit, priorDoc);
+  check('תלוש זהה — unchanged', audit.results[0].__prior_compare?.verdict === 'unchanged');
+  check('תלוש שהשתנה — changed עם פירוט', audit.results[1].__prior_compare?.verdict === 'changed'
+    && audit.results[1].__prior_compare.diffs[0].field === 'net_to_pay');
+  check('עובד חדש בחודש — no_baseline', audit.results[2].__prior_compare?.verdict === 'no_baseline');
+  check('שורה בלי תלוש לא מוחתמת', audit.results[3].__prior_compare === undefined);
 }
 
 console.log('');
