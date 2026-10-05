@@ -42,7 +42,7 @@ const KEY = 'brain-test-key-at-least-32-characters-long';
   const uri = mongod.getUri();
   if (!/127\.0\.0\.1|localhost/.test(uri)) throw new Error('not loopback');
   await mongoose.connect(uri);
-  const { Branch, Classroom, Registration, Child, Collection } = require('../src/models');
+  const { Branch, Classroom, Registration, Child, Collection, Discount, IncomeAllocation } = require('../src/models');
 
   const app = express();
   app.use(express.json());
@@ -60,13 +60,14 @@ const KEY = 'brain-test-key-at-least-32-characters-long';
 
   // ── fixture: one branch, one class, five families, loaded with PII ──
   const PII = { phone: '0541234567', email: 'secret.parent@example.com', idn: '123456789',
-    address: 'רחוב הסוד 99', notes: 'הערה-פרטית-מאוד', surname: 'משפחתיקוב' };
+    address: 'רחוב הסוד 99', notes: 'הערה-פרטית-מאוד', surname: 'משפחתיקוב',
+    parentName: 'הורה פרטי', parentPhone: '0527654321', parentEmail: 'parent.reg@example.org', parentId: '987654321' };
   const branch = await Branch.create({ name: 'סניף בדיקה' });
   const room = await Classroom.create({ name: 'כיתת ניסוי', academic_year: '2026-2027', branch_id: branch._id });
   const mk = async (first, extra = {}) => {
     const reg = await Registration.create({
       unique_id: `u-${first}`, branch_id: branch._id, child_name: `${first} ${PII.surname}`, classroom_id: room._id,
-      parent_name: 'הורה פרטי', monthly_fee: 2000, start_date: new Date('2026-09-01'), end_date: new Date('2027-08-31'),
+      parent_name: PII.parentName, parent_phone: PII.parentPhone, parent_email: PII.parentEmail, parent_id_number: PII.parentId, monthly_fee: 2000, start_date: new Date('2026-09-01'), end_date: new Date('2027-08-31'),
       academic_year: '2026-2027', status: 'completed', ...extra,
     });
     const child = await Child.create({
@@ -118,10 +119,11 @@ const KEY = 'brain-test-key-at-least-32-characters-long';
   for (const bad of ['', 'abc', '2026-13', '2026-00', '2026-1', '26-10', '2019-12', '2041-01', '2026-10-01', '2026-10;x']) {
     eq((await call(`/payments?month=${encodeURIComponent(bad)}`)).status, 400, `payments month="${bad}" → 400`);
   }
-  eq((await call('/payments')).status, 400, 'payments בלי month → 400');
-  eq((await call('/unpaid')).status, 400, 'unpaid בלי month → 400');
+  eq((await call('/payments?month=')).status, 400, 'payments month ריק → 400');
+  eq((await call('/payments?month=2026-10&month=2026-11')).status, 400, 'month כפול → 400');
   eq((await call('/unpaid?month=2026-14')).status, 400, 'unpaid חודש לא חוקי → 400');
   eq((await call('/children?active=maybe')).status, 400, 'children active לא חוקי → 400');
+  eq((await call('/children?active=false')).status, 400, 'children active=false נעלם → 400');
 
   console.log('\nתשלומים');
   const pay = await call('/payments?month=2026-10');
@@ -157,8 +159,8 @@ const KEY = 'brain-test-key-at-least-32-characters-long';
   eq(kids.json.count, 3, 'שלושה פעילים');
   eq(kids.json.children[0].start_date, '2026-09-01', 'תאריך התחלה');
   eq((await call('/children')).json.count, 3, 'ברירת מחדל = פעילים');
-  const ina = await call('/children?active=false');
-  eq(ina.json.count, 1, 'active=false → הלא-פעילים');
+  const ina = kids;
+  ok(!kids.text.includes('עומר'), 'ילד לא פעיל לא מופיע');
 
   console.log('\nסיכום');
   const sum = await call('/summary');
@@ -174,7 +176,7 @@ const KEY = 'brain-test-key-at-least-32-characters-long';
 
   console.log('\nאין PII');
   const ALLOWED = {
-    payments: ['child', 'class', 'branch', 'due', 'paid', 'status'],
+    payments: ['child', 'class', 'branch', 'due', 'paid', 'bank_found', 'status', 'due_passed'],
     children: ['child', 'class', 'branch', 'start_date'],
   };
   const sameKeys = (o, list) => JSON.stringify(Object.keys(o).sort()) === JSON.stringify([...list].sort());
@@ -187,6 +189,98 @@ const KEY = 'brain-test-key-at-least-32-characters-long';
     ok(leaked.length === 0, `${label}: אף ערך רגיש לא דלף`, leaked.join(','));
   }
   ok(!/"(_id|phone|email|address|notes|parent|id_number|salary)/i.test(pay.text + kids.text + sum.text), 'אין שמות שדות רגישים');
+
+  console.log('\nברירת מחדל לחודש');
+  const defPay = await call('/payments');
+  eq(defPay.status, 200, 'payments בלי month → 200');
+  eq(defPay.json.month, svc.currentMonthKey(), 'ברירת מחדל = החודש הנוכחי');
+  eq((await call('/unpaid')).json.month, svc.currentMonthKey(), 'unpaid ברירת מחדל');
+
+  console.log('\nמצב חודש ויום גבייה');
+  const T = (iso) => new Date(iso);
+  eq(svc.monthState('2026-09', T('2026-10-15T09:00:00Z')), 'past', 'ספטמבר ביחס לאוקטובר = past');
+  eq(svc.monthState('2026-10', T('2026-10-15T09:00:00Z')), 'current', 'current');
+  eq(svc.monthState('2026-11', T('2026-10-15T09:00:00Z')), 'future', 'future');
+  eq(svc.monthState('2026-11', T('2026-10-31T22:30:00Z')), 'current', 'שעון ישראל: 31.10 22:30Z כבר נובמבר');
+  eq(svc.duePassed('2026-10', T('2026-10-10T09:00:00Z')), false, 'ב-10 לחודש עדיין לא באיחור');
+  eq(svc.duePassed('2026-10', T('2026-10-11T09:00:00Z')), true, 'ב-11 באיחור');
+  eq(svc.duePassed('2026-09', T('2026-10-01T09:00:00Z')), true, 'חודש עבר באיחור');
+  eq(svc.duePassed('2026-11', T('2026-10-20T09:00:00Z')), false, 'חודש עתידי לא');
+  const early = await svc.payments('2026-10', T('2026-10-05T09:00:00Z'));
+  ok(early.payments.every(r => r.due_passed === false) && early.month_state === 'current', '5.10: current ולא באיחור');
+  const late = await svc.unpaid('2026-10', T('2026-10-20T09:00:00Z'));
+  ok(late.unpaid.every(r => r.due_passed === true), '20.10: באיחור');
+  eq((await svc.payments('2026-12', T('2026-10-20T09:00:00Z'))).month_state, 'future', 'payments דצמבר = future');
+  ok((await svc.summary(T('2026-10-20T09:00:00Z'))).current_month.due_passed === true, 'summary: due_passed');
+  eq(sum.json.current_month.month_state, 'current', 'summary: month_state');
+
+  console.log('\nמבצעים לפי סניף (שני סניפים)');
+  const branch2 = await Branch.create({ name: 'סניף שני' });
+  const room2 = await Classroom.create({ name: 'כיתה ב', academic_year: '2026-2027', branch_id: branch2._id });
+  const mk2 = async (first, br, rm) => {
+    const reg = await Registration.create({
+      unique_id: `u2-${first}`, branch_id: br._id, child_name: `${first} בדיקה`, classroom_id: rm._id, parent_name: 'x',
+      monthly_fee: 1000, start_date: new Date('2026-09-01'), end_date: new Date('2027-08-31'), academic_year: '2026-2027', status: 'completed',
+    });
+    await Child.create({ registration_id: reg._id, child_name: `${first} בדיקה`, classroom_id: rm._id, academic_year: '2026-2027' });
+    return reg;
+  };
+  const a1 = await mk2('ענבר', branch2, room2);
+  const b1 = await mk2('רותם', branch2, room2);
+  await Discount.create({ branch_id: branch2._id, scope: 'branch', discount_type: 'percentage', value: 50, month: 10, academic_year: '2026-2027' });
+  const dp = await call('/payments?month=2026-10');
+  const row = (n) => dp.json.payments.find(p => p.child.startsWith(n));
+  eq(row('ענבר').due, 500, 'סניף 2: מבצע הסניף חל (1000 → 500)');
+  eq(row('אורי').due, 2000, 'סניף 1: מבצע של סניף 2 לא חל');
+  eq(row('גיל').due, 2000, 'סניף 1: גם לא על גיל');
+
+  console.log('\nמקרי חודש: מבצע ילד, override, פטור');
+  await Discount.create({ branch_id: branch._id, scope: 'child', registration_id: unpKid.reg._id, discount_type: 'fixed', value: 300, month: 10, academic_year: '2026-2027' });
+  await Collection.create({ registration_id: b1._id, academic_year: '2026-2027', months: [{ month_number: 10, expected_amount: 1000, fee_override: 800, payment_status: 'expected' }] });
+  await Collection.create({ registration_id: a1._id, academic_year: '2026-2027', months: [{ month_number: 11, payment_status: 'exempt' }] });
+  const m10 = await call('/payments?month=2026-10');
+  const r10 = (n) => m10.json.payments.find(p => p.child.startsWith(n));
+  eq(r10('גיל').due, 1700, 'מבצע ילד קבוע: 2000 − 300');
+  eq(r10('רותם').due, 800, 'fee_override גובר: 800');
+  const m11 = await call('/payments?month=2026-11');
+  eq(m11.json.payments.find(p => p.child.startsWith('ענבר')).status, 'exempt', 'חודש פטור → exempt');
+  ok(!(await call('/unpaid?month=2026-11')).json.unpaid.some(r => r.child.startsWith('ענבר')), 'פטור לא ברשימת הלא-שילמו');
+
+  console.log('\nהעברות בנק');
+  const oid = () => new mongoose.Types.ObjectId();
+  await IncomeAllocation.create({ transaction_id: oid(), registration_id: unpKid.reg._id, academic_year: '2026-2027', month_number: 10, amount: 1700 });
+  await IncomeAllocation.create({ transaction_id: oid(), registration_id: partKid.reg._id, academic_year: '2026-2027', month_number: 10, amount: 500 });
+  await IncomeAllocation.create({ transaction_id: oid(), registration_id: partKid.reg._id, academic_year: '2026-2027', month_number: 11, amount: 9999 });
+  const bp = await call('/payments?month=2026-10');
+  const rb = (n) => bp.json.payments.find(p => p.child.startsWith(n));
+  eq(rb('גיל').status, 'paid_by_bank', 'בנק מכסה את כל החוב → paid_by_bank');
+  eq(rb('גיל').bank_found, 1700, 'bank_found');
+  eq(rb('נועה').status, 'partial', 'בנק 500 < חסר 1300 → עדיין partial');
+  eq(rb('נועה').bank_found, 500, 'bank_found חלקי (רק החודש הזה)');
+  eq(rb('אורי').bank_found, 0, 'בלי העברה → 0');
+  const bu = await call('/unpaid?month=2026-10');
+  ok(!bu.json.unpaid.some(r => r.child.startsWith('גיל')), 'paid_by_bank לא ברשימת הלא-שילמו');
+  ok(bu.json.unpaid.some(r => r.child.startsWith('נועה')), 'partial כן');
+  const bs = await svc.summary(new Date('2026-10-15T09:00:00Z'));
+  eq(bs.current_month.bank_found_total, 2200, 'summary: bank_found_total');
+
+  console.log('\nמיקום הדלת ב-routes/index.js האמיתי');
+  {
+    const real = express();
+    real.use(express.json());
+    real.use('/api', require('../src/routes/index'));
+    const srv = await new Promise(r => { const x = real.listen(0, '127.0.0.1', () => r(x)); });
+    const rb2 = `http://127.0.0.1:${srv.address().port}/api`;
+    const withKey = await fetch(`${rb2}/brain/children`, { headers: { Authorization: `Bearer ${KEY}` } });
+    eq(withKey.status, 200, 'מפתח המוח עובר בלי session');
+    const noAuth = await fetch(`${rb2}/employees`);
+    ok(noAuth.status === 401 || noAuth.status === 403, 'נתיב רגיל בלי session עדיין נעצר', `${noAuth.status}`);
+    const other = await fetch(`${rb2}/employees`, { headers: { Authorization: `Bearer ${KEY}` } });
+    ok(other.status === 401 || other.status === 403, 'מפתח המוח לא פותח נתיבים אחרים', `${other.status}`);
+    const post = await fetch(`${rb2}/brain/summary`, { method: 'POST', headers: { Authorization: `Bearer ${KEY}` } });
+    eq(post.status, 405, 'POST דרך index האמיתי → 405');
+    srv.close();
+  }
 
   console.log('\nהגבלת קצב');
   process.env.BRAIN_READ_KEY = KEY;

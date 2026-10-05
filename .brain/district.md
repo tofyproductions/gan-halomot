@@ -18,10 +18,10 @@ actions:
     how: "district_api brain-summary"
   - id: brain-payments
     tier: green
-    how: "district_api brain-payments {month?}"
+    how: "district_api brain-payments {month?} (month=YYYY-MM, default current month)"
   - id: brain-unpaid
     tier: green
-    how: "district_api brain-unpaid {month?}"
+    how: "district_api brain-unpaid {month?} (month=YYYY-MM, default current month)"
   - id: brain-children
     tier: green
     how: "district_api brain-children"

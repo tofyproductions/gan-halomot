@@ -13,8 +13,8 @@ const svc = require('../services/brainRead.service');
  */
 const router = express.Router();
 
-// After the key check on purpose: an anonymous flood must not be able to burn
-// the brain's budget, but the 503/401 answers stay cheap and unmetered by key.
+// BEFORE the key check on purpose: an anonymous flood of guesses is throttled
+// too, not just the holder of the key. Keyed by IP (trust proxy is set).
 const limiter = rateLimit({
   windowMs: 60 * 1000,
   max: 60,
@@ -25,25 +25,29 @@ const limiter = rateLimit({
 
 router.use(limiter, requireBrainKey);
 
-const needMonth = (req, res) => {
-  if (svc.parseMonth(req.query.month)) return req.query.month;
+// `month` is optional (defaults to the current Israel month, like /summary), but
+// when given it must be a valid YYYY-MM or the call is refused.
+const monthOf = (req, res) => {
+  if (req.query.month === undefined) return svc.currentMonthKey();
+  if (typeof req.query.month === 'string' && svc.parseMonth(req.query.month)) return req.query.month;
   res.status(400).json({ error: 'month must be YYYY-MM (2020-01 .. 2040-12)' });
   return null;
 };
 
 router.get('/summary', asyncWrap(async (req, res) => res.json(await svc.summary())));
 router.get('/payments', asyncWrap(async (req, res) => {
-  const month = needMonth(req, res); if (!month) return;
+  const month = monthOf(req, res); if (!month) return;
   res.json(await svc.payments(month));
 }));
 router.get('/unpaid', asyncWrap(async (req, res) => {
-  const month = needMonth(req, res); if (!month) return;
+  const month = monthOf(req, res); if (!month) return;
   res.json(await svc.unpaid(month));
 }));
 router.get('/children', asyncWrap(async (req, res) => {
-  const a = req.query.active;
-  if (a !== undefined && a !== 'true' && a !== 'false') return res.status(400).json({ error: 'active must be true or false' });
-  res.json(await svc.children({ active: a !== 'false' }));
+  // Only active children exist here; `active=true` is accepted for the brain's
+  // sake, anything else is refused rather than silently ignored.
+  if (req.query.active !== undefined && req.query.active !== 'true') return res.status(400).json({ error: 'only active=true is supported' });
+  res.json(await svc.children());
 }));
 
 // Anything else under /brain: no write method exists here, and says so (405)
