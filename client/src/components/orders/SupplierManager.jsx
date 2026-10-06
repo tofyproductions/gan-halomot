@@ -480,7 +480,31 @@ export default function SupplierManager() {
               <TextField label="מק״ט" value={productDialog.data.sku || ''} onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, sku: e.target.value } }))} fullWidth />
               <TextField label="קטגוריה" value={productDialog.data.category || ''} onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, category: e.target.value } }))} fullWidth />
               <TextField label="שם המוצר" value={productDialog.data.name || ''} onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, name: e.target.value } }))} fullWidth required />
-              <TextField label="מחיר לפני מע״מ" type="number" value={productDialog.data.price_before_vat || ''} onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, price_before_vat: parseFloat(e.target.value) || 0 } }))} fullWidth />
+              {/*
+                The unit, beside the price, because it is half of it.
+
+                The model has carried this field all along and the products
+                table shows it; only the quote importer ever filled it in. So
+                every product added by hand had a price and no idea what the
+                price bought — and the order catalogue says the quantity out
+                loud for exactly that reason: ₪195 is a 23-kilo drum or it is
+                a bottle, and a row showing only a number and a name cannot
+                tell you which one you just ordered.
+              */}
+              <Stack direction="row" spacing={2}>
+                <TextField
+                  label="מחיר לפני מע״מ" type="number" sx={{ flex: 2 }}
+                  value={productDialog.data.price_before_vat || ''}
+                  onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, price_before_vat: parseFloat(e.target.value) || 0 } }))}
+                />
+                <TextField
+                  label="יחידת מידה" sx={{ flex: 1 }}
+                  value={productDialog.data.unit || ''}
+                  onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, unit: e.target.value } }))}
+                  placeholder="מכל / קרטון / יח׳"
+                  helperText="מה המחיר קונה"
+                />
+              </Stack>
               <TextField
                 label="הערה קבועה להזמנה" multiline minRows={2}
                 value={productDialog.data.standing_note || ''}
