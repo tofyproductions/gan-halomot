@@ -66,11 +66,17 @@ function saveBlobUrl(url, filename) {
 }
 
 /**
- * A window holding nothing but the card, which prints as one full page.
+ * A window holding nothing but the card, which prints as one full A4 page.
  *
- * The image is sized to the page rather than to its own pixels: at 2480px
- * wide a browser prints it across several sheets, which is how you discover
- * that a birthday card needs sellotape.
+ * `size: A4 portrait` is not decoration. Chrome remembers the last
+ * orientation the person used, and the first card printed off this screen
+ * came out landscape with both sides cut off — the card is a portrait page
+ * and the dialog must open knowing it rather than inheriting whatever the
+ * last spreadsheet needed.
+ *
+ * The image is then sized to the page rather than to its own pixels: at
+ * 2480px wide a browser spreads it over several sheets, which is how you
+ * discover that a birthday card needs sellotape.
  */
 function printBlobUrl(url, title) {
   const w = window.open('', '_blank');
@@ -81,9 +87,12 @@ function printBlobUrl(url, title) {
   w.document.write(`<!doctype html><html lang="he" dir="rtl"><head>
 <title>${title}</title><meta charset="utf-8">
 <style>
-  @page{margin:0}
+  @page{size:A4 portrait;margin:0}
   html,body{margin:0;padding:0;height:100%}
   img{width:100%;height:100%;object-fit:contain;display:block}
+  /* Some browsers drop images they consider background when the person has
+     turned background graphics off; this one is content, and says so. */
+  @media print{img{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 </style></head><body><img src="${url}"></body></html>`);
   w.document.close();
   // Printing before the image has decoded prints an empty page.

@@ -267,11 +267,16 @@ const CARD_CSS = `
   .card::before{content:'';position:absolute;inset:0;
         border:18px solid transparent;
         border-image:linear-gradient(135deg,#e8443b,#f5871f,#f0a500,#2bb673,#2e7dd7,#8e44ad) 1}
-  .deco{position:absolute;font-size:96px;line-height:1;opacity:.5;z-index:1}
-  .deco.a{top:58px;inset-inline-start:58px;transform:rotate(-14deg)}
-  .deco.b{top:58px;inset-inline-end:58px;transform:rotate(12deg)}
-  .deco.c{bottom:54px;inset-inline-start:62px;transform:rotate(9deg)}
-  .deco.d{bottom:54px;inset-inline-end:62px;transform:rotate(-10deg)}
+  /* Drawn, not typed. See CARD_DECO. */
+  .deco{position:absolute;z-index:1;line-height:0}
+  .deco svg{display:block}
+  .deco.a{top:64px;inset-inline-start:66px;transform:rotate(-9deg)}
+  .deco.b{top:62px;inset-inline-end:66px;transform:rotate(7deg)}
+  .deco.c{bottom:62px;inset-inline-start:70px;transform:rotate(6deg)}
+  .deco.d{bottom:64px;inset-inline-end:70px;transform:rotate(-7deg)}
+  /* Confetti: a dozen small shapes in the logo's colours, scattered down both
+     margins so the page has life without anything competing with the name. */
+  .confetti{position:absolute;z-index:0;border-radius:3px;opacity:.55}
   .logo{position:relative;z-index:3;margin-bottom:10px}
   .logo img{height:300px;width:auto}
   .kicker{position:relative;z-index:3;font-family:var(--font-head);font-weight:700;
@@ -300,6 +305,95 @@ const CARD_CSS = `
   .foot{position:absolute;z-index:3;bottom:76px;inset-inline:0;text-align:center;
          font-family:var(--font-head);font-weight:700;font-size:44px;color:var(--brand)}
 `;
+
+/* ----------------------------- decorations -----------------------------
+ *
+ * DRAWN, NOT TYPED — and that is the whole point of this block.
+ *
+ * The card used emoji (🎈🎂🎁⭐) and they looked right on every machine this
+ * was written on. On Render they came out as four empty squares: that
+ * Chromium is @sparticuz's Linux build and the image has no colour-emoji
+ * font, so the glyphs have nothing to render with and fall back to tofu. The
+ * failure is invisible locally and lands on a card a parent is holding.
+ *
+ * Inline SVG depends on no font at all. It also prints: a browser may be told
+ * to drop background graphics, and these are foreground elements of the image
+ * the server already flattened.
+ */
+
+/** The logo's own colours — the decorations belong to this gan, not to a theme. */
+const CARD_COLORS = ['#e8443b', '#f5871f', '#f0a500', '#2bb673', '#2e7dd7', '#8e44ad'];
+
+const BALLOON = `
+<svg width="118" height="214" viewBox="0 0 118 214" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="59" cy="54" rx="44" ry="52" fill="#e8443b"/>
+  <ellipse cx="44" cy="38" rx="13" ry="18" fill="#fff" opacity=".35"/>
+  <path d="M59 104 l-9 14 h18 z" fill="#c23a32"/>
+  <path d="M59 118 C 44 142, 76 160, 59 184 C 50 196, 62 204, 59 212"
+        stroke="#B4540A" stroke-width="4" stroke-linecap="round" fill="none"/>
+</svg>`;
+
+const CAKE = `
+<svg width="132" height="140" viewBox="0 0 132 140" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="16" y="74" width="100" height="52" rx="12" fill="#f5871f"/>
+  <path d="M16 78 q14 16 28 0 q14 16 28 0 q14 16 28 0 q8 9 16 2 v-14 H16z" fill="#FFF1DC"/>
+  <rect x="60" y="34" width="12" height="36" rx="5" fill="#2e7dd7"/>
+  <ellipse cx="66" cy="26" rx="9" ry="13" fill="#f0a500"/>
+  <circle cx="42" cy="104" r="6" fill="#FFF1DC"/>
+  <circle cx="66" cy="112" r="6" fill="#FFF1DC"/>
+  <circle cx="90" cy="102" r="6" fill="#FFF1DC"/>
+</svg>`;
+
+const GIFT = `
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="14" y="48" width="100" height="68" rx="10" fill="#2bb673"/>
+  <rect x="8" y="34" width="112" height="26" rx="9" fill="#17a05f"/>
+  <rect x="55" y="34" width="18" height="82" fill="#f0a500"/>
+  <path d="M64 34 C 44 34, 36 10, 54 12 C 66 13, 64 28, 64 34z" fill="#f0a500"/>
+  <path d="M64 34 C 84 34, 92 10, 74 12 C 62 13, 64 28, 64 34z" fill="#f0a500"/>
+</svg>`;
+
+const STAR = `
+<svg width="124" height="120" viewBox="0 0 124 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M62 6 l17 35 38 6 -28 27 7 39 -34 -19 -34 19 7 -39 -28 -27 38 -6z"
+        fill="#f0a500" stroke="#e09000" stroke-width="3" stroke-linejoin="round"/>
+</svg>`;
+
+/** A small rainbow for the signature, where the 🌈 used to be. */
+const MINI_RAINBOW = `
+<svg width="52" height="30" viewBox="0 0 52 30" fill="none" xmlns="http://www.w3.org/2000/svg"
+     style="vertical-align:-4px;margin-inline-end:10px">
+  ${CARD_COLORS.slice(0, 5).map((c, i) => {
+    const r = 23 - i * 4.4;
+    return `<path d="M${26 - r} 28 a${r} ${r} 0 0 1 ${r * 2} 0" stroke="${c}" stroke-width="4" fill="none"/>`;
+  }).join('')}
+</svg>`;
+
+/**
+ * Twelve confetti shapes down the two margins.
+ *
+ * Fixed positions rather than random ones: a template that renders
+ * differently every call cannot be tested, and two children in the same room
+ * comparing cards would find them subtly different for no reason.
+ */
+const CONFETTI = [
+  [112, 300, 18, 10, -20], [96, 520, 12, 12, 0], [140, 760, 20, 9, 35],
+  [104, 1020, 14, 14, 15], [128, 1270, 18, 10, -30], [92, 1480, 12, 12, 10],
+  [1112, 330, 18, 10, 25], [1130, 560, 12, 12, 0], [1086, 800, 20, 9, -25],
+  [1124, 1060, 14, 14, -15], [1096, 1300, 18, 10, 30], [1134, 1500, 12, 12, 8],
+].map(([x, y, w, h, rot], i) => {
+  const c = CARD_COLORS[i % CARD_COLORS.length];
+  const round = h === w ? 'border-radius:50%;' : '';
+  return `<span class="confetti" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px;`
+       + `background:${c};${round}transform:rotate(${rot}deg)"></span>`;
+}).join('');
+
+const CARD_DECO = `
+  <span class="deco a">${CAKE}</span>
+  <span class="deco b">${BALLOON}</span>
+  <span class="deco c">${GIFT}</span>
+  <span class="deco d">${STAR}</span>
+  ${CONFETTI}`;
 
 /**
  * The greeting, in the child's gender when the gan knows it.
@@ -353,7 +447,7 @@ function nameFontSize(line) {
  * @param {string} [opts.gender] 'boy' | 'girl' | '' — inflects the greeting
  * @param {string} [opts.footer]
  */
-function buildBirthdayCardHtml({ name = '', gender = '', footer = 'באהבה, צוות גן החלומות 🌈' } = {}) {
+function buildBirthdayCardHtml({ name = '', gender = '', footer = 'באהבה, צוות גן החלומות' } = {}) {
   const logo = letterhead.logoDataUrl();
   const g = birthdayGreeting(gender);
   const trimmed = String(name || '').trim();
@@ -371,14 +465,13 @@ function buildBirthdayCardHtml({ name = '', gender = '', footer = 'באהבה, �
 <style>:root{--name-size:${size}px}</style></head>
 <body>
   <div class="card">
-    <span class="deco a">🎈</span><span class="deco b">🎂</span>
-    <span class="deco c">🎁</span><span class="deco d">⭐</span>
+    ${CARD_DECO}
     ${logo ? `<div class="logo"><img src="${logo}" alt="גן החלומות"/></div>` : ''}
     <h1 class="kicker">מזל טוב!</h1>
     <div class="rule"></div>
     ${nameBlock}
     <div class="body">${g.lines.map(l => esc(l)).join('<br>')}</div>
-    <div class="foot">${esc(footer)}</div>
+    <div class="foot">${MINI_RAINBOW}${esc(footer)}</div>
   </div>
 </body></html>`;
 }

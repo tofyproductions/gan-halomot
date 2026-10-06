@@ -110,10 +110,26 @@ async function main() {
   // htmlToPng renders with the network cut: a logo referenced by URL would
   // come out as a blank square and nobody would see it until it was printed.
   ok(/<img src="data:image\/png;base64,/.test(blankHtml), 'הלוגו הוא data: URI ולא כתובת');
-  ok(!/https?:\/\//.test(blankHtml.replace(/<\/?html[^>]*>/g, '')), 'ואין בקובץ שום כתובת חיצונית');
+  // The SVG decorations carry the xmlns, which is a URL and is not fetched.
+  const external = blankHtml.replace(/xmlns="[^"]*"/g, '');
+  ok(!/https?:\/\//.test(external), 'ואין בקובץ שום כתובת חיצונית');
 
   /* ---------------------------------------------------------------- */
-  head('6. רינדור — גודל A4 ושום דבר לא גולש');
+  head('6. בלי אימוג\'י — הם יצאו ריבועים ריקים באוויר');
+  // THE BUG THIS EXISTS FOR: the card was decorated with 🎈🎂🎁⭐ and they
+  // rendered perfectly on every machine it was written on. Render's Chromium
+  // is a Linux build with no colour-emoji font, so on the live server they
+  // came out as four empty squares — on a card a parent was holding. Nothing
+  // in the markup looked wrong, and nothing local reproduced it. So: no
+  // pictographs anywhere in the document, drawn SVG instead.
+  const pictographs = [...buildBirthdayCardHtml({ name: 'נועם', gender: 'boy' })]
+    .filter(ch => /\p{Extended_Pictographic}/u.test(ch));
+  ok(pictographs.length === 0, 'אין שום תו אימוג\'י בכרטיס',
+    pictographs.length ? `נמצאו: ${[...new Set(pictographs)].join(' ')}` : '');
+  ok(/<svg /.test(blankHtml), 'והקישוטים מצוירים כ-SVG');
+
+  /* ---------------------------------------------------------------- */
+  head('7. רינדור — גודל A4 ושום דבר לא גולש');
   const chrome = findChrome();
   if (!chrome) {
     console.log('  ⏭️  אין דפדפן מקומי — בדיקות הרינדור דולגו');
