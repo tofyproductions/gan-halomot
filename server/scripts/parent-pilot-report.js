@@ -11,8 +11,18 @@
  * Read-only. It writes nothing, ever.
  *
  *   node scripts/parent-pilot-report.js                              # list branches
- *   node scripts/parent-pilot-report.js --branch "כפר סבא - משה דיין"
- *   node scripts/parent-pilot-report.js --branch "כפר סבא - משה דיין" --names
+ *   node scripts/parent-pilot-report.js --branch "<סניף>"
+ *   node scripts/parent-pilot-report.js --branch "<סניף>" --classroom "תינוקיה"
+ *   node scripts/parent-pilot-report.js --branch "<סניף>" --csv
+ *
+ * --classroom narrows to one room, matched on any part of its name. A pilot
+ * usually starts in one class rather than a whole branch.
+ *
+ * --csv writes the parent list to a spreadsheet on the Desktop instead of
+ * printing it. Use it rather than --names: a terminal line that mixes Hebrew
+ * names with Latin digits is reordered on screen, and the ת.ז and the mobile
+ * run into each other and read as one impossible nineteen-digit number. The
+ * file opens in Numbers or Excel, where the columns stay columns.
  *
  * Three things decide whether a parent can activate, and all three are
  * enrolment data rather than anything the portal owns (see
@@ -36,14 +46,38 @@
  */
 require('dotenv').config();
 const mongoose = require('mongoose');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 
 function arg(name) {
   const i = process.argv.indexOf(`--${name}`);
   return i > -1 ? process.argv[i + 1] : null;
 }
 const WITH_NAMES = process.argv.includes('--names');
+const AS_CSV = process.argv.includes('--csv');
 
 const pad = (s, n) => String(s ?? '').padEnd(n);
+
+/**
+ * One line of the parent list, written so a terminal cannot scramble it.
+ *
+ * Columns are separated by a visible bar and not by spaces. In a line that
+ * mixes Hebrew with Latin digits the terminal reorders the runs and eats the
+ * padding, and the ת.ז and the mobile end up touching — they read as one
+ * nineteen-digit number, which is what sent somebody looking for a data bug
+ * that was not there. A bar between them cannot be swallowed.
+ *
+ * Hebrew goes last for the same reason: once the RTL run starts, everything
+ * after it is at the mercy of the reordering, so nothing the reader has to
+ * compare digit by digit is put there.
+ */
+const row = (...cells) => `  ${cells.join(' | ')}`;
+
+const csvCell = (v) => {
+  const s = String(v ?? '');
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
 
 async function main() {
   const uri = process.env.MONGODB_URI;
@@ -74,7 +108,21 @@ async function main() {
     return;
   }
 
-  const rooms = await Classroom.find({ branch_id: branch._id }).select('_id name category').lean();
+  let rooms = await Classroom.find({ branch_id: branch._id }).select('_id name category').lean();
+
+  // One room, usually: a pilot starts in a class rather than in a branch.
+  const wantedRoom = arg('classroom');
+  if (wantedRoom) {
+    const narrowed = rooms.filter(r => String(r.name || '').includes(wantedRoom));
+    if (!narrowed.length) {
+      console.log(`לא נמצאה כיתה שמכילה "${wantedRoom}" ב-${branch.name}. הכיתות:`);
+      for (const r of rooms) console.log(`  ${r.name}`);
+      process.exitCode = 1;
+      return;
+    }
+    rooms = narrowed;
+  }
+
   const roomIds = rooms.map(r => r._id);
   const roomById = new Map(rooms.map(r => [String(r._id), r]));
 
@@ -86,7 +134,8 @@ async function main() {
     .sort({ child_name: 1 })
     .lean();
 
-  console.log(`=== ${branch.name} — מצב ההורים לקראת הפיילוט ===`);
+  const scope = wantedRoom ? `${branch.name} / ${rooms.map(r => r.name).join(', ')}` : branch.name;
+  console.log(`=== ${scope} — מצב ההורים לקראת הפיילוט ===`);
   console.log(`${children.length} ילדים פעילים, ${rooms.length} כיתות\n`);
 
   /**
@@ -204,17 +253,39 @@ async function main() {
     if (noDates.length > 15) console.log(`     ...ועוד ${noDates.length - 15}`);
   }
 
-  if (WITH_NAMES) {
-    console.log('\n--- כל ההורים, עם הנייד שהקוד יישלח אליו ---');
-    console.log('קראו את השורות. מספר תקין אבל שגוי נראה כמו הצלחה ושולח את הקוד לזר.\n');
-    const all = [...parents.values()].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'he'));
+  const all = [...parents.values()].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'he'));
+  const stateOf = (e) => (e.account?.activated ? 'הפעיל' : (e.phone ? 'ממתין' : 'חסום'));
+
+  if (AS_CSV) {
+    const safeName = scope.replace(/[\\/:]/g, '-');
+    const file = arg('csv-path') || path.join(os.homedir(), 'Desktop', `הורים - ${safeName}.csv`);
+    const lines = [['מצב', 'תעודת זהות', 'נייד', 'שם ההורה', 'ילדים'].map(csvCell).join(',')];
     for (const e of all) {
-      const state = e.account?.activated ? 'הפעיל' : (e.phone ? 'ממתין' : 'חסום');
+      lines.push([
+        stateOf(e), e.id, e.phone || '', e.name || '',
+        e.children.map(c => c.child_name).join(' · '),
+      ].map(csvCell).join(','));
+    }
+    // BOM, or Excel reads the Hebrew as mojibake.
+    fs.writeFileSync(file, `﻿${lines.join('\n')}\n`, 'utf8');
+    console.log(`\n📄 ${all.length} הורים נכתבו לקובץ:`);
+    console.log(`   ${file}`);
+    console.log('\n   הקובץ מכיל תעודות זהות ומספרי טלפון של משפחות.');
+    console.log('   אחרי שעברתם עליו — מחקו אותו.');
+  } else if (WITH_NAMES) {
+    console.log('\n--- כל ההורים, עם הנייד שהקוד יישלח אליו ---');
+    console.log('מספר תקין אבל שגוי נראה כמו הצלחה ושולח את הקוד לזר.');
+    console.log('(--csv במקום --names נותן קובץ לנאמברס, קריא הרבה יותר)\n');
+    console.log(row(pad('מצב', 6), pad('תעודת זהות', 11), pad('נייד', 10), 'שם / ילדים'));
+    for (const e of all) {
       const kids = e.children.map(c => c.child_name).join(', ');
-      console.log(`  ${pad(state, 7)} ${pad(e.id, 11)} ${pad(e.phone || '—', 12)} ${pad(e.name || '(ללא שם)', 18)} ${kids}`);
+      console.log(row(
+        pad(stateOf(e), 6), pad(e.id, 11), pad(e.phone || '—', 10),
+        `${e.name || '(ללא שם)'} — ${kids}`,
+      ));
     }
   } else {
-    console.log('\n(--names כדי לראות את כל ההורים והנייד שהקוד יישלח אליו)');
+    console.log('\n(--csv כדי לקבל את כל ההורים והניידים כקובץ לנאמברס)');
   }
 
   console.log('');
