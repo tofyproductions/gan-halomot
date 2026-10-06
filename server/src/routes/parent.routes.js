@@ -38,7 +38,9 @@ router.get('/me', auth.me);
 
 const push = wrapControllers(require('../controllers/push.controller'));
 router.post('/push/register', push.registerParent);
-router.post('/push/unregister', push.unregister);
+// Scoped to this parent's own rows — the token-keyed delete let one caller
+// silence any device whose FCM token they had, staff included.
+router.post('/push/unregister', push.unregisterParent);
 
 const dataDeletion = wrapControllers(require('../controllers/dataDeletion.controller'));
 router.post('/data-deletion/me', dataDeletion.requestParent);
@@ -114,7 +116,13 @@ router.get('/children/:childId/documents/:docId/file', portal.sharedDocumentFile
 
 // Changing the phone is its own two-step flow, because the code has to go to
 // the new number — see parentPortal.controller.
-router.post('/phone/start', portal.startPhoneChange);
-router.post('/phone/confirm', portal.confirmPhoneChange);
+//
+// Throttled like the activation codes above, and for the same reason: this is
+// the other route in the portal that spends real money on an SMS, and the
+// per-account counters behind it do not stop one signed-in parent from walking
+// through numbers. The prepaid balance it draws on is the one every parent's
+// sign-in code comes out of.
+router.post('/phone/start', otpLimiter, portal.startPhoneChange);
+router.post('/phone/confirm', otpLimiter, portal.confirmPhoneChange);
 
 module.exports = router;
