@@ -193,6 +193,7 @@ const foot = (right) => `<footer><span>${right}</span><span>גן החלומות 
  * For the families.
  * ------------------------------------------------------------------ */
 const PORTAL = 'gan-halomot.onrender.com/parents';
+const STAFF_PORTAL = 'gan-halomot.onrender.com';
 const PLAY = 'bit.ly — או חיפוש "גן החלומות" בחנות';
 
 const parents = (qr) => page(`
@@ -321,6 +322,100 @@ ${head('הלוח היומי במערכת', 'מה משתנה בתינוקייה, 
 ${foot('הנחיות לצוות התינוקייה')}
 `);
 
+/* ------------------------------------------------------------------ *
+ * For the staff room wall: every screen, and what it is for.
+ *
+ * Written for the גננת, who sees six of the thirteen. The rest are marked
+ * rather than hidden, because a list that quietly omits them leaves somebody
+ * wondering whether she is missing a screen or missing a permission — and
+ * the answer to that one is "ask the office", which she can only do if she
+ * knows there is something to ask about.
+ * ------------------------------------------------------------------ */
+const screenRow = (name, who, what) => `
+  <tr>
+    <td style="font-weight:700;white-space:nowrap">${name}</td>
+    <td>${what}</td>
+    <td style="white-space:nowrap;color:var(--soft);font-size:9.4pt">${who}</td>
+  </tr>`;
+
+const staffScreens = (qr) => page(`
+${head('האפליקציה של הגן', 'מה יש בה, ומה אפשר לעשות בכל מסך')}
+
+<div class="scan">
+  <div class="qr">${qr}</div>
+  <div class="txt">
+    <div class="big">נכנסים לראשונה</div>
+    <div class="small">
+      סורקים, ואז <strong>שם מלא + תעודת זהות</strong>. זהו — אין סיסמה בכניסה
+      הראשונה. המערכת תציע לבחור סיסמה, וכדאי לבחור.
+      <span class="url">${STAFF_PORTAL}</span>
+    </div>
+  </div>
+</div>
+
+<h2>שני הדברים החשובים</h2>
+<ol class="steps">
+  <li>
+    <div class="t">לוח יומי — ממלאים במהלך היום</div>
+    <div class="d">
+      אוכל, שינה, החתלות, מצב רוח, ותפריט היום. <strong>ההורים רואים את זה
+      באזור האישי שלהם</strong>, אז מה שנרשם כאן הוא מה שההורה יודע בערב.
+    </div>
+  </li>
+  <li>
+    <div class="t">תמונות — מעלים מהטלפון</div>
+    <div class="d">
+      בוחרים כיתה, מצלמים או בוחרים מהגלריה, מעלים. התמונות נראות
+      <strong>להורי הכיתה בלבד, במשך שבוע</strong>. הורה יכול לסמן "זה הילד
+      שלי" — זה מגיע אליכן לאישור ולא משנה כלום עד שתאשרו.
+    </div>
+  </li>
+</ol>
+
+${foot('מדריך לצוות החינוכי')}
+`) + page(`
+<h2>כל המסכים</h2>
+
+<table>
+  <tr><th style="width:22%">המסך</th><th>מה עושים בו</th><th style="width:16%">מי רואה</th></tr>
+  ${screenRow('לוח יומי', 'כולן', 'היום של כל ילד/ה — אוכל, שינה, החתלות, תפריט. ההורים רואים.')}
+  ${screenRow('תמונות', 'כולן', 'העלאת תמונות לכיתה. נראות להורי הכיתה במשך שבוע.')}
+  ${screenRow('מה חסר', 'כולן', 'מסמנות מה אזל בכיתה — מגבונים, טיטולים. המשרד רואה ומזמין.')}
+  ${screenRow('מורשי איסוף', 'כולן', 'מי מותר לו לאסוף כל ילד/ה. לבדוק לפני שמוסרים.')}
+  ${screenRow('היעדרויות', 'גננת', 'מי דיווח מראש שלא מגיע.')}
+  ${screenRow('הודעות לגן', 'גננת', 'כותבות הודעה להורים. מנהלת הסניף מפרסמת אותה.')}
+  ${screenRow('עדכונים מהורים', 'אחראית', 'מה הורים שינו בפרטים — אלרגיה, כתובת, טלפון.')}
+  ${screenRow('מעקב חוגים', 'אחראית', 'מי רשום לאיזה חוג ומי הגיע.')}
+  ${screenRow('גאנט', 'אחראית', 'תוכנית החודש. מה שמאושר מוצג להורים.')}
+  ${screenRow('מתנות', 'אחראית', 'בחירת התמונה שתודפס על המתנה.')}
+  ${screenRow('הזמנות', 'אחראית', 'בניית הזמנה לספק. נשלחת לאישור ההנהלה.')}
+  ${screenRow('מעקב מלאי', 'אחראית', 'מה יש במחסן ומה נגמר.')}
+  ${screenRow('אחזקה', 'אחראית', 'דיווח על תקלה — ברז, תאורה, ריהוט.')}
+</table>
+
+<div class="note">
+  <span class="h">"כולן" / "גננת" / "אחראית"</span>
+  סייעת רואה את מה שמסומן "כולן". גננת רואה גם את מה שמסומן "גננת".
+  גננת אחראית רואה את הכול. אם מסך שאמור להיות לכן לא מופיע — זה עניין
+  של הרשאה, ופותרים אותו במשרד.
+</div>
+
+<div class="note">
+  <span class="h">החתמות</span>
+  הכניסה והיציאה נרשמות במערכת. אם יום יצא בלי החתמה תקבלו על כך הודעה
+  ותוכלו להסביר מה קרה — עדיף לטפל בזה מיד ולא בסוף החודש.
+</div>
+
+<div class="note">
+  <span class="h">לא בטוחות במשהו?</span>
+  אף פעולה במסכים האלה אינה סופית בלי אישור — הזמנה הולכת להנהלה, הודעה
+  להורים מתפרסמת על ידי מנהלת הסניף, וסימון של הורה על תמונה מחכה לכן.
+  מותר להתנסות.
+</div>
+
+${foot('מדריך לצוות החינוכי')}
+`);
+
 const doc = (title, body) => `<!doctype html>
 <html lang="he" dir="rtl"><meta charset="utf-8"><title>${title}</title>
 <style>${CSS}</style><body>${body}</body></html>`;
@@ -339,6 +434,7 @@ const pageCount = (file) => {
 
 (async () => {
   const qr = await qrSvg(`https://${PORTAL}`);
+  const staffQr = await qrSvg(`https://${STAFF_PORTAL}`);
 
   const browser = await puppeteer.launch({
     executablePath: findChrome(), headless: true,
@@ -349,6 +445,7 @@ const pageCount = (file) => {
     const jobs = [
       ['הורים — איך נכנסים לאפליקציה.pdf', doc('הורים — התחברות', parents(qr))],
       ['צוות — הלוח היומי במערכת.pdf', doc('צוות — הלוח היומי', staff)],
+      ['צוות — מדריך לאפליקציה.pdf', doc('צוות — מדריך לאפליקציה', staffScreens(staffQr))],
     ];
     for (const [name, html] of jobs) {
       const file = path.join(__dirname, name);
@@ -361,8 +458,9 @@ const pageCount = (file) => {
       await p.close();
 
       const pages = pageCount(file);
-      if (pages === 1) console.log(`✅ ${name}`);
-      else { bad++; console.log(`❌ ${name} — ${pages} עמודים, התוכן גולש`); }
+      const want = name.includes('מדריך') ? 2 : 1;
+      if (pages === want) console.log(`✅ ${name} (${pages} עמ')`);
+      else { bad++; console.log(`❌ ${name} — ${pages} עמודים, ציפינו ${want}`); }
     }
   } finally { await browser.close(); }
   if (bad) process.exit(1);
