@@ -79,6 +79,36 @@ const csvCell = (v) => {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
+/**
+ * A mobile number that survives being opened in a spreadsheet.
+ *
+ * `0546136599` is digits, so Numbers and Excel read it as the number five
+ * hundred and forty-six million and print it back without the leading zero —
+ * which is the one digit that makes it a phone number. The reader is checking
+ * these by eye against numbers they know, and nine digits beginning 5 is not
+ * what any of them look like.
+ *
+ * The dash settles it: no spreadsheet parses 054-6136599 as a number, and it
+ * is how an Israeli mobile is written down anyway, so it reads faster.
+ */
+const csvPhone = (p) => {
+  const s = String(p || '');
+  return /^0\d{9}$/.test(s) ? `${s.slice(0, 3)}-${s.slice(3)}` : s;
+};
+
+/**
+ * And the same hazard on the ת.ז, which is quieter and worse.
+ *
+ * An ID number is nine digits and some of them genuinely start with a zero.
+ * A spreadsheet eats that zero too, and unlike the phone there is nothing
+ * about the result that looks wrong — it is simply a different, valid-looking
+ * ID. The ="…" form is the one both Numbers and Excel honour as text.
+ */
+const csvId = (id) => {
+  const s = String(id || '').padStart(9, '0');
+  return /^0/.test(s) ? `="${s}"` : s;
+};
+
 async function main() {
   const uri = process.env.MONGODB_URI;
   if (!uri) throw new Error('MONGODB_URI חסר');
@@ -262,9 +292,10 @@ async function main() {
     const lines = [['מצב', 'תעודת זהות', 'נייד', 'שם ההורה', 'ילדים'].map(csvCell).join(',')];
     for (const e of all) {
       lines.push([
-        stateOf(e), e.id, e.phone || '', e.name || '',
-        e.children.map(c => c.child_name).join(' · '),
-      ].map(csvCell).join(','));
+        csvCell(stateOf(e)), csvId(e.id), csvPhone(e.phone),
+        csvCell(e.name || ''),
+        csvCell(e.children.map(c => c.child_name).join(' · ')),
+      ].join(','));
     }
     // BOM, or Excel reads the Hebrew as mojibake.
     fs.writeFileSync(file, `﻿${lines.join('\n')}\n`, 'utf8');
