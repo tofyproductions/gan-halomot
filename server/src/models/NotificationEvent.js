@@ -45,6 +45,11 @@ const notificationEventSchema = new mongoose.Schema({
       'shift_edit_request', 'shift_edit_decision',
       // אילוצים (docs/superpowers/specs/2026-10-04-shifts-phase2-constraints-design.md).
       'constraint_decision', 'constraint_cancelled',
+      // The answer to a holiday or sick-leave request. The decision travelled
+      // two desks — her manager, then accounting — and reached her screen in
+      // silence: nothing told her, so she either kept opening "עדכונים" or
+      // found out when the payslip came.
+      'employee_request_decision',
       // סניפים אחרים (docs/superpowers/specs/2026-10-04-shifts-phase3-crossbranch-design.md).
       'rate_request', 'rate_request_decision', 'cross_placement_request', 'cross_placement_decision',
       'cross_arrangement', 'shift_attendance_report', 'shift_attendance_report_office',

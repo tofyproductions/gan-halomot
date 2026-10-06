@@ -4,6 +4,7 @@ const { scanSickNote } = require('../services/sickNoteScan');
 const { workingWeekdays } = require('../services/commitmentAnalysis');
 const { computeBalance } = require('../services/pregnancyExam');
 const { findDocumentForDate } = require('../services/docDateMatch');
+const { notifyOnce } = require('../services/notification.service');
 
 /**
  * A pregnancy-exam entry without a certificate goes looking for one among the
@@ -329,6 +330,49 @@ async function updateRequestStatus(req, res, next) {
     if (request.status === 'approved' && request.type === 'sick') {
       try { await applySickToPayroll(request); }
       catch (err) { console.error('applySickToPayroll failed:', err.message); }
+    }
+
+    /**
+     * Tell her. Nothing did.
+     *
+     * The request crossed two desks — her manager, then accounting — and the
+     * answer landed on a screen in silence. She either kept opening "עדכונים"
+     * to look, or found out when the payslip came. Somebody who asked for a
+     * day off deserves to hear the answer when it is given.
+     *
+     * Only on the two ANSWERS, not on the hand-off between the desks: "your
+     * request has reached accounting" is not news, it is noise, and the next
+     * message after it is the one that matters.
+     *
+     * notifyOnce, like every other message to an employee — she is told once;
+     * the repeating reminders in this system are for the people who owe
+     * somebody a decision.
+     */
+    if (request.status === 'approved' || request.status === 'rejected') {
+      try {
+        const recipientId = request.user_id
+          || (request.employee_id
+            && (await Employee.findById(request.employee_id).select('user_id').lean())?.user_id);
+        if (recipientId) {
+          const sick = request.type === 'sick';
+          const what = sick ? 'דיווח המחלה' : 'בקשת החופשה';
+          const approved = request.status === 'approved';
+          await notifyOnce({
+            type: 'employee_request_decision',
+            ref_collection: 'EmployeeRequest',
+            ref_id: request._id,
+            recipient_id: recipientId,
+            title: `${what} שלך ${approved ? 'אושר' : 'לא אושר'}${sick ? '' : 'ה'}`,
+            body: approved
+              ? 'הבקשה אושרה ותיכנס לחישוב השכר.'
+              : 'אפשר לראות את הפרטים במסך העדכונים.',
+            url: '/my-updates',
+          });
+        }
+      } catch (err) {
+        // A message that failed must not undo a decision that was made.
+        console.error('[employee-request] notify failed:', err.message);
+      }
     }
 
     res.json({ request });

@@ -16,6 +16,8 @@ import { MyDecisionsPopup } from '../payroll/MyDecisions';
 import EmployeePunchFixPopup from '../attendance/EmployeePunchFixPopup';
 import ManagerPunchFollowupPopup from '../attendance/ManagerPunchFollowupPopup';
 import HelpButton from '../shared/HelpButton';
+import api from '../../api/client';
+import { registerNativePush } from '../../utils/nativePush';
 
 /**
  * The shell: a fixed rail, and everything else.
@@ -36,6 +38,30 @@ export default function AppShell() {
   const hasMobileNav = useHasMobileNav();
   const { pathname } = useLocation();
   const { selectedBranch } = useBranch();
+  const { isAuthenticated } = useAuth();
+
+  /**
+   * Native push for STAFF, which had never been switched on.
+   *
+   * nativePush.js was written for both sides and says so — "`api` for staff,
+   * `parentApi` for the parent portal" — and the parent portal calls it.
+   * Nothing on the staff side ever did. So a rota published on Thursday
+   * night, a swap somebody was waiting on, a punch correction rejected with
+   * a reason: all of it was written, sent, and delivered to nobody who had
+   * the app installed. The only channel staff really had was a browser
+   * notification they had to go and find in a menu.
+   *
+   * On every launch rather than once per login, because almost nobody logs
+   * in — the token lasts thirty days, so for an installed app "once per
+   * login" means once, long ago, before this existed. The server upserts on
+   * the token, so repeating costs nothing.
+   *
+   * A no-op in a browser: registerNativePush returns at once off-device.
+   */
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    registerNativePush(api).catch(() => { /* a device that refuses push still works */ });
+  }, [isAuthenticated]);
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100dvh', bgcolor: 'background.default' }}>
