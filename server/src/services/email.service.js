@@ -371,35 +371,80 @@ async function sendOrderEmail({ order, supplier, branch, creatorEmail, creatorNa
 
   const { buildSupplierHTML, buildInternalHTML, buildFilename } = require('./order-pdf.service');
 
-  // Email body — short summary; the detailed copies are in the attached PDFs.
-  const html = `
-    <div dir="rtl" style="font-family: Arial, sans-serif; max-width:700px; margin:0 auto;">
-      <h2 style="color:#10b981; border-bottom:3px solid #10b981; padding-bottom:8px;">הזמנה סופית ומאושרת</h2>
-      <p><b>סניף:</b> ${esc(branch?.name)}</p>
-      <p style="color:#475569;">מצורפים 2 קבצים (למשרד ולספק).</p>
-      <h3>פירוט ההזמנה:</h3>
-      ${buildOrderHTML({ order, supplier, branch, creatorName })}
-    </div>
-  `;
-
   const supplierHTML = buildSupplierHTML({ order, supplier, branch });
   const internalHTML = buildInternalHTML({ order, supplier, branch });
   const supplierFile = buildFilename({ variant: 'supplier', branch, order });
   const internalFile = buildFilename({ variant: 'internal', branch, order });
 
-  // Through module.exports so a test can observe the message.
-  const info = await module.exports.dispatchEmail({
-    to: supplierEmail || creatorEmail || officeEmail,
-    cc,
-    subject: `הזמנה מאושרת: ${branch?.name || ''} (הזמנה #${order.order_number})`,
-    html,
-    attachments: [
-      { name: supplierFile, html: supplierHTML },
-      { name: internalFile, html: internalHTML },
-    ],
-  });
+  /**
+   * TWO LETTERS, BECAUSE THE SUPPLIER MUST NOT BE TOLD WHAT WE EXPECT TO PAY.
+   *
+   * The two documents were always right — buildSupplierHTML has never carried
+   * a price — and then both were attached to one message addressed to the
+   * supplier, with a body listing every unit price and the total underneath.
+   * The priceless copy was posted inside an envelope that spelled the prices
+   * out.
+   *
+   * It is a commercial fact and not a tidiness one: those prices are what the
+   * gan paid last time, and sometimes the supplier would have quoted less.
+   * Telling him what we expect ends that conversation before it opens.
+   *
+   * So the supplier gets a letter carrying his own document and nothing else,
+   * and the office gets its own letter with both — which is what makes the
+   * comparison against the invoice possible at all.
+   */
+  const supplierBody = `
+    <div dir="rtl" style="font-family: Arial, sans-serif; max-width:700px; margin:0 auto;">
+      <h2 style="color:#10b981; border-bottom:3px solid #10b981; padding-bottom:8px;">הזמנה</h2>
+      <p><b>סניף:</b> ${esc(branch?.name)}</p>
+      <p><b>מספר הזמנה:</b> ${esc(order.order_number)}</p>
+      <p style="color:#475569;">פירוט ההזמנה בקובץ המצורף. נשמח לאישור ולמועד אספקה.</p>
+    </div>
+  `;
 
-  return { sent: true, messageId: info.messageId, provider: info.provider, recipients };
+  const officeBody = `
+    <div dir="rtl" style="font-family: Arial, sans-serif; max-width:700px; margin:0 auto;">
+      <h2 style="color:#10b981; border-bottom:3px solid #10b981; padding-bottom:8px;">הזמנה סופית ומאושרת</h2>
+      <p><b>סניף:</b> ${esc(branch?.name)}</p>
+      <p style="color:#475569;">
+        העותק שנשלח לספק אינו כולל מחירים. העותק הפנימי המצורף כאן כולל אותם,
+        להשוואה מול החשבונית.
+      </p>
+      <h3>פירוט ההזמנה:</h3>
+      ${buildOrderHTML({ order, supplier, branch, creatorName })}
+    </div>
+  `;
+
+  // Through module.exports so a test can observe the messages.
+  let info = null;
+  if (supplierEmail) {
+    info = await module.exports.dispatchEmail({
+      to: supplierEmail,
+      subject: `הזמנה: ${branch?.name || ''} (הזמנה #${order.order_number})`,
+      html: supplierBody,
+      attachments: [{ name: supplierFile, html: supplierHTML }],
+    });
+  }
+
+  // Ours. Sent even when the supplier has no address on file — then this is
+  // the only copy there is, and losing it would lose the order.
+  const ours = [creatorEmail, officeEmail].filter(Boolean);
+  if (ours.length) {
+    const copy = await module.exports.dispatchEmail({
+      to: ours[0],
+      cc: ours.slice(1),
+      subject: `עותק הזמנה: ${branch?.name || ''} (הזמנה #${order.order_number})`,
+      html: officeBody,
+      attachments: [
+        { name: internalFile, html: internalHTML },
+        { name: supplierFile, html: supplierHTML },
+      ],
+    });
+    // The supplier's send is what decides whether the order actually went out.
+    if (!info) info = copy;
+  }
+
+  return { sent: true, messageId: info?.messageId, provider: info?.provider, recipients };
 }
 
 /**
@@ -429,40 +474,72 @@ async function sendGroupOrderEmail({ orders, supplier, creatorEmail, creatorName
   const total = orders.reduce((s, { order }) => s + (order.total_amount || 0), 0);
   const fmt = (n) => Number(n || 0).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  const perBranch = orders.map(({ order, branch }) => `
+  // Same split as the single order, and for the same reason — except the
+  // joint total is the sharper leak: it states the whole network's spend with
+  // this supplier in one line, which is the number he would most like to have
+  // before quoting. The delivery details the driver needs stay; the money goes.
+  const branchCard = ({ order, branch }, { withMoney }) => `
       <div style="border:1px solid #cbd5e1; border-radius:8px; padding:12px; margin-bottom:12px;">
         <div style="font-weight:800; font-size:15px;">${esc(branch?.name)} — הזמנה #${esc(order.order_number)}</div>
         ${branch?.address ? `<div><b>כתובת למשלוח:</b> ${esc(branch.address)}</div>` : ''}
         ${branch?.delivery_contact_name ? `<div><b>איש קשר:</b> ${esc(branch.delivery_contact_name)} ${esc(branch.delivery_contact_phone)}</div>` : ''}
-        <div><b>פריטים:</b> ${(order.items || []).length} · <b>סה"כ:</b> ${fmt(order.total_amount)} ₪</div>
+        <div><b>פריטים:</b> ${(order.items || []).length}${withMoney ? ` · <b>סה"כ:</b> ${fmt(order.total_amount)} ₪` : ''}</div>
         ${order.notes ? `<div style="margin-top:6px;"><b>הערות:</b> ${esc(order.notes)}</div>` : ''}
-      </div>`).join('');
+      </div>`;
 
-  const html = `
+  const supplierBody = `
+    <div dir="rtl" style="font-family: Arial, sans-serif; max-width:700px; margin:0 auto;">
+      <h2 style="color:#10b981; border-bottom:3px solid #10b981; padding-bottom:8px;">הזמנה משותפת — ${branchNames.length} סניפים</h2>
+      <p><b>ספק:</b> ${esc(supplier?.name)}</p>
+      <p style="color:#475569;">המשלוח לכל סניף בנפרד, לכתובת הרשומה לידו. לכל סניף מצורף קובץ הזמנה משלו.</p>
+      ${orders.map(o => branchCard(o, { withMoney: false })).join('')}
+      <p style="color:#475569;">נשמח לאישור ולמועד אספקה.</p>
+    </div>
+  `;
+
+  const officeBody = `
     <div dir="rtl" style="font-family: Arial, sans-serif; max-width:700px; margin:0 auto;">
       <h2 style="color:#10b981; border-bottom:3px solid #10b981; padding-bottom:8px;">הזמנה משותפת — ${branchNames.length} סניפים</h2>
       <p><b>ספק:</b> ${esc(supplier?.name)}</p>
       <p><b>סה"כ משותף:</b> ${fmt(total)} ₪</p>
-      <p style="color:#475569;">המשלוח לכל סניף בנפרד, לכתובת הרשומה לידו. לכל סניף מצורף קובץ הזמנה משלו.</p>
-      ${perBranch}
+      <p style="color:#475569;">העותק שנשלח לספק אינו כולל מחירים.</p>
+      ${orders.map(o => branchCard(o, { withMoney: true })).join('')}
       <p style="color:#94a3b8; font-size:12px;">נשלח על ידי ${esc(creatorName)} ממערכת ההזמנות</p>
     </div>
   `;
 
-  const attachments = orders.flatMap(({ order, branch }) => ([
-    { name: buildFilename({ variant: 'supplier', branch, order }), html: buildSupplierHTML({ order, supplier, branch }) },
-    { name: buildFilename({ variant: 'internal', branch, order }), html: buildInternalHTML({ order, supplier, branch }) },
-  ]));
+  const supplierFiles = orders.map(({ order, branch }) => ({
+    name: buildFilename({ variant: 'supplier', branch, order }),
+    html: buildSupplierHTML({ order, supplier, branch }),
+  }));
+  const internalFiles = orders.map(({ order, branch }) => ({
+    name: buildFilename({ variant: 'internal', branch, order }),
+    html: buildInternalHTML({ order, supplier, branch }),
+  }));
 
-  const info = await module.exports.dispatchEmail({
-    to: supplierEmail || creatorEmail || officeEmail,
-    cc,
-    subject: `הזמנה משותפת: ${branchNames.join(', ')} (הזמנות #${numbers})`,
-    html,
-    attachments,
-  });
+  let info = null;
+  if (supplierEmail) {
+    info = await module.exports.dispatchEmail({
+      to: supplierEmail,
+      subject: `הזמנה משותפת: ${branchNames.join(', ')} (הזמנות #${numbers})`,
+      html: supplierBody,
+      attachments: supplierFiles,
+    });
+  }
 
-  return { sent: true, messageId: info.messageId, provider: info.provider, recipients };
+  const ours = [creatorEmail, officeEmail].filter(Boolean);
+  if (ours.length) {
+    const copy = await module.exports.dispatchEmail({
+      to: ours[0],
+      cc: ours.slice(1),
+      subject: `עותק הזמנה משותפת: ${branchNames.join(', ')} (הזמנות #${numbers})`,
+      html: officeBody,
+      attachments: [...internalFiles, ...supplierFiles],
+    });
+    if (!info) info = copy;
+  }
+
+  return { sent: true, messageId: info?.messageId, provider: info?.provider, recipients };
 }
 
 module.exports = {

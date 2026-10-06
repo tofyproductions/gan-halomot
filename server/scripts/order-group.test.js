@@ -121,7 +121,13 @@ async function main() {
     heldId = String(r.body.order.id);
   }
 
-  head('1x — בלי hold: כמו היום, pending + מייל');
+  // Since the approval step (scripts/order-approval-flow.test.js), creating an
+  // order no longer reaches the supplier: it is submitted and waits for the
+  // office, and APPROVING is what posts the letter. This block used to assert
+  // the old behaviour — "create without hold → pending + email" — and is kept
+  // pointed at the same question, which is still worth asking: does an order
+  // created without `hold` go out by itself?
+  head('1x — בלי hold: ממתין לאישור, ובלי מייל לספק');
   {
     sentMail.length = 0;
     const r = await invoke(c.create, {
@@ -129,12 +135,10 @@ async function main() {
       body: { branch_id: String(branchA._id), supplier_id: sid, items: [item('לחם', 200, 8)] },
     });
     eq(r.status, 201, '1f נוצרה');
-    eq(r.body.order.status, 'pending', '1g pending');
-    eq(r.body.order.email_status, 'sent', '1h המייל נשלח');
-    eq(sentMail.length, 1, '1i בדיוק שולח אחד');
-    eq(sentMail[0].kind, 'single', '1j הזמנה בודדת — המייל הרגיל');
-    ok(r.body.order.sent_at, '1k sent_at נרשם');
-    eq(r.body.order.sent_by, 'מנהלת א', '1l sent_by הוא מי שלחץ');
+    eq(r.body.order.status, 'awaiting_approval', '1g ממתינה לאישור');
+    eq(r.body.order.email_status, 'never', '1h לא נשלח מייל');
+    eq(sentMail.length, 0, '1i השולח לא נקרא');
+    ok(!r.body.order.sent_at, '1k sent_at ריק — שום דבר לא יצא');
   }
 
   head('1m — מתחת למינימום בלי hold — נדחה');
@@ -149,17 +153,17 @@ async function main() {
   }
 
   // ---------------------------------------------------------------- 2 ------
-  head('2 — שליחת טיוטה בודדת');
+  // `send` now means "submit for the office's approval", not "post it".
+  head('2 — הגשת טיוטה בודדת לאישור');
   {
     sentMail.length = 0;
     const r = await invoke(c.send, { user: userA, branchScope: scopeA, params: { id: heldId } });
     eq(r.status, 200, '2a נשלחה');
-    eq(r.body.order.status, 'pending', '2b עכשיו pending');
-    eq(r.body.order.email_status, 'sent', '2c המייל נשלח');
-    eq(sentMail.length, 1, '2d מייל אחד');
-    ok(r.body.order.sent_at, '2e sent_at נרשם');
+    eq(r.body.order.status, 'awaiting_approval', '2b עכשיו ממתינה לאישור');
+    eq(sentMail.length, 0, '2c ובלי מייל לספק — זה קורה באישור');
     const inDb = await Order.findById(heldId).lean();
-    eq(inDb.status, 'pending', '2f וגם במסד');
+    eq(inDb.status, 'awaiting_approval', '2f וגם במסד');
+    ok(inDb.submitted_at, '2e נרשם מתי הוגשה');
   }
 
   // ---------------------------------------------------------------- 7 ------
@@ -262,7 +266,10 @@ async function main() {
   }
 
   // ---------------------------------------------------------------- 5 ------
-  head('5 — שליחה משותפת: מייל אחד, קובץ לכל סניף, הריק מבוטל');
+  // The group still moves as ONE — that is the whole point of a group, and it
+  // is what the approval must not break. What changed is where it moves TO:
+  // the office, not the supplier.
+  head('5 — הגשה משותפת: הקבוצה נעה יחד, הריקה מבוטלת');
   {
     // Third branch invited and never adds anything.
     const inv = await invoke(c.invite, { user: userA, branchScope: scopeA, params: { id: groupSeedId }, body: { branch_id: String(branchC._id) } });
@@ -272,19 +279,13 @@ async function main() {
     sentMail.length = 0;
     const r = await invoke(c.send, { user: userB, branchScope: scopeB, params: { id: invitedId } });
     eq(r.status, 200, '5a נשלחה');
-    eq(r.body.sent_count, 2, '5b שתי הזמנות נשלחו');
-    eq(sentMail.length, 1, '5c מייל אחד');
-    eq(sentMail[0].kind, 'group', '5d המייל הקבוצתי');
-    eq(sentMail[0].orders.length, 2, '5e עם שתי ההזמנות');
-    const names = sentMail[0].orders.map(o => o.branch.name).sort();
-    eq(names, ['סניף א', 'סניף ב'], '5f כל אחת עם הסניף שלה');
+    eq(r.body.sent_count, 2, '5b שתי הזמנות הוגשו');
+    eq(sentMail.length, 0, '5c ובלי מייל לספק');
 
     const a = await Order.findById(groupSeedId).lean();
     const b = await Order.findById(invitedId).lean();
     const e = await Order.findById(emptyId).lean();
-    eq([a.status, b.status], ['pending', 'pending'], '5g שתיהן pending');
-    eq([a.email_status, b.email_status], ['sent', 'sent'], '5h שתיהן רשמו שהמייל נשלח');
-    eq(a.email_message_id, b.email_message_id, '5i אותו מזהה הודעה');
+    eq([a.status, b.status], ['awaiting_approval', 'awaiting_approval'], '5g שתיהן ממתינות לאישור');
     eq(e.status, 'cancelled', '5j הריקה בוטלה');
     ok(/לא הוסיף פריטים/.test(e.notes), '5k עם הסיבה בהערות');
     const evB = await NotificationEvent.find({ ref_id: invitedId, status: 'pending' }).lean();
@@ -333,11 +334,18 @@ async function main() {
       supplier: { name: 'שאבי', contact_email: 's@x.co.il' }, creatorEmail: 'a@gan.co.il', creatorName: 'מנהלת א',
     });
     eq(result.sent, true, '5x-a הוחזר sent');
-    eq(dispatched.length, 1, '5x-b מייל אחד');
-    eq(dispatched[0].attachments.length, 4, '5x-c ארבעה קבצים — ספק+פנימי לכל סניף');
-    ok(/הזמנה משותפת/.test(dispatched[0].subject), '5x-d הנושא אומר משותפת');
-    ok(/סניף א/.test(dispatched[0].subject) && /סניף ב/.test(dispatched[0].subject), '5x-e ושני הסניפים בנושא');
-    ok(/רחוב א 1/.test(dispatched[0].html) && /רחוב ב 2/.test(dispatched[0].html), '5x-f שתי הכתובות בגוף');
+    // Two letters: the supplier's, carrying one priceless document per branch,
+    // and ours, carrying both documents for both branches. See
+    // scripts/order-email-no-prices.test.js for why the two are separate.
+    const sup = dispatched.find(m => m.to === 's@x.co.il');
+    const us = dispatched.find(m => m.to === 'a@gan.co.il');
+    eq(dispatched.length, 2, '5x-b שני מיילים — לספק ולנו');
+    eq(sup.attachments.length, 2, '5x-c לספק: קובץ אחד לכל סניף');
+    ok(!sup.attachments.some(a => /פנימית/.test(a.name)), '5x-c2 ואף לא אחד פנימי');
+    eq(us.attachments.length, 4, '5x-c3 אלינו: ספק+פנימי לכל סניף');
+    ok(/הזמנה משותפת/.test(sup.subject), '5x-d הנושא אומר משותפת');
+    ok(/סניף א/.test(sup.subject) && /סניף ב/.test(sup.subject), '5x-e ושני הסניפים בנושא');
+    ok(/רחוב א 1/.test(sup.html) && /רחוב ב 2/.test(sup.html), '5x-f שתי הכתובות בגוף — הנהג צריך אותן');
     realEmail.dispatchEmail = origDispatch;
   }
 
@@ -391,10 +399,12 @@ async function main() {
     const emptyId = String(inv.body.order.id);
 
     const origUpdateMany = Order.updateMany;
-    // Only the claim (draft → pending) fails; every other write goes through,
-    // so a cancel that ran BEFORE the send would still land and be caught.
+    // Only the claim (draft → awaiting_approval) fails; every other write goes
+    // through, so a cancel that ran BEFORE the claim would still land and be
+    // caught. The claim's target changed with the approval step; what is being
+    // tested — that a failed submit cancels nobody — did not.
     Order.updateMany = function claimFails(filter, update, ...rest) {
-      if (update?.$set?.status === 'pending') throw new Error('מסד הנתונים נפל');
+      if (update?.$set?.status === 'awaiting_approval') throw new Error('מסד הנתונים נפל');
       return origUpdateMany.call(this, filter, update, ...rest);
     };
     let threw = false;
@@ -466,14 +476,19 @@ async function main() {
     eq(lone.group_size, undefined, '15b להזמנה רגילה אין group_size');
   }
 
-  head('16 — שם היוצר כשלמשתמש אין שם');
+  // Creating no longer emails anybody; approving does. The name on the letter
+  // is now the approver's, which is right — she is the one who sent it — and
+  // the creator's name stays on the order itself.
+  head('16 — שם היוצר נשמר על ההזמנה, והמייל יוצא באישור');
   {
     sentMail.length = 0;
-    await invoke(c.create, {
+    const r = await invoke(c.create, {
       user: { id: 'nameless', role: 'system_admin', full_name: '', email: 'n@gan.co.il' }, branchScope: null,
       body: { branch_id: String(branchA._id), supplier_id: sid, created_by: 'יוצרת ההזמנה', items: [item('לחם', 200, 8)] },
     });
-    eq(sentMail[0]?.creatorName, 'יוצרת ההזמנה', '16a המייל חתום בשם מי שיצרה את ההזמנה');
+    eq(sentMail.length, 0, '16a היצירה לא שולחת מייל');
+    const row = await Order.findById(String(r.body.order.id)).lean();
+    eq(row.created_by, 'יוצרת ההזמנה', '16b ושם היוצרת נשמר על ההזמנה');
   }
 
   head('17 — טקסט חופשי במייל עובר כטקסט, לא כ-HTML');
@@ -487,21 +502,31 @@ async function main() {
     const branch = { name: 'סניף <א>', address: 'רחוב "א" & 1', delivery_contact_name: '<b>דנה</b>' };
     const supplierX = { name: 'ספק & בנו', contact_email: 's@x.co.il' };
 
+    // Two letters now: the supplier's, and ours. The free text lives in the
+    // detailed one, which is ours.
     await realEmail.sendOrderEmail({ order, supplier: supplierX, branch, creatorEmail: 'a@gan.co.il', creatorName: 'מנהלת <א>' });
-    const single = dispatched[0]?.html || '';
-    ok(!single.includes('<img src=x'), '17a במייל הבודד — ההערה לא הופכת לתגית');
+    const toSupplier = dispatched.find(m => m.to === 's@x.co.il');
+    const toUs = dispatched.find(m => m.to === 'a@gan.co.il');
+    const single = toUs?.html || '';
+    ok(!single.includes('<img src=x'), '17a במייל אלינו — ההערה לא הופכת לתגית');
     ok(single.includes('&lt;img src=x onerror=alert(1)&gt; &amp; &quot;ציטוט&quot;'), '17b אלא מוצגת כמו שנכתבה');
     ok(single.includes('סניף &lt;א&gt;') && single.includes('ספק &amp; בנו') && single.includes('שמן &lt;זית&gt;'), '17c שם הסניף, הספק והמוצר מוצפנים');
-    eq(dispatched[0]?.cc, ['a@gan.co.il', 'dreamgan10@gmail.com'], '17d העתק ליוצרת ולמשרד — אותם נמענים כמו קודם');
+    ok(!(toSupplier?.html || '').includes('<img src=x'), '17c2 וגם במייל לספק שום טקסט חופשי לא הופך לתגית');
+    eq(toUs?.cc, ['dreamgan10@gmail.com'], '17d העותק שלנו — ליוצרת, עם העתק למשרד');
 
+    dispatched.length = 0;
     await realEmail.sendGroupOrderEmail({
       orders: [{ order, branch }, { order: { ...order, order_number: 'ORD-2' }, branch: { name: 'סניף ב', address: 'רחוב ב 2' } }],
       supplier: supplierX, creatorEmail: 'a@gan.co.il', creatorName: 'מנהלת א',
     });
-    const group = dispatched[1]?.html || '';
+    const gSupplier = dispatched.find(m => m.to === 's@x.co.il');
+    const gUs = dispatched.find(m => m.to === 'a@gan.co.il');
+    const group = gUs?.html || '';
     ok(!group.includes('<img src=x') && !group.includes('<b>דנה</b>'), '17e במייל המשותף — שום טקסט חופשי לא הופך לתגית');
     ok(group.includes('רחוב &quot;א&quot; &amp; 1') && group.includes('&lt;b&gt;דנה&lt;/b&gt;'), '17f הכתובת ואיש הקשר מוצגים כמו שנכתבו');
-    eq(dispatched[1]?.cc, ['a@gan.co.il', 'dreamgan10@gmail.com'], '17g ואותם נמענים');
+    // The driver needs the address, so it travels — escaped — to the supplier too.
+    ok((gSupplier?.html || '').includes('רחוב &quot;א&quot; &amp; 1'), '17f2 וגם בעותק לספק, מוצפנים');
+    eq(gUs?.cc, ['dreamgan10@gmail.com'], '17g ואותם נמענים');
     realEmail.dispatchEmail = origDispatch;
   }
 

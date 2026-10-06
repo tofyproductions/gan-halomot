@@ -161,6 +161,7 @@
     "test:face-parent": "node scripts/face-parent-corrections.test.js",
     "test:parent-authz": "node scripts/parent-portal-authz.test.js",
     "test:order-approval": "node scripts/order-approval-flow.test.js",
+    "test:order-no-prices": "node scripts/order-email-no-prices.test.js",
     "test:parent-signups": "node scripts/parent-signups.test.js",
     "parent:pilot": "node scripts/parent-pilot-report.js",
     "nursery:menu-add": "node scripts/nursery-menu-add-dish.js",
