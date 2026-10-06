@@ -1,7 +1,8 @@
 const jwt = require('jsonwebtoken');
 const env = require('../config/env');
 const {
-  isRead, isViewer, isBlockedForViewer, isWriteBlockedForViewer, isMultipart, pathOnly,
+  isRead, isViewer, isBlockedForViewer, isWriteBlockedForViewer, isWriteAllowedForViewer,
+  isMultipart, pathOnly,
   startsWithPrefix, NO_UPLOAD,
 } = require('../utils/viewer');
 const { CLASSROOM_BOARD, ADMIN_VIEWER } = require('../constants/roles');
@@ -238,6 +239,11 @@ function decideViewerWrite(req, res, next) {
     res.status(403).json(DENIED);
     return true;
   }
+  // A write the gan deliberately granted this role — it runs as itself, and
+  // the route's own requireRole is what says whether this viewer may. Decided
+  // here rather than at that gate because this function runs first and would
+  // otherwise have already turned the request into a proposal.
+  if (isWriteAllowedForViewer(path)) return false;
   // From here the request is decided. The flag says so, so viewerGate below —
   // kept as a fallback for a router mounted without this middleware — does not
   // decide it a second time and file the change twice.
@@ -498,6 +504,13 @@ function viewerWriteGate(req, res, next, roles) {
   // answer is the refusal, not a second proposal on top of the first.
   if (req.viewerHandled) return res.status(403).json(DENIED);
   if (isWriteBlockedForViewer(req.originalUrl)) return res.status(403).json(DENIED);
+  // A write the gan granted this role outright — approving a supply order.
+  // BOTH halves have to agree: the path is on the allowlist in utils/viewer,
+  // and this route named admin_viewer in its own role list. Either alone is
+  // not enough, so adding a path cannot quietly open a route that never meant
+  // to admit a viewer, and naming the role cannot open one the allowlist
+  // never mentioned.
+  if (isWriteAllowedForViewer(req.originalUrl) && roles.includes(ADMIN_VIEWER)) return next();
   const managed = req.user.managed_branch_ids || [];
   if (roles.includes('branch_manager') && managed.length > 0) {
     req.user.role = 'branch_manager';

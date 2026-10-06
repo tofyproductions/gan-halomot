@@ -160,6 +160,7 @@
     "test:face-health": "node scripts/face-health.test.js",
     "test:face-parent": "node scripts/face-parent-corrections.test.js",
     "test:parent-authz": "node scripts/parent-portal-authz.test.js",
+    "test:order-approval": "node scripts/order-approval-flow.test.js",
     "parent:pilot": "node scripts/parent-pilot-report.js",
     "nursery:menu-add": "node scripts/nursery-menu-add-dish.js",
     "face:demo": "node scripts/face-demo.js",

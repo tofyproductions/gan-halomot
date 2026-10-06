@@ -253,9 +253,9 @@ export default function OrderForm() {
           try {
             const res = await api.post(`/orders/${editId}/send`);
             const n = res.data.sent_count || 1;
-            toast.success(n > 1 ? `ההזמנה נשלחה לספק — ${n} סניפים` : 'ההזמנה נשלחה לספק');
+            toast.success(n > 1 ? `ההזמנה נשלחה לאישור — ${n} סניפים` : 'ההזמנה נשלחה לאישור');
           } catch (sendErr) {
-            toast.error(`ההזמנה נשמרה אבל לא נשלחה: ${sendErr.response?.data?.error || 'שגיאה בשליחה'}`);
+            toast.error(`ההזמנה נשמרה אבל לא נשלחה לאישור: ${sendErr.response?.data?.error || 'שגיאה בשליחה'}`);
           }
         } else {
           toast.success('ההזמנה עודכנה');
@@ -270,10 +270,10 @@ export default function OrderForm() {
           hold: mode === 'hold',
         });
         if (mode === 'hold') {
-          toast.success('ההזמנה נשמרה בהמתנה');
+          toast.success('ההזמנה נשמרה כטיוטה');
           navigate(`/orders/${res.data.order.id || res.data.order._id}`);
         } else {
-          toast.success('ההזמנה נשלחה לספק');
+          toast.success('ההזמנה נשלחה לאישור');
           navigate('/orders');
         }
       }
@@ -460,10 +460,18 @@ export default function OrderForm() {
                     />
 
                     {(() => {
-                      const isDraft = !isEdit || editOrder?.status === 'draft';
+                      // An order still being built, OR one already waiting for
+                      // the office — both are still the builder's to finish.
+                      const isDraft = !isEdit
+                        || editOrder?.status === 'draft'
+                        || editOrder?.status === 'awaiting_approval';
                       const isGroup = Boolean(editOrder?.group_id);
                       const memberCount = groupInfo?.members?.filter(m => m.status !== 'cancelled').length || 0;
-                      const sendLabel = isGroup && memberCount > 1 ? `שלח לספק — כל הסניפים (${memberCount})` : 'שלח לספק';
+                      // Not "to the supplier" — nobody on this screen sends to
+                      // a supplier any more. The office does, by approving.
+                      const sendLabel = isGroup && memberCount > 1
+                        ? `שלח לאישור — כל הסניפים (${memberCount})`
+                        : 'שלח לאישור';
                       const below = minOrder > 0 && total < minOrder && !isGroup;
                       return (
                         <Stack spacing={1}>
@@ -474,7 +482,7 @@ export default function OrderForm() {
                               onClick={() => handleSubmit(isEdit ? 'save' : 'hold')}
                               disabled={saving}
                             >
-                              {isEdit ? 'שמור' : 'שמור בהמתנה'}
+                              {isEdit ? 'שמור' : 'שמור כטיוטה'}
                             </Button>
                           )}
                           {isDraft ? (

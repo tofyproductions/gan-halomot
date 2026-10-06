@@ -11,9 +11,16 @@ import api from '../../api/client';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import { formatCurrency } from '../../utils/hebrewYear';
 
+/**
+ * The labels used to lie, and after the approval step they would have lied
+ * dangerously: `pending` means the supplier already has it, and it was shown
+ * as "ממתין לאישור" — so the one state nobody can still change read as the
+ * one state everybody can.
+ */
 const STATUS_MAP = {
-  draft: { label: 'בהמתנה', color: 'default' },
-  pending: { label: 'ממתין לאישור', color: 'warning' },
+  draft: { label: 'טיוטה', color: 'default' },
+  awaiting_approval: { label: 'ממתין לאישור', color: 'warning' },
+  pending: { label: 'נשלח לספק', color: 'info' },
   approved: { label: 'מאושר', color: 'success' },
   sent: { label: 'נשלח', color: 'info' },
   pending_receive: { label: 'בדרך', color: 'warning' },
