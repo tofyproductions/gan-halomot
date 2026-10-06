@@ -42,6 +42,21 @@ const childSchema = new mongoose.Schema({
   is_active: { type: Boolean, default: true },
 
   /**
+   * A child who stands in for a child, so counts stop believing in them.
+   *
+   * There is one per branch — "ילד בדיקה משה דיין" and its three siblings —
+   * and they exist so somebody can sign in as a parent and see what a parent
+   * sees in each gan. That is worth keeping, so they are marked rather than
+   * deleted, exactly as the staff logins that stand in for people are
+   * (User.is_test_account, scripts/mark-test-accounts.js).
+   *
+   * Marked rather than detected: a test family is a fact somebody recorded,
+   * not a pattern in a name. Matching on "בדיקה" would one day quietly hide a
+   * real family whose surname contains it.
+   */
+  is_test_account: { type: Boolean, default: false },
+
+  /**
    * Kept on a board that is not their room's, until a date.
    *
    * A child who moves up to פעוטות does not stop being somebody's baby the
