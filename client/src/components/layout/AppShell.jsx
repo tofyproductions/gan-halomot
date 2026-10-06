@@ -18,6 +18,7 @@ import ManagerPunchFollowupPopup from '../attendance/ManagerPunchFollowupPopup';
 import HelpButton from '../shared/HelpButton';
 import api from '../../api/client';
 import { registerNativePush } from '../../utils/nativePush';
+import EnrollBiometricDialog, { platformAuthenticatorAvailable } from '../shared/EnrollBiometricDialog';
 
 /**
  * The shell: a fixed rail, and everything else.
@@ -145,6 +146,7 @@ export default function AppShell() {
 
       <ClassPopupPoller />
       <SetPasswordGate />
+      <EnrollBiometricGate />
       <FreshEntryGate />
     </Box>
   );
@@ -210,6 +212,49 @@ function SetPasswordGate() {
       open={open} allowSkip={!mustChange}
       forced={mustChange}
       onClose={(saved) => { if (!saved) sessionStorage.setItem('pw_nag_dismissed', '1'); setOpen(false); }}
+    />
+  );
+}
+
+/**
+ * And the same for a fingerprint, for everybody who already has a password.
+ *
+ * The enrolment step after CHOOSING a password only ever reached somebody
+ * choosing one — and almost the whole staff passed that point long ago. So
+ * the lock on the payslips was in place and nobody had the key to it.
+ *
+ * Waits for the password gate: two dialogs stacked on a first launch is how
+ * people learn to dismiss dialogs without reading them. Shown only on a
+ * device that can actually do it, and only once per session — "לא עכשיו"
+ * closes it until the next launch, which is the same shape as the punch
+ * popup and for the same reason: the popup is the repeating reminder, and a
+ * woman who cannot reach the daily board because of a security prompt is a
+ * worse outcome than one who puts it off.
+ */
+function EnrollBiometricGate() {
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+
+  const needs = Boolean(
+    user && user.password_set && !user.must_change_password && !user.hasWebauthn,
+  );
+
+  useEffect(() => {
+    if (!needs) { setOpen(false); return undefined; }
+    if (sessionStorage.getItem('bio_nag_dismissed')) return undefined;
+    let alive = true;
+    platformAuthenticatorAvailable().then((can) => { if (alive && can) setOpen(true); });
+    return () => { alive = false; };
+  }, [needs]);
+
+  if (!needs) return null;
+  return (
+    <EnrollBiometricDialog
+      open={open}
+      onClose={(done) => {
+        if (!done) sessionStorage.setItem('bio_nag_dismissed', '1');
+        setOpen(false);
+      }}
     />
   );
 }

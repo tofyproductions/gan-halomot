@@ -6,6 +6,7 @@ import { startAuthentication } from '@simplewebauthn/browser';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useAuth } from '../../hooks/useAuth';
+import { platformAuthenticatorAvailable } from './EnrollBiometricDialog';
 
 /**
  * A second lock on the screens that hold somebody's money.
@@ -40,11 +41,10 @@ export default function BiometricGate({ title = 'אזור אישי', children })
     let alive = true;
     (async () => {
       // No platform authenticator at all — a desktop without Windows Hello, an
-      // older device, a browser that does not support it.
-      const supported = typeof window !== 'undefined'
-        && window.PublicKeyCredential
-        && await window.PublicKeyCredential
-          .isUserVerifyingPlatformAuthenticatorAvailable?.().catch(() => false);
+      // older device, a browser that does not support it. Asked through the
+      // same helper the enrolment prompt uses, so the two can never disagree
+      // about whether this device can do it.
+      const supported = await platformAuthenticatorAvailable();
       if (!alive) return;
       if (!supported || !user?.hasWebauthn) { setState('unavailable'); return; }
       setState('locked');
