@@ -94,6 +94,7 @@ const OrderForm = lazy(() => import('./components/orders/OrderForm'));
 const OrderList = lazy(() => import('./components/orders/OrderList'));
 const OrderView = lazy(() => import('./components/orders/OrderView'));
 const ParentChanges = lazy(() => import('./components/admin/ParentChanges'));
+const ParentSignups = lazy(() => import('./components/parents/ParentSignups'));
 const ParentLettersPage = lazy(() => import('./components/parent-letters/ParentLettersPage'));
 const ParentLogin = lazy(() => import('./components/parent-portal/ParentLogin'));
 const ParentOnboarding = lazy(() => import('./components/registration/ParentOnboarding'));
@@ -318,6 +319,12 @@ function AppRoutes() {
           </ProtectedRoute>
         } />
         <Route path="parent-changes" element={<ParentChanges />} />
+        {/* Family ת.ז and mobiles on every row — gated here as well as on the
+            server, so the screen is not offered to somebody it will refuse. */}
+        <Route
+          path="parent-signups"
+          element={<ProtectedRoute tab="parent_signups"><ParentSignups /></ProtectedRoute>}
+        />
         <Route path="gantt" element={<GanttCalendar />} />
         <Route path="gantt/edit" element={<GanttEditor />} />
         <Route path="classes" element={<ClassTrackingPage />} />

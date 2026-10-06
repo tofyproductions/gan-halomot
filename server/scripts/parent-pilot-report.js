@@ -2,11 +2,15 @@
 /**
  * Can this branch's parents actually get in, and who already has?
  *
- * The portal has no enable switch — every parent of an active child can sign in
- * today — so "roll out a branch" is not a deploy, it is finding out which
- * families the DATA lets in and fixing the ones it does not. This is the
- * report for that, and it exists because nothing else in the system can answer
- * it: there is no parent-accounts screen anywhere.
+ * The same question the מעקב הורים רשומים screen answers, asked from a
+ * terminal — and asked through the SAME service
+ * (services/parentSignups.service), deliberately. There were two copies of
+ * this logic for about an hour and that was already one too many: a screen
+ * and a report that disagree about a branch leave the gan with two numbers
+ * and no way to tell which is true.
+ *
+ * What this adds over the screen is the part a browser is bad at: a file to
+ * read line by line, and the warnings that matter before a rollout.
  *
  * Read-only. It writes nothing, ever.
  *
@@ -15,34 +19,22 @@
  *   node scripts/parent-pilot-report.js --branch "<סניף>" --classroom "תינוקיה"
  *   node scripts/parent-pilot-report.js --branch "<סניף>" --csv
  *
- * --classroom narrows to one room, matched on any part of its name. A pilot
- * usually starts in one class rather than a whole branch.
- *
  * --csv writes the parent list to a spreadsheet on the Desktop instead of
  * printing it. Use it rather than --names: a terminal line that mixes Hebrew
  * names with Latin digits is reordered on screen, and the ת.ז and the mobile
- * run into each other and read as one impossible nineteen-digit number. The
- * file opens in Numbers or Excel, where the columns stay columns.
+ * run into each other and read as one impossible nineteen-digit number.
  *
  * Three things decide whether a parent can activate, and all three are
- * enrolment data rather than anything the portal owns (see
- * parentDirectory.service):
+ * enrolment data rather than anything the portal owns:
  *
  *   ת.ז    on the child's parent slot, the second-parent slot, or — for most
- *          families — on the REGISTRATION behind the child. Missing means the
- *          sign-in screen tells them their ID is not registered here.
- *   נייד   must normalise to 05XXXXXXXX. A landline reads as no phone and they
- *          are told to call the gan. THE DANGEROUS CASE IS NOT LISTED HERE:
- *          a number that is valid but WRONG looks like a success and sends the
- *          code to a stranger. Only a human reading the list can catch that,
- *          which is why --names exists.
- *   כיתה   no classroom means no branch, and the daily board, the menu and the
- *          announcements all hang off the branch.
- *
- * And `boardKind` decides whether the daily board appears at all: תינוקייה gets
- * the full board, בוגרים and צעירים get none, everything else gets the light
- * one. A pilot about the daily board only means something for the rooms that
- * have one.
+ *          families — on the REGISTRATION behind the child.
+ *   נייד   must normalise to 05XXXXXXXX. THE DANGEROUS CASE IS NOT LISTED
+ *          ANYWHERE: a number that is valid but WRONG looks like a success
+ *          and sends the code to a stranger. Only a human reading the list
+ *          can catch that, which is why --csv exists.
+ *   כיתה   no classroom means no branch, and the daily board, the menu and
+ *          the announcements all hang off the branch.
  */
 require('dotenv').config();
 const mongoose = require('mongoose');
@@ -66,11 +58,7 @@ const pad = (s, n) => String(s ?? '').padEnd(n);
  * mixes Hebrew with Latin digits the terminal reorders the runs and eats the
  * padding, and the ת.ז and the mobile end up touching — they read as one
  * nineteen-digit number, which is what sent somebody looking for a data bug
- * that was not there. A bar between them cannot be swallowed.
- *
- * Hebrew goes last for the same reason: once the RTL run starts, everything
- * after it is at the mercy of the reordering, so nothing the reader has to
- * compare digit by digit is put there.
+ * that was not there.
  */
 const row = (...cells) => `  ${cells.join(' | ')}`;
 
@@ -82,14 +70,9 @@ const csvCell = (v) => {
 /**
  * A mobile number that survives being opened in a spreadsheet.
  *
- * `0546136599` is digits, so Numbers and Excel read it as the number five
- * hundred and forty-six million and print it back without the leading zero —
- * which is the one digit that makes it a phone number. The reader is checking
- * these by eye against numbers they know, and nine digits beginning 5 is not
- * what any of them look like.
- *
- * The dash settles it: no spreadsheet parses 054-6136599 as a number, and it
- * is how an Israeli mobile is written down anyway, so it reads faster.
+ * `0546136599` is digits, so Numbers and Excel read it as a number and print
+ * it back without the leading zero — the one digit that makes it a phone
+ * number. The dash settles it, and is how an Israeli mobile is written down.
  */
 const csvPhone = (p) => {
   const s = String(p || '');
@@ -97,16 +80,21 @@ const csvPhone = (p) => {
 };
 
 /**
- * And the same hazard on the ת.ז, which is quieter and worse.
- *
- * An ID number is nine digits and some of them genuinely start with a zero.
- * A spreadsheet eats that zero too, and unlike the phone there is nothing
- * about the result that looks wrong — it is simply a different, valid-looking
- * ID. The ="…" form is the one both Numbers and Excel honour as text.
+ * And the same hazard on the ת.ז, which is quieter and worse: some genuinely
+ * start with a zero, and unlike the phone the mangled result does not look
+ * wrong — it is simply a different, valid-looking ID.
  */
 const csvId = (id) => {
   const s = String(id || '').padStart(9, '0');
   return /^0/.test(s) ? `="${s}"` : s;
+};
+
+const STATE_LABEL = {
+  active: 'הפעיל',
+  not_signed_up: 'ממתין',
+  blocked: 'חסום',
+  awaiting_approval: 'ממתין לאישור',
+  closed: 'סגור',
 };
 
 async function main() {
@@ -115,9 +103,8 @@ async function main() {
   await mongoose.connect(uri);
   console.log(`מסד: ${mongoose.connection.host}/${mongoose.connection.name}\n`);
 
-  const { Branch, Child, ParentAccount, Classroom } = require('../src/models');
-  const { contactFromChild, normalizeIdNumber } = require('../src/services/parentDirectory.service');
-  const { normalizePhone } = require('../src/services/sms.service');
+  const { Branch, Classroom, Child } = require('../src/models');
+  const { signups } = require('../src/services/parentSignups.service');
   const nursery = require('../src/services/nursery.service');
 
   const wanted = arg('branch');
@@ -138,168 +125,82 @@ async function main() {
     return;
   }
 
-  let rooms = await Classroom.find({ branch_id: branch._id }).select('_id name category').lean();
-
-  // One room, usually: a pilot starts in a class rather than in a branch.
   const wantedRoom = arg('classroom');
-  if (wantedRoom) {
-    const narrowed = rooms.filter(r => String(r.name || '').includes(wantedRoom));
-    if (!narrowed.length) {
-      console.log(`לא נמצאה כיתה שמכילה "${wantedRoom}" ב-${branch.name}. הכיתות:`);
-      for (const r of rooms) console.log(`  ${r.name}`);
-      process.exitCode = 1;
-      return;
-    }
-    rooms = narrowed;
+  const allRooms = await Classroom.find({ branch_id: branch._id }).select('_id name category').lean();
+  const rooms = wantedRoom
+    ? allRooms.filter(r => String(r.name || '').includes(wantedRoom))
+    : allRooms;
+  if (wantedRoom && !rooms.length) {
+    console.log(`לא נמצאה כיתה שמכילה "${wantedRoom}" ב-${branch.name}. הכיתות:`);
+    for (const r of allRooms) console.log(`  ${r.name}`);
+    process.exitCode = 1;
+    return;
   }
 
-  const roomIds = rooms.map(r => r._id);
-  const roomById = new Map(rooms.map(r => [String(r._id), r]));
-
-  // Active children of this branch, by classroom — the same way the portal
-  // resolves a child's branch, so the two agree about who is in the pilot.
-  const children = await Child.find({ is_active: true, classroom_id: { $in: roomIds } })
-    .populate('registration_id', 'parent_name parent_phone parent_id_number start_date end_date')
-    .populate('classroom_id', 'name category branch_id')
-    .sort({ child_name: 1 })
-    .lean();
+  const data = await signups({
+    branchIds: [String(branch._id)],
+    classroom: wantedRoom || '',
+  });
+  const { parents, summary } = data;
 
   const scope = wantedRoom ? `${branch.name} / ${rooms.map(r => r.name).join(', ')}` : branch.name;
   console.log(`=== ${scope} — מצב ההורים לקראת הפיילוט ===`);
-  console.log(`${children.length} ילדים פעילים, ${rooms.length} כיתות\n`);
-
-  /**
-   * Every (parent ID → the children they would see) in this branch.
-   *
-   * Keyed on the ID number rather than on the child, because an account is a
-   * person and a person is a family: two siblings are one activation, and the
-   * announcement SMS counts phones for the same reason.
-   */
-  const parents = new Map();
-  const noParentId = [];
-
-  for (const child of children) {
-    const reg = child.registration_id;
-    const ids = new Set();
-    for (const raw of [child.parent_id_number, child.parent2_id_number, reg?.parent_id_number]) {
-      const id = normalizeIdNumber(raw);
-      if (id) ids.add(id);
-    }
-
-    if (!ids.size) {
-      noParentId.push(child);
-      continue;
-    }
-
-    for (const id of ids) {
-      if (!parents.has(id)) parents.set(id, { id, children: [], name: '', phone: null });
-      const entry = parents.get(id);
-      entry.children.push(child);
-      const { name, phone } = contactFromChild(child, id);
-      if (!entry.name && name) entry.name = name;
-      if (!entry.phone && phone) entry.phone = phone;
-    }
-  }
-
-  // Which of them already activated. There is no screen for this.
-  const accounts = await ParentAccount.find({ id_number: { $in: [...parents.keys()] } })
-    .select('id_number activated is_active access_approved last_login_at')
-    .lean();
-  const accountById = new Map(accounts.map(a => [normalizeIdNumber(a.id_number), a]));
-
-  const canActivate = [];
-  const noPhone = [];
-  const activated = [];
-  const blocked = [];
-
-  for (const entry of parents.values()) {
-    const account = accountById.get(entry.id) || null;
-    entry.account = account;
-
-    if (account && account.is_active === false) { blocked.push(entry); continue; }
-    if (account && account.access_approved === false) { blocked.push(entry); continue; }
-    if (account && account.activated) { activated.push(entry); continue; }
-    if (!entry.phone) { noPhone.push(entry); continue; }
-    canActivate.push(entry);
-  }
+  console.log(`${summary.children} ילדים פעילים, ${rooms.length} כיתות\n`);
 
   // Which rooms have a daily board at all. A pilot about the board does not
   // reach a room that deliberately has none.
   console.log('לוח יומי לפי כיתה');
-  for (const room of rooms) {
-    const inRoom = children.filter(c => String(c.classroom_id?._id || c.classroom_id) === String(room._id));
-    if (!inRoom.length) continue;
-    const kind = nursery.boardKind(room);
-    const label = { full: 'לוח מלא', light: 'לוח מקוצר', none: 'ללא לוח' }[kind] || kind;
-    console.log(`  ${pad(room.name, 16)} ${pad(`${inRoom.length} ילדים`, 12)} ${label}`);
+  const children = await Child.find({ is_active: true, classroom_id: { $in: rooms.map(r => r._id) } })
+    .select('classroom_id').lean();
+  for (const r of rooms) {
+    const n = children.filter(c => String(c.classroom_id) === String(r._id)).length;
+    if (!n) continue;
+    const label = { full: 'לוח מלא', light: 'לוח מקוצר', none: 'ללא לוח' }[nursery.boardKind(r)] || '';
+    console.log(`  ${pad(r.name, 16)} ${pad(`${n} ילדים`, 12)} ${label}`);
   }
 
   console.log('\nהורים');
-  console.log(`  ${pad('סך הכול', 26)} ${parents.size}`);
-  console.log(`  ${pad('כבר הפעילו חשבון', 26)} ${activated.length}`);
-  console.log(`  ${pad('יכולים להפעיל עכשיו', 26)} ${canActivate.length}`);
-  console.log(`  ${pad('בלי נייד תקין — חוסם', 26)} ${noPhone.length}`);
-  console.log(`  ${pad('חשבון סגור / ממתין לאישור', 26)} ${blocked.length}`);
-  if (noParentId.length) {
-    console.log(`  ${pad('ילדים בלי ת.ז הורה בכלל', 26)} ${noParentId.length}`);
+  console.log(`  ${pad('סך הכול', 26)} ${summary.parents}`);
+  console.log(`  ${pad('כבר הפעילו חשבון', 26)} ${summary.active}`);
+  console.log(`  ${pad('יכולים להפעיל עכשיו', 26)} ${summary.not_signed_up}`);
+  console.log(`  ${pad('חסומים — לא יוכלו בכלל', 26)} ${summary.blocked}`);
+  console.log(`  ${pad('ממתינים לאישור הגן', 26)} ${summary.awaiting_approval}`);
+  console.log(`  ${pad('חשבון סגור', 26)} ${summary.closed}`);
+  if (summary.children_without_parent_id) {
+    console.log(`  ${pad('ילדים בלי ת.ז הורה בכלל', 26)} ${summary.children_without_parent_id}`);
   }
 
-  if (noPhone.length) {
-    console.log('\n❗ בלי מספר נייד תקין — אלה לא יוכלו להיכנס עד שהמשרד יעדכן');
-    for (const e of noPhone) {
-      const kids = e.children.map(c => c.child_name).join(', ');
-      console.log(`  ${pad(e.id, 11)} ${pad(e.name || '(ללא שם)', 18)} ${kids}`);
-    }
-  }
-
-  if (noParentId.length) {
-    console.log('\n❗ ילדים שאין עליהם ת.ז הורה באף אחד משלושת המקומות');
-    for (const c of noParentId) {
-      console.log(`  ${pad(c.child_name, 20)} ${roomById.get(String(c.classroom_id?._id || c.classroom_id))?.name || ''}`);
-    }
-  }
-
+  const blocked = parents.filter(p => p.state === 'blocked');
   if (blocked.length) {
-    console.log('\n⚠️  חשבונות שלא ייכנסו גם עם ת.ז ונייד תקינים');
-    for (const e of blocked) {
-      const why = e.account?.is_active === false ? 'החשבון סגור' : 'ממתין לאישור הגן';
-      console.log(`  ${pad(e.id, 11)} ${pad(e.name || '(ללא שם)', 18)} ${why}`);
+    console.log('\n❗ חסומים — אלה לא יוכלו להיכנס עד שהמשרד יעדכן');
+    for (const p of blocked) {
+      const why = p.blocked_reason === 'no_phone' ? 'אין נייד תקין' : 'אין ת.ז';
+      console.log(row(pad(p.id_number, 11), pad(why, 14), `${p.name || '(ללא שם)'} — ${p.children.map(c => c.name).join(', ')}`));
     }
   }
 
-  // Enrolment dates decide which year's row the portal calls "now". Without
-  // them it falls back to the newest, which in Aug–Sep is NEXT year — and the
-  // daily board disappears from a parent's screen when next year's room is a
-  // category that has no board.
-  const noDates = children.filter(c => {
-    const reg = c.registration_id;
-    return !reg || !reg.start_date || !reg.end_date;
-  });
-  if (noDates.length) {
-    console.log(`\n⚠️  ${noDates.length} ילדים בלי תאריכי התחלה/סיום ברישום.`);
-    console.log('   לא חוסם כניסה, אבל באוגוסט–ספטמבר הפורטל עלול להציג את כיתת');
-    console.log('   השנה הבאה כאילו היא ההווה, ואז הלוח היומי נעלם מהמסך שלהם.');
-    for (const c of noDates.slice(0, 15)) console.log(`     ${c.child_name}`);
-    if (noDates.length > 15) console.log(`     ...ועוד ${noDates.length - 15}`);
+  if (data.children_without_parent_id.length) {
+    console.log('\n❗ ילדים שאין עליהם ת.ז הורה באף אחד משלושת המקומות');
+    for (const c of data.children_without_parent_id) {
+      console.log(`  ${pad(c.child_name, 20)} ${c.classroom}`);
+    }
   }
 
-  const all = [...parents.values()].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'he'));
-  const stateOf = (e) => (e.account?.activated ? 'הפעיל' : (e.phone ? 'ממתין' : 'חסום'));
+  const sorted = [...parents].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'he'));
 
   if (AS_CSV) {
     const safeName = scope.replace(/[\\/:]/g, '-');
     const file = arg('csv-path') || path.join(os.homedir(), 'Desktop', `הורים - ${safeName}.csv`);
     const lines = [['מצב', 'תעודת זהות', 'נייד', 'שם ההורה', 'ילדים'].map(csvCell).join(',')];
-    for (const e of all) {
+    for (const p of sorted) {
       lines.push([
-        csvCell(stateOf(e)), csvId(e.id), csvPhone(e.phone),
-        csvCell(e.name || ''),
-        csvCell(e.children.map(c => c.child_name).join(' · ')),
+        csvCell(STATE_LABEL[p.state] || p.state), csvId(p.id_number), csvPhone(p.phone),
+        csvCell(p.name || ''), csvCell(p.children.map(c => c.name).join(' · ')),
       ].join(','));
     }
     // BOM, or Excel reads the Hebrew as mojibake.
     fs.writeFileSync(file, `﻿${lines.join('\n')}\n`, 'utf8');
-    console.log(`\n📄 ${all.length} הורים נכתבו לקובץ:`);
+    console.log(`\n📄 ${sorted.length} הורים נכתבו לקובץ:`);
     console.log(`   ${file}`);
     console.log('\n   הקובץ מכיל תעודות זהות ומספרי טלפון של משפחות.');
     console.log('   אחרי שעברתם עליו — מחקו אותו.');
@@ -308,11 +209,10 @@ async function main() {
     console.log('מספר תקין אבל שגוי נראה כמו הצלחה ושולח את הקוד לזר.');
     console.log('(--csv במקום --names נותן קובץ לנאמברס, קריא הרבה יותר)\n');
     console.log(row(pad('מצב', 6), pad('תעודת זהות', 11), pad('נייד', 10), 'שם / ילדים'));
-    for (const e of all) {
-      const kids = e.children.map(c => c.child_name).join(', ');
+    for (const p of sorted) {
       console.log(row(
-        pad(stateOf(e), 6), pad(e.id, 11), pad(e.phone || '—', 10),
-        `${e.name || '(ללא שם)'} — ${kids}`,
+        pad(STATE_LABEL[p.state] || p.state, 6), pad(p.id_number, 11), pad(p.phone || '—', 10),
+        `${p.name || '(ללא שם)'} — ${p.children.map(c => c.name).join(', ')}`,
       ));
     }
   } else {

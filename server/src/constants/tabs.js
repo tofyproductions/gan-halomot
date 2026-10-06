@@ -75,6 +75,7 @@ const TAB_DEFAULT_ROLES = {
   classroom_boards: ['system_admin', 'admin_viewer', 'branch_manager'],
   supplies: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'teacher', 'assistant'],
   parent_changes: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant', 'class_leader'],
+  parent_signups: ['system_admin', 'admin_viewer', 'branch_manager'],
   photos: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'teacher', 'assistant'],
   gifts: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'accountant'],
   gantt: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader'],
