@@ -90,22 +90,51 @@ export function EmptyDayCard({ issue, onSend, busy, onRequest, forManager = fals
       )}
       {mode === 'not' && (
         <Stack spacing={1}>
-          <Stack direction="row" spacing={1}>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
             {onRequest && (
               <>
                 <Button size="small" variant="outlined" onClick={() => onRequest('sick', issue.date)}>מחלה</Button>
                 <Button size="small" variant="outlined" onClick={() => onRequest('vacation', issue.date)}>חופשה</Button>
               </>
             )}
-            <Button size="small" variant={other ? 'contained' : 'outlined'} onClick={() => setOther(true)}>
-              {onRequest ? 'אחר' : 'רשום סיבה'}
+            {/*
+              For a MANAGER, this is a decision and it finishes here.
+
+              She pressed "לא עבדה" and the only thing on the card was a
+              button reading "רשום סיבה" — which looks like an optional
+              extra, not the next step. So she stopped, and the day stayed
+              open with nothing that looked like a confirmation. Now the
+              confirmation is the confirmation, and the reason is what it
+              always should have been: something she may add.
+
+              The employee's side is unchanged. Her explanation IS the
+              action, so for her the text is still the way through.
+            */}
+            {!onRequest && (
+              <Button
+                size="small" variant="contained" color="primary" disabled={busy}
+                onClick={() => onSend({ action: 'other', text: text.trim() })}
+              >
+                {busy ? 'שומר…' : 'אישור — לא עבדה'}
+              </Button>
+            )}
+            <Button size="small" variant={other ? 'contained' : 'outlined'} onClick={() => setOther(v => !v)}>
+              {onRequest ? 'אחר' : 'הוספת סיבה'}
             </Button>
           </Stack>
           {other && (
             <Stack direction="row" spacing={1}>
-              <TextField size="small" label="מה קרה?" value={text} onChange={e => setText(e.target.value)} fullWidth />
-              <Button variant="contained" size="small" disabled={busy || !text.trim()}
-                onClick={() => onSend({ action: 'other', text })}>שליחה</Button>
+              <TextField
+                size="small" label="מה קרה?" value={text}
+                onChange={e => setText(e.target.value)} fullWidth
+              />
+              <Button
+                variant="contained" size="small"
+                disabled={busy || (Boolean(onRequest) && !text.trim())}
+                onClick={() => onSend({ action: 'other', text: text.trim() })}
+              >
+                שליחה
+              </Button>
             </Stack>
           )}
         </Stack>
