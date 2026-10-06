@@ -319,6 +319,36 @@ export default function LoginPage() {
           </Box>
           </>
           )}
+
+          {/*
+            The way out for a parent.
+
+            The installed app opens here — Capacitor serves the bundle at '/',
+            ProtectedRoute sees no staff token and sends them to this screen —
+            and until this link existed there was no way off it. A parent who
+            downloaded the gan's app was asked for a full name and a תעודת
+            זהות that would never be recognised, with nothing on screen
+            suggesting another door. "Download the app and sign in as a
+            parent" was not a thing anybody could do.
+
+            Quiet rather than prominent: almost everyone who reaches this
+            screen is a member of staff, and the one who is not needs it to be
+            findable, not loud.
+          */}
+          <Divider sx={{ mt: 3, mb: 2 }} />
+          <Box sx={{ textAlign: 'center' }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+              הורה/ת ילד/ה בגן?
+            </Typography>
+            <Button
+              variant="text"
+              size="small"
+              onClick={() => navigate('/parents/login')}
+              sx={{ fontWeight: 700 }}
+            >
+              לכניסת ההורים
+            </Button>
+          </Box>
         </CardContent>
       </Card>
     </Box>

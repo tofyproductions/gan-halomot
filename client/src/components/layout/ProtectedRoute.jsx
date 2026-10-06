@@ -25,6 +25,28 @@ export default function ProtectedRoute({ children, roles, tab }) {
   }
 
   if (!isAuthenticated) {
+    /**
+     * A signed-in parent is not a signed-out employee.
+     *
+     * The installed app always opens at '/', so this branch is what every
+     * launch runs — and it sent a parent who had already activated an account
+     * back to the staff login every time, to a form asking for a full name
+     * and an employee's תעודת זהות. The parent token was in storage the whole
+     * while; nothing looked at it, because the two sides of the application
+     * deliberately share no auth state (api/parentClient.js says why the keys
+     * are separate).
+     *
+     * Checked here rather than given its own route, because '/' is not one
+     * address: it is the dashboard, a tapped notification, a link somebody
+     * sent. Whichever of them a parent arrives at, the answer is the portal.
+     *
+     * A member of staff who is also a parent is unaffected — they hold a
+     * staff token, so isAuthenticated is true and this branch never runs.
+     */
+    let parentToken = null;
+    try { parentToken = localStorage.getItem('gan_parent_token'); } catch { /* private window */ }
+    if (parentToken) return <Navigate to="/parents" replace />;
+
     // Remember where she was going, so signing in continues there (a tapped
     // notification, a link) instead of always starting from the dashboard.
     return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}` }} />;
