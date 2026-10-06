@@ -3,9 +3,11 @@ import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import {
   Box, Typography, Card, CardContent, TextField, Button, Stack,
   MenuItem, Table, TableBody, TableCell, TableHead, TableRow,
-  InputAdornment, IconButton, Alert, Divider, Chip,
+  InputAdornment, IconButton, Alert, Divider, Chip, Badge,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import RemoveIcon from '@mui/icons-material/Remove';
+import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SearchIcon from '@mui/icons-material/Search';
 import SendIcon from '@mui/icons-material/Send';
@@ -53,6 +55,7 @@ export default function OrderForm() {
   const prefill = location.state?.prefill;
   const prefillApplied = useRef(false);
   const editLoaded = useRef(false);
+  const cartRef = useRef(null);
 
   const [suppliers, setSuppliers] = useState([]);
   const [selectedSupplier, setSelectedSupplier] = useState(prefill?.supplier_id || '');
@@ -217,6 +220,9 @@ export default function OrderForm() {
 
   const total = cart.reduce((sum, c) => sum + c.qty * c.product.price_with_vat, 0);
   const totalBeforeVat = cart.reduce((sum, c) => sum + c.qty * (c.product.price_before_vat || 0), 0);
+  // A joint order reaches the minimum together, so a single branch being
+  // under it is not yet a problem — the same rule the send checks by.
+  const belowMinimum = minOrder > 0 && total < minOrder && !editOrder?.group_id;
 
   /**
    * mode: 'hold'  — new order, saved as a draft, no email
@@ -306,8 +312,57 @@ export default function OrderForm() {
         </CardContent>
       </Card>
 
+      {/*
+        The running total, on a phone, pinned to the bottom.
+
+        Side by side the basket is always in view and this is unnecessary —
+        which is why it only appears below md. Stacked, the basket sits under
+        a long catalogue, so somebody adding items could see neither how many
+        they had nor what it came to without scrolling to the end and back.
+        The minimum order is the sharp edge: reaching the bottom to discover
+        you are ₪40 short, and having to climb back up, is the whole trip
+        wasted.
+
+        It scrolls to the basket rather than opening a sheet of its own: one
+        basket, in one place, is easier to trust than two that have to agree.
+      */}
+      {selectedSupplier && cart.length > 0 && (
+        <Box
+          sx={{
+            display: { xs: 'block', md: 'none' },
+            position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 1200,
+            bgcolor: 'background.paper', borderTop: '1px solid', borderColor: 'divider',
+            px: 2, py: 1.25, boxShadow: '0 -4px 16px rgba(0,0,0,0.08)',
+          }}
+          onClick={() => cartRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+        >
+          <Stack direction="row" alignItems="center" spacing={1.5}>
+            <Badge badgeContent={cart.length} color="primary">
+              <ShoppingCartIcon />
+            </Badge>
+            <Box sx={{ flex: 1 }}>
+              <Typography sx={{ fontWeight: 800, lineHeight: 1.2 }}>
+                {formatCurrencyExact(total)}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {belowMinimum
+                  ? `חסרים ${formatCurrencyExact(minOrder - total)} למינימום`
+                  : `${formatCurrencyExact(totalBeforeVat)} לפני מע״מ`}
+              </Typography>
+            </Box>
+            <Button size="small" variant="contained" color={belowMinimum ? 'warning' : 'primary'}>
+              לסל
+            </Button>
+          </Stack>
+        </Box>
+      )}
+
       {selectedSupplier && (
-        <Stack direction={{ xs: 'column', md: 'row' }} spacing={3}>
+        <Stack
+          direction={{ xs: 'column', md: 'row' }} spacing={3}
+          // Room for the bar above, so it never covers the last button.
+          sx={{ pb: { xs: cart.length ? 9 : 0, md: 0 } }}
+        >
           {/* Product Catalog */}
           <Box sx={{ flex: 2 }}>
             <Card>
@@ -322,7 +377,12 @@ export default function OrderForm() {
                   }}
                 />
 
-                <Box sx={{ maxHeight: 500, overflow: 'auto' }}>
+                {/* On a phone the catalogue IS the page — the basket is below
+                    it, not beside it — so capping it at 500px produced a
+                    scrollbar inside a scrollbar, which is the worst thing a
+                    thumb can meet. The cap stays where the two columns are
+                    really side by side. */}
+                <Box sx={{ maxHeight: { xs: 'none', md: 500 }, overflow: { xs: 'visible', md: 'auto' } }}>
                   {categories.map(([cat, prods]) => (
                     <Box key={cat} sx={{ mb: 2 }}>
                       <Chip label={cat} size="small" sx={{ fontWeight: 700, mb: 1 }} />
@@ -331,12 +391,21 @@ export default function OrderForm() {
                         return (
                           <Box
                             key={p._id || p.id}
+                            /*
+                              The row itself is no longer a button.
+
+                              It used to add one on any tap, which is why a
+                              mis-hit was so easy and so hard to undo: the only
+                              way back was the basket, at the far end of the
+                              page. Now every row carries its own control, so
+                              the row can go back to being a row and nothing is
+                              added by accident.
+                            */
                             sx={{
                               display: 'flex', alignItems: 'center', gap: 1.5,
-                              p: 1, mb: 0.5, borderRadius: 2, bgcolor: inCart ? '#dcfce7' : '#f8fafc',
-                              cursor: 'pointer', '&:hover': { bgcolor: inCart ? '#bbf7d0' : '#f1f5f9' },
+                              p: 1, mb: 0.5, borderRadius: 2,
+                              bgcolor: inCart ? '#dcfce7' : '#f8fafc',
                             }}
-                            onClick={() => addToCart(p)}
                           >
                             <ProductThumb product={p} size={44} radius={1.5} />
                             <Box sx={{ flex: 1 }}>
@@ -362,10 +431,56 @@ export default function OrderForm() {
                               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', whiteSpace: 'nowrap' }}>
                                 {formatCurrencyExact(p.price_before_vat)} לפני מע״מ
                               </Typography>
-                              {inCart && (
-                                <Typography variant="caption" color="success.main" sx={{ fontWeight: 700 }}>
-                                  x{inCart.qty}
-                                </Typography>
+                            </Box>
+
+                            {/*
+                              The quantity, changed where the product is.
+
+                              Tapping the row added one and there was no way to
+                              take one back without scrolling past the whole
+                              catalogue to the basket — on a phone, where the
+                              basket is not beside the list but a long way
+                              below it. Somebody who tapped twice by accident
+                              had to go and find the row again. So the counter
+                              lives on the row, and the only thing the basket
+                              is still needed for is sending.
+
+                              Big enough to hit with a thumb: these are pressed
+                              standing in a storeroom, not sitting at a desk.
+                            */}
+                            <Box
+                              sx={{ minWidth: 96, display: 'flex', justifyContent: 'flex-end' }}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              {inCart ? (
+                                <Stack direction="row" alignItems="center" spacing={0.5}>
+                                  <IconButton
+                                    size="small" color="error"
+                                    sx={{ border: '1px solid', borderColor: 'error.light' }}
+                                    onClick={() => updateQty(p._id || p.id, inCart.qty - 1)}
+                                    aria-label="הורד יחידה"
+                                  >
+                                    {inCart.qty === 1 ? <DeleteIcon fontSize="small" /> : <RemoveIcon fontSize="small" />}
+                                  </IconButton>
+                                  <Typography sx={{ fontWeight: 800, minWidth: 24, textAlign: 'center' }}>
+                                    {inCart.qty}
+                                  </Typography>
+                                  <IconButton
+                                    size="small" color="success"
+                                    sx={{ border: '1px solid', borderColor: 'success.light' }}
+                                    onClick={() => addToCart(p)}
+                                    aria-label="הוסף יחידה"
+                                  >
+                                    <AddIcon fontSize="small" />
+                                  </IconButton>
+                                </Stack>
+                              ) : (
+                                <Button
+                                  size="small" variant="outlined" startIcon={<AddIcon />}
+                                  onClick={() => addToCart(p)}
+                                >
+                                  הוסף
+                                </Button>
                               )}
                             </Box>
                           </Box>
@@ -384,8 +499,8 @@ export default function OrderForm() {
           </Box>
 
           {/* Cart */}
-          <Box sx={{ flex: 1 }}>
-            <Card sx={{ position: 'sticky', top: 80 }}>
+          <Box sx={{ flex: 1 }} ref={cartRef}>
+            <Card sx={{ position: { xs: 'static', md: 'sticky' }, top: 80 }}>
               <CardContent>
                 {isEdit && editOrder?.group_id && (
                   <OrderGroupPanel orderId={editId} onLoaded={setGroupInfo} />
@@ -401,7 +516,7 @@ export default function OrderForm() {
 
                 {cart.length === 0 ? (
                   <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: 'center' }}>
-                    לחץ על מוצר להוספה
+                    הוסיפו מוצרים מהקטלוג
                   </Typography>
                 ) : (
                   <>
@@ -419,11 +534,30 @@ export default function OrderForm() {
                           </Typography>
                         )}
                         <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
+                          {/* Buttons first, typing second. Changing 2 to 3 on
+                              a phone meant summoning the number pad for one
+                              digit; most changes here are by one. */}
+                          <IconButton
+                            size="small" color="error"
+                            sx={{ border: '1px solid', borderColor: 'error.light' }}
+                            onClick={() => updateQty(c.product._id || c.product.id, c.qty - 1)}
+                            aria-label="הורד יחידה"
+                          >
+                            <RemoveIcon fontSize="small" />
+                          </IconButton>
                           <TextField
                             size="small" type="number" value={c.qty}
-                            onChange={e => updateQty(c.product._id || c.product.id, parseInt(e.target.value) || 0)}
-                            inputProps={{ min: 0, style: { width: 50, textAlign: 'center', padding: '4px' } }}
+                            onChange={e => updateQty(c.product._id || c.product.id, parseInt(e.target.value, 10) || 0)}
+                            inputProps={{ min: 0, inputMode: 'numeric', style: { width: 44, textAlign: 'center', padding: '6px 2px' } }}
                           />
+                          <IconButton
+                            size="small" color="success"
+                            sx={{ border: '1px solid', borderColor: 'success.light' }}
+                            onClick={() => updateQty(c.product._id || c.product.id, c.qty + 1)}
+                            aria-label="הוסף יחידה"
+                          >
+                            <AddIcon fontSize="small" />
+                          </IconButton>
                           <Typography variant="body2" color="text.secondary">x {formatCurrencyExact(c.product.price_with_vat)}</Typography>
                           <Typography variant="body2" sx={{ fontWeight: 700, ml: 'auto' }}>
                             = {formatCurrencyExact(c.qty * c.product.price_with_vat)}

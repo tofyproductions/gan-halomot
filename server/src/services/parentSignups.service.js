@@ -50,7 +50,14 @@ async function signups({ branchIds = null, classroom = '' } = {}) {
     rooms = rooms.filter(r => String(r.name || '').includes(needle));
   }
 
-  const children = await Child.find({ is_active: true, classroom_id: { $in: rooms.map(r => r._id) } })
+  // Test families are excluded, not hidden by a name match — see
+  // Child.is_test_account. Four of them, one per branch, and counted they
+  // made "324 parents have not signed up" wrong by four every single day.
+  const children = await Child.find({
+    is_active: true,
+    is_test_account: { $ne: true },
+    classroom_id: { $in: rooms.map(r => r._id) },
+  })
     .populate('registration_id', 'parent_name parent_phone parent_id_number start_date end_date')
     .populate('classroom_id', 'name category branch_id')
     .sort({ child_name: 1 })
