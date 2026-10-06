@@ -118,6 +118,11 @@ services:
       # feature switched off rather than a hole.
       - key: TASKS_SYNC_KEY
         sync: false
+      # המוח's read window (routes/brain.routes.js): GET-only, closed (503) while
+      # unset or shorter than 32 chars. Set the same value in the brain's env.
+      #   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+      - key: BRAIN_READ_KEY
+        sync: false
       # The import bot's key (routes/importBot.routes.js). Neither Cibus nor
       # ClickTac has an API, so a robot signs in to their sites, downloads the
       # monthly reports and posts the files to /api/import-bot. Write-only, two
