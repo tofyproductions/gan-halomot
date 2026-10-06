@@ -201,6 +201,34 @@ app.get('/api/pdf-pagetest', ...diagGate, async (req, res) => {
 // API routes
 app.use('/api', routes);
 
+/**
+ * The store listings' legal pages, served EVERYWHERE — including on the gan's
+ * own host, which is the only place the stores ever point at.
+ *
+ * These used to live inside the customer-layer block below, which is switched
+ * on only where PLATFORM_MONGODB_URI is set. It is not set on the gan's own
+ * service, so /app/privacy fell through to the SPA catch-all and answered 200
+ * with the staff login screen. Apple and Google both demand a reachable
+ * privacy policy, and a reviewer following that link got a password box. The
+ * 200 is what made it invisible: nothing was broken enough to notice.
+ *
+ * Not inside the `landing()` helper either — that one steps aside for any
+ * host naming a customer, which is right for a shop window on the bare domain
+ * and exactly wrong for a document a store listing links to by URL.
+ *
+ * (Distinct from /privacy and /terms below: those are "חלום", the platform
+ * sold to other kindergartens. These three are גן החלומות's own app.)
+ */
+for (const [route, file] of [
+  ['/app/privacy', 'app-privacy.html'],
+  ['/app/terms', 'app-terms.html'],
+  ['/app/data-deletion', 'app-data-deletion.html'],
+]) {
+  app.get(route, (req, res) => {
+    res.sendFile(path.join(__dirname, '../../landing', file));
+  });
+}
+
 // The console — ours, not a customer's. Served only where the customer layer
 // is switched on, and mounted ABOVE the client's catch-all so that /console
 // does not fall through and get handed a gan's application shell.
@@ -226,13 +254,9 @@ if (require('./platform/connection').isEnabled()) {
   app.get('/privacy', landing('privacy.html'));
   app.get('/terms', landing('terms.html'));
 
-  // The kindergarten app's own policy pages — distinct from the ones above,
-  // which are "חלום" (the platform sold to other gans) marketing/legal
-  // content living on this same bare domain. These are what the Android/iOS
-  // store listings for "גן החלומות" itself point at.
-  app.get('/app/privacy', landing('app-privacy.html'));
-  app.get('/app/terms', landing('app-terms.html'));
-  app.get('/app/data-deletion', landing('app-data-deletion.html'));
+  // The gan's own three (/app/privacy, /app/terms, /app/data-deletion) are
+  // mounted above `app.use('/api')`, unconditionally — the store listings
+  // point at the gan's own host, where this block never runs.
 
   // The deck and the specification, as links that can be sent to somebody who
   // has no account anywhere — which is the whole requirement: a gan owner gets
