@@ -1,0 +1,96 @@
+/* גן החלומות — brand kit CSS.
+   Put this file next to the kit files (studio: brand/brand.css) and link it from the page:
+     <link rel="stylesheet" href="../brand/brand.css">
+   All url()s below are relative to this file, so it works from any page that links it.
+   Units are mm so the same CSS prints at A4/A5; for square social images use px (see GUIDE.md). */
+
+/* ---------- fonts (files in this folder) ---------- */
+@font-face { font-family: "Gveret Levin"; src: url("GveretLevinAlefAlefAlef-Regular.otf") format("opentype"); font-weight: 400; }
+@font-face { font-family: "Arial Hebrew Kit"; src: url("ArialHebrew-Regular.ttf") format("truetype"); font-weight: 400; }
+@font-face { font-family: "Arial Hebrew Kit"; src: url("ArialHebrew-Bold.ttf") format("truetype"); font-weight: 700; }
+@font-face { font-family: "Gan CLM"; src: url("GanCLM-Bold.ttf") format("truetype"); font-weight: 700; }
+@font-face { font-family: "Corsiva Hebrew Kit"; src: url("CorsivaHebrew-Bold.ttf") format("truetype"); font-weight: 700; }
+@font-face { font-family: "Athelas Kit"; src: url("Athelas-Bold.ttf") format("truetype"); font-weight: 700; }
+
+:root {
+  /* logo (sampled from the logo artwork) */
+  --gan-blue: #00AEEF;        /* "גן החלומות" lettering + rainbow blue */
+  --gan-sky: #23AAE1;         /* tagline "כל ילד חולם להיות בו" */
+  --gan-red: #ED1C24;
+  --gan-orange: #F26522;
+  --gan-yellow: #FFDE16;
+  --gan-green: #0BA14B;
+  --gan-indigo: #2E3192;
+  --gan-ink: #231F20;         /* logo outline / near-black */
+  --gan-cloud: #EAE9E9;       /* cloud shading */
+  /* signs */
+  --sign-red: #FF0000;        /* "אלרגיה לחלב" line */
+  --bar-black: rgba(0, 0, 0, .77);   /* top warning bar */
+  --dim-black: rgba(0, 0, 0, .51);   /* darkening over the meadow (allergy signs) */
+  --pill-white: rgba(255, 255, 255, .5);
+  /* holiday table */
+  --cal-cream: #FFF4E3;
+  --cal-tan: #F8E6CA;
+  --cal-peach: #FFD699;
+  --cal-red: #CE2027;
+  /* certificate */
+  --cert-aqua: #B9F8F7;
+  --cert-center: #EDFCE7;
+  --cert-gold-line: #CFC6A4;
+  /* "מזל טוב!" letters, right-to-left (confetti frame) */
+  --mt-1: #D04CF8; --mt-2: #40C848; --mt-3: #F85880; --mt-4: #48D0F8; --mt-5: #F8C000; --mt-6: #F83840; --mt-7: #C8B058;
+  /* "מזל טוב!" letters, right-to-left (party frame / printed birthday squares) */
+  --mp-1: #FDD245; --mp-2: #F7719A; --mp-3: #48B9E1; --mp-4: #FCA74C; --mp-5: #6AC8A9; --mp-6: #B36BDB; --mp-7: #FDD245;
+
+  --font-hand: "Gveret Levin", "Gan CLM", sans-serif;
+  --font-sign: "Arial Hebrew Kit", "Arial Hebrew", Arial, sans-serif;
+  --font-name: "Gan CLM", "Gveret Levin", sans-serif;
+  --font-cal: "Corsiva Hebrew Kit", "Corsiva Hebrew", serif;
+  --font-cal-digits: "Athelas Kit", Athelas, serif;
+}
+
+/* ---------- page boxes (studio_render pages) ---------- */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: #fff; }
+.page { position: relative; overflow: hidden; direction: rtl; }
+.page--a4-landscape { width: 297mm; height: 210mm; }
+.page--a4 { width: 210mm; height: 297mm; }
+.page--square { width: 1080px; height: 1080px; }
+.cover { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+/* ---------- text treatments ---------- */
+/* White letters, black outline drawn OUTSIDE the glyph (Photoshop "Stroke: outside").
+   paint-order puts the stroke under the fill, so the stroke must be twice the visible width.
+   --o = visible outline width. */
+.outline-white { color: #fff; -webkit-text-stroke: calc(var(--o, 1mm) * 2) #000; paint-order: stroke fill; }
+.outline-black-on-white { color: #000; -webkit-text-stroke: calc(var(--o, 1mm) * 2) #fff; paint-order: stroke fill; }
+.outline-red-on-white { color: var(--sign-red); -webkit-text-stroke: calc(var(--o, 1mm) * 2) #fff; paint-order: stroke fill; }
+/* the soft white halo the signs also carry (Outer glow 35%) */
+.glow { text-shadow: 0 0 .6mm rgba(255, 255, 255, .35); }
+
+/* multicolor "מזל טוב!" — wrap each letter in <span> */
+/* Two layers per letter: the letter thickened with a stroke in its own color (--w), and behind it (::before)
+   the same letter with a black stroke (--w + --o) — gives the chunky, black-outlined balloon letters. */
+.mazal { font-family: var(--font-hand); white-space: nowrap; --w: 3px; --o: 4px; }
+.mazal span { display: inline-block; position: relative; margin: 0 .04em; -webkit-text-stroke: calc(var(--w) * 2) currentColor; paint-order: stroke fill; }
+.mazal span::before { content: attr(data-l); position: absolute; inset: 0; z-index: -1; color: #000;
+  -webkit-text-stroke: calc((var(--w) + var(--o)) * 2) #000; paint-order: stroke fill; }
+.mazal--party span:nth-child(1) { color: var(--mp-1); transform: rotate(-6deg) translateY(4%); }
+.mazal--party span:nth-child(2) { color: var(--mp-2); transform: rotate(4deg); }
+.mazal--party span:nth-child(3) { color: var(--mp-3); transform: rotate(-3deg) translateY(-6%); }
+.mazal--party span:nth-child(4) { width: .3em; }   /* the space between the words: an empty <span data-l=" "> </span> */
+.mazal--party span:nth-child(5) { color: var(--mp-4); transform: rotate(5deg) translateY(-6%); }
+.mazal--party span:nth-child(6) { color: var(--mp-5); transform: rotate(-4deg); }
+.mazal--party span:nth-child(7) { color: var(--mp-6); transform: rotate(6deg) translateY(4%); }
+.mazal--party span:nth-child(8) { color: var(--mp-7); transform: rotate(-8deg) translateY(8%); }
+
+/* ---------- building blocks ---------- */
+/* dark warning bar across the top of allergy signs */
+.top-bar { position: absolute; left: 0; right: 0; top: 2.6%; height: 15.2%; background: var(--bar-black);
+  display: flex; align-items: center; justify-content: center; }
+/* semi-transparent white rounded pill (birthday board rows) */
+.pill { background: var(--pill-white); border-radius: 4.2mm; display: flex; align-items: center; justify-content: center; }
+.pill--frost { backdrop-filter: blur(2mm); -webkit-backdrop-filter: blur(2mm); }
+/* the logo in the corner of A4 signs */
+.logo-corner { position: absolute; left: 2%; bottom: 1.9%; width: 15.3%; height: auto; }
+.logo-bottom-center { position: absolute; left: 50%; transform: translateX(-50%); bottom: .6%; width: 25.8%; height: auto; }
