@@ -91,7 +91,7 @@ const KEY = 'brain-test-key-at-least-32-characters-long';
 
   console.log('סגור כשאין מפתח');
   delete process.env.BRAIN_READ_KEY;
-  for (const p of ['/summary', '/payments?month=2026-10', '/unpaid?month=2026-10', '/children']) {
+  for (const p of ['/summary', '/payments?month=2026-10', '/unpaid?month=2026-10', '/children', '/sync']) {
     const r = await call(p);
     ok(r.status === 503 && r.json?.error === 'brain read disabled', `${p} → 503 בלי מפתח בשרת`, `${r.status}`);
   }
@@ -263,6 +263,35 @@ const KEY = 'brain-test-key-at-least-32-characters-long';
   ok(bu.json.unpaid.some(r => r.child.startsWith('נועה')), 'partial כן');
   const bs = await svc.summary(new Date('2026-10-15T09:00:00Z'));
   eq(bs.current_month.bank_found_total, 2200, 'summary: bank_found_total');
+
+  console.log('\nסנכרון אחרון (/sync)');
+  {
+    const { FinanceSyncLog, BankAccount } = require('../src/models');
+    process.env.BRAIN_READ_KEY = KEY;
+    eq((await call('/sync', { key: 'wrong-key-wrong-key-wrong-key-wrong' })).status, 401, 'sync מפתח שגוי → 401');
+    const none = await call('/sync');
+    eq(none.status, 200, 'sync → 200');
+    eq(none.json.lastSyncAt, null, 'אין סנכרון → lastSyncAt null');
+    eq(none.json.accounts, 0, 'אין חשבונות → 0');
+    await BankAccount.create({ external_id: 'ext-secret-1', institution: 'בנק-סודי', label: 'חשבון-סודי', account_number: '99887766', balance: 123456.78, type: 'bank', is_active: true });
+    await BankAccount.create({ external_id: 'ext-secret-2', institution: 'בנק-סודי', label: 'כרטיס-סודי', type: 'card', is_active: true });
+    const t1 = new Date('2026-10-04T02:00:00Z'), t2 = new Date('2026-10-05T02:00:00Z'), t3 = new Date('2026-10-06T02:00:00Z');
+    await FinanceSyncLog.collection.insertMany([
+      { source: 'agent', status: 'ok', created_at: t1, accounts_seen: 1, inserted: 5 },
+      { source: 'agent', status: 'ok', created_at: t2, accounts_seen: 1, inserted: 777 },
+      { source: 'agent', status: 'error', created_at: t3, error: 'boom-secret' },
+      { source: 'max_xlsx', status: 'ok', created_at: t3 },
+    ]);
+    const r = await call('/sync');
+    eq(r.status, 200, 'sync עם נתונים → 200');
+    eq(Object.keys(r.json).sort().join(','), 'accounts,lastSyncAt,source', 'צורת התשובה סגורה');
+    eq(r.json.lastSyncAt, t2.toISOString(), 'lastSyncAt = ריצת agent מוצלחת אחרונה (לא שגיאה ולא xlsx)');
+    eq(r.json.accounts, 1, 'accounts = חשבונות בנק פעילים בלבד');
+    ok(typeof r.json.source === 'string' && r.json.source.length > 0, 'source מתאר על מה זה מבוסס');
+    for (const secret of ['99887766', 'חשבון-סודי', 'כרטיס-סודי', 'בנק-סודי', 'ext-secret', '123456', '777', 'boom-secret']) {
+      ok(!r.text.includes(secret), `אין דליפה: ${secret}`);
+    }
+  }
 
   console.log('\nמיקום הדלת ב-routes/index.js האמיתי');
   {

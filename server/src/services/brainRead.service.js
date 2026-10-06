@@ -12,7 +12,7 @@
  * third answer to "what does this child owe" would drift on the first discount
  * nobody remembered to copy across.
  */
-const { Registration, Classroom, Child, Collection, Branch, Discount, IncomeAllocation } = require('../models');
+const { Registration, Classroom, Child, Collection, Branch, Discount, IncomeAllocation, FinanceSyncLog, BankAccount } = require('../models');
 const { academicYearOf } = require('./academic-year.service');
 const { buildRegistrationMonths } = require('./collection-view.service');
 
@@ -230,4 +230,22 @@ async function summary(now = new Date()) {
   };
 }
 
-module.exports = { parseMonth, currentMonthKey, monthState, duePassed, DUE_DAY, shortName, summary, payments, unpaid, children };
+/**
+ * When the Pi last delivered bank data. Same definition the bank-watch job and
+ * the finance screen use: the newest FinanceSyncLog row from the agent with
+ * status ok (failed runs and manual xlsx uploads do not count). Returns only a
+ * timestamp and a count — no account numbers, labels, balances or amounts.
+ */
+async function sync() {
+  const [last, accounts] = await Promise.all([
+    FinanceSyncLog.findOne({ source: 'agent', status: 'ok' }).sort({ created_at: -1 }).select('created_at').lean(),
+    BankAccount.countDocuments({ type: 'bank', is_active: true }),
+  ]);
+  return {
+    lastSyncAt: last?.created_at ? new Date(last.created_at).toISOString() : null,
+    source: 'FinanceSyncLog: latest agent run with status ok',
+    accounts,
+  };
+}
+
+module.exports = { sync, parseMonth, currentMonthKey, monthState, duePassed, DUE_DAY, shortName, summary, payments, unpaid, children };

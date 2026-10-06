@@ -25,6 +25,14 @@ actions:
   - id: brain-children
     tier: green
     how: "district_api brain-children"
+  - id: brain-sync
+    tier: green
+    how: "district_api brain-sync"
+sync_check:
+  action: brain-sync
+  field: lastSyncAt
+  max_hours: 26
+  label: ה-Pi בגן
 ---
 מערכת הניהול של גן החלומות: הורים, תשלומים, שכר, משמרות וקבלות.
 רצה ב-Render (שירות gan-halomot, פרנקפורט); הקוד ב-GitHub tofyproductions/gan-halomot.

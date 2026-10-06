@@ -43,6 +43,7 @@ router.get('/unpaid', asyncWrap(async (req, res) => {
   const month = monthOf(req, res); if (!month) return;
   res.json(await svc.unpaid(month));
 }));
+router.get('/sync', asyncWrap(async (req, res) => res.json(await svc.sync())));
 router.get('/children', asyncWrap(async (req, res) => {
   // Only active children exist here; `active=true` is accepted for the brain's
   // sake, anything else is refused rather than silently ignored.
