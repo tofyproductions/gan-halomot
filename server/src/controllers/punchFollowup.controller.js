@@ -370,8 +370,26 @@ async function fixAsManager(req, res, next) {
         return res.status(r.status).json(r.body);
       }
       if (body.action === 'other') {
+        /**
+         * The reason is optional HERE, and stays required on the employee's
+         * side above.
+         *
+         * The two look like one action and are not. An employee explaining an
+         * empty day is making a claim, and the explanation is the whole of it
+         * — with no text there is nothing to accept. A manager marking the
+         * day is making a DECISION, and it stands on its own: she knows the
+         * woman did not come in, and most days that is all there is to know.
+         *
+         * Requiring her to type something anyway did not produce better
+         * records, it produced a dead end. The card offered "לא עבדה", she
+         * pressed it, and the only way on was a button reading "רשום סיבה" —
+         * which looks like an optional extra, not the next step. So she
+         * stopped, and the day stayed open.
+         *
+         * An empty reason_text is the honest record of a decision taken
+         * without one, and decided_by says who took it.
+         */
         const text = String(body.text || '').trim().slice(0, 300);
-        if (!text) return res.status(400).json({ error: 'יש לכתוב הסבר קצר' });
         const doc = await PunchDayExplanation.findOneAndUpdate(
           { employee_id: issue.employee_id, date: issue.date },
           { $set: { reason_text: text, status: 'accepted', decided_by: req.user?.id || null, decided_at: new Date(), reject_reason: '' } },

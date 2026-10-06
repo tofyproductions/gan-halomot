@@ -36,6 +36,38 @@ const DEFAULTS = {
 
 const STORE_KEY = 'gan.a11y.v1';
 
+/**
+ * Where the button sits, and how to get it out of the way.
+ *
+ * It is pinned to the bottom-left corner, which on a phone is where the save
+ * and cancel buttons of a dialog are, and where the bottom navigation bar is
+ * — so on those screens it covered the very control somebody was reaching
+ * for. An accessibility button that blocks a button is not an accessibility
+ * feature.
+ *
+ * Three places rather than free dragging: dragging on a touch screen fights
+ * the page's own scrolling, and the problem is not that this corner is wrong
+ * for everybody — it is that it is wrong on some screens, and the person
+ * needs it moved, not positioned to the pixel.
+ *
+ * Kept in its own key, not in the settings object: it is not an accessibility
+ * preference and should not be swept away by "reset settings", which would
+ * move the button back under the save button without being asked to.
+ */
+const PLACE_KEY = 'gan.a11y.placement';
+const PLACEMENTS = {
+  bottom: { label: 'למטה', style: { bottom: 16, left: 16 } },
+  raised: { label: 'גבוה יותר', style: { bottom: 104, left: 16 } },
+  tucked: { label: 'מוצמד לצד', style: { bottom: 104, left: -22, opacity: 0.45 } },
+};
+
+function readPlacement() {
+  try {
+    const v = localStorage.getItem(PLACE_KEY);
+    return PLACEMENTS[v] ? v : 'bottom';
+  } catch { return 'bottom'; }
+}
+
 const A11Y_CSS = `
 html.a11y-zoom-1 { zoom: 1.1; }
 html.a11y-zoom-2 { zoom: 1.25; }
@@ -125,6 +157,7 @@ const isDefault = (s) => JSON.stringify(s) === JSON.stringify(DEFAULTS);
 
 export default function AccessibilityWidget() {
   const [settings, setSettings] = useState(readSettings);
+  const [placement, setPlacement] = useState(readPlacement);
   const [open, setOpen] = useState(false);
   const [statementOpen, setStatementOpen] = useState(false);
   const panelRef = useRef(null);
@@ -135,6 +168,10 @@ export default function AccessibilityWidget() {
     applySettings(settings);
     try { localStorage.setItem(STORE_KEY, JSON.stringify(settings)); } catch { /* not remembered */ }
   }, [settings]);
+
+  useEffect(() => {
+    try { localStorage.setItem(PLACE_KEY, placement); } catch { /* not remembered */ }
+  }, [placement]);
 
   // Escape closes; a click outside closes. The statement dialog traps its own Escape.
   useEffect(() => {
@@ -173,20 +210,26 @@ export default function AccessibilityWidget() {
     <div dir="rtl">
       <style>{A11Y_CSS}</style>
 
-      {/* The trigger. Fixed to the bottom-left corner on every screen. */}
+      {/* The trigger, wherever the person has put it — see PLACEMENTS. */}
       <button
         ref={buttonRef}
         type="button"
-        aria-label="תפריט נגישות"
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        onClick={() => setOpen((v) => !v)}
+        aria-label={placement === 'tucked' ? 'החזרת כפתור הנגישות' : 'תפריט נגישות'}
+        aria-expanded={placement === 'tucked' ? undefined : open}
+        aria-haspopup={placement === 'tucked' ? undefined : 'dialog'}
+        // Tucked away, the first press brings it back rather than opening the
+        // menu: somebody who pushed it aside and now wants it has to be able
+        // to get it without knowing that pressing a half-hidden circle opens
+        // something.
+        onClick={() => (placement === 'tucked' ? setPlacement('raised') : setOpen((v) => !v))}
         style={{
-          position: 'fixed', bottom: 16, left: 16, zIndex: 2000,
+          position: 'fixed', zIndex: 2000,
+          ...PLACEMENTS[placement].style,
           height: 48, width: 48, borderRadius: '50%', border: 'none',
           background: '#0b57a4', color: '#fff', cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           boxShadow: '0 4px 14px rgba(0,0,0,.35), 0 0 0 2px rgba(255,255,255,.7)',
+          transition: 'bottom .18s ease, left .18s ease, opacity .18s ease',
         }}
       >
         {/* The international accessibility mark, drawn inline so it always loads. */}
@@ -202,7 +245,9 @@ export default function AccessibilityWidget() {
           role="dialog"
           aria-label="הגדרות נגישות"
           style={{
-            position: 'fixed', bottom: 76, left: 16, zIndex: 2000,
+            position: 'fixed', zIndex: 2000, left: 16,
+            // Above the button, wherever the button is.
+            bottom: placement === 'bottom' ? 76 : 164,
             width: 300, maxWidth: 'calc(100vw - 2rem)', borderRadius: 16,
             border: '1px solid #e2e8f0', background: '#fff', padding: 12,
             boxShadow: '0 20px 50px rgba(0,0,0,.3)', ...font,
@@ -249,6 +294,43 @@ export default function AccessibilityWidget() {
             <Row label="הדגשת מיקוד מקלדת" active={settings.focusHighlight} onPress={() => toggle('focusHighlight')} />
             <Row label="סמן עכבר גדול" active={settings.bigCursor} onPress={() => toggle('bigCursor')} />
             <Row label="עצירת אנימציות" active={settings.noMotion} onPress={() => toggle('noMotion')} />
+          </div>
+
+          {/*
+            Where the button itself sits.
+
+            In the menu rather than on the button, because it is a setting and
+            not an action — and because a second control ON a 48px circle
+            would be a target nobody can hit, which is the opposite of the
+            point. "מוצמד לצד" pushes it half off the screen; pressing it
+            there brings it back rather than opening this menu.
+          */}
+          <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid #f1f5f9' }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: '#475569', marginBottom: 6 }}>
+              מיקום הכפתור
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {Object.entries(PLACEMENTS).map(([key, p]) => (
+                <button
+                  key={key}
+                  type="button"
+                  aria-pressed={placement === key}
+                  onClick={() => setPlacement(key)}
+                  style={{
+                    flex: 1, padding: '7px 4px', borderRadius: 10, fontSize: 12, fontWeight: 700,
+                    cursor: 'pointer',
+                    border: `1px solid ${placement === key ? '#10b98166' : '#cbd5e1'}`,
+                    background: placement === key ? '#ecfdf5' : '#fff',
+                    color: placement === key ? '#047857' : '#334155',
+                  }}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: '#64748b', marginTop: 5 }}>
+              אם הכפתור מסתיר כפתור שמירה או ביטול — הזיזו אותו מכאן.
+            </div>
           </div>
 
           <div style={{
