@@ -3967,6 +3967,15 @@ async function mySalaryPreview(req, res, next) {
       ? Number(row.manual.holiday_pay)
       : (row.holiday_pay_auto?.total_pay || 0);
 
+    // Is the month she is looking at still being lived? See the long note
+    // further down — it decides whether this screen is a statement or a
+    // running total, and they are not the same screen.
+    const [yy, mm] = month.split('-').map(Number);
+    const lastDayOfMonth = new Date(yy, mm, 0).getDate();
+    const nowD = new Date();
+    const inProgress = nowD.getFullYear() === yy && nowD.getMonth() + 1 === mm
+      && nowD.getDate() <= lastDayOfMonth;
+
     const lines = [];
     const add = (key, label, amount, note) => {
       const v = Math.round((Number(amount) || 0) * 100) / 100;
@@ -3975,7 +3984,9 @@ async function mySalaryPreview(req, res, next) {
 
     add('base', 'שכר בסיס', split.regular != null ? split.regular : c.base_salary);
     add('overtime', 'שעות נוספות', (split.ot_125 || 0) + (split.ot_150 || 0));
-    add('completion', 'השלמת שכר', split.completion);
+    // Paired with the absence deduction below; both are whole-month machinery
+    // and both stay out while the month is running.
+    if (!inProgress) add('completion', 'השלמת שכר', split.completion);
     add('supplement', 'תוספת מעבר להתחייבות', split.supplement);
     add('vacation', 'דמי חופשה', row.vacation_pay,
       row.vacation_eff_days ? `${row.vacation_eff_days} ימים` : '');
@@ -3992,23 +4003,62 @@ async function mySalaryPreview(req, res, next) {
     // disable too). Showing both would double-count the standing bonus.
     add('fixed_bonus', 'בונוס קבוע', row.bonus?.effective);
     add('one_time_bonus', 'בונוס חד פעמי', row.one_time_bonus?.amount);
-    add('absence', 'ניכוי היעדרות', -(row.absence?.deduction || 0));
-    add('partial_absence', 'ניכוי שעות חסרות', -(row.partial_absence?.deduction || 0));
-    add('loans', 'ניכוי הלוואה', -(ded.loans || 0));
+    /**
+     * MID-MONTH, THE PROJECTION IS NOT A FORECAST AND MUST NOT LOOK LIKE ONE.
+     *
+     * The engine computes a whole month: for a תקן employee it completes the
+     * salary to the agreed figure and then deducts every scheduled day without
+     * punches. Across a finished month those two balance and the total is
+     * right — which is why the manager's number stays exactly as it was.
+     *
+     * On the sixth of the month they do not balance, because "no punches yet"
+     * and "did not come to work" are the same thing to the engine and
+     * completely different things to the woman reading the screen. She had
+     * worked three days and was shown השלמת שכר 21,514 against ניכוי היעדרות
+     * -21,023 and a bottom line of MINUS 381 ₪. Nothing about that is true,
+     * and it is frightening in a way no explanatory footnote repairs.
+     *
+     * So while the month is still running the employee's screen shows what she
+     * has ACCRUED, and the full-month machinery — the completion and the
+     * absence deduction it is paired with — is left out of it rather than
+     * shown as a pair of enormous offsetting numbers. The settlement happens
+     * at the end of the month, and that is what the screen now says.
+     */
+    if (!inProgress) {
+      add('absence', 'ניכוי היעדרות', -(row.absence?.deduction || 0));
+      add('partial_absence', 'ניכוי שעות חסרות', -(row.partial_absence?.deduction || 0));
+    }
+    // The loan comes off once, at the end. Set against a partial month it
+    // reads as though she owes more than she has earned.
+    const loansDue = Math.round((ded.loans || 0) * 100) / 100;
+    if (!inProgress) add('loans', 'ניכוי הלוואה', -loansDue);
 
-    // The total is the authoritative number — the one the manager sees. Anything
-    // it contains that has no line above is surfaced rather than swallowed, so
-    // the screen always adds up to the number printed at the bottom of it.
-    const total = Math.round((Number(b.estimated_total) || 0) * 100) / 100;
-    const listed = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
-    const residual = Math.round((total - listed) * 100) / 100;
-    if (Math.abs(residual) >= 1) {
-      lines.push({
-        key: 'other',
-        label: residual > 0 ? 'רכיבים נוספים' : 'ניכויים נוספים',
-        amount: residual,
-        note: 'לפירוט פנו למנהלת',
-      });
+    /**
+     * A finished month is reconciled against the manager's number; a month in
+     * progress is simply the sum of what is on the screen.
+     *
+     * The reconciliation exists so the lines always add up to the figure at
+     * the bottom — anything the engine's total contains that has no line of
+     * its own is surfaced rather than swallowed. But mid-month that total is
+     * the whole-month projection, and forcing the partial lines to reach it
+     * would reintroduce the very number this screen is avoiding, under the
+     * name "ניכויים נוספים".
+     */
+    let total;
+    if (inProgress) {
+      total = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+    } else {
+      total = Math.round((Number(b.estimated_total) || 0) * 100) / 100;
+      const listed = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+      const residual = Math.round((total - listed) * 100) / 100;
+      if (Math.abs(residual) >= 1) {
+        lines.push({
+          key: 'other',
+          label: residual > 0 ? 'רכיבים נוספים' : 'ניכויים נוספים',
+          amount: residual,
+          note: 'לפירוט פנו למנהלת',
+        });
+      }
     }
 
     // Branches she actually punched at this month, named for the screen.
@@ -4023,6 +4073,11 @@ async function mySalaryPreview(req, res, next) {
       salary_is_net: !!row.salary_is_net,
       lines,
       total,
+      // The screen reads differently in the two cases, and only the server
+      // knows which one this is.
+      in_progress: inProgress,
+      // Waiting at the end of the month, not set against a partial one.
+      pending_loan_deduction: inProgress ? loansDue : 0,
       hours_total: Math.round((b.hours?.total || 0) * 100) / 100,
       days_worked: b.hours?.days_worked || 0,
       loans: Math.round((ded.loans || 0) * 100) / 100,

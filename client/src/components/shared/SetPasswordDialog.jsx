@@ -107,13 +107,29 @@ export default function SetPasswordDialog({ open, onClose, allowSkip = false, fo
                   is actually looking at. */}
               <FingerprintIcon sx={{ fontSize: 56, color: 'primary.main' }} />
               <Typography variant="body2" color="text.secondary">
-                אפשר להוסיף כניסה עם טביעת אצבע או זיהוי פנים במכשיר הזה —
+                מוסיפים כניסה עם טביעת אצבע או זיהוי פנים במכשיר הזה —
                 בפעם הבאה נכנסים בנגיעה אחת, בלי להקליד סיסמה.
+              </Typography>
+              {/*
+                Asked for rather than offered, and the reason is on the screen.
+                This was a suggestion with "אולי אחר כך" beside it, and almost
+                nobody accepts a suggestion at the end of a form. The personal
+                area holds payslips, an ID number and a salary, on a phone that
+                gets put down on a table in a room full of people — so the
+                second lock is the point, not a nicety, and this is the one
+                moment the person is already here and already proving who she
+                is. Still refusable: a device that cannot do it exists, and
+                refusing must not lock anybody out of the system.
+              */}
+              <Typography variant="caption" color="text.secondary">
+                נדרש כדי לפתוח את "צפי השכר שלי", התלושים והמסמכים האישיים.
               </Typography>
             </Stack>
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => finish(true)} disabled={saving}>אולי אחר כך</Button>
+            <Button onClick={() => finish(true)} disabled={saving} color="inherit" size="small">
+              לא עכשיו
+            </Button>
             <Button variant="contained" startIcon={<FingerprintIcon />} onClick={enrollBiometric} disabled={saving}>
               {saving ? 'מגדיר…' : 'הפעלת כניסה ביומטרית'}
             </Button>

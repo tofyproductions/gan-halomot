@@ -7,6 +7,7 @@ import ScreenBoundary from './components/ui/ScreenBoundary';
 import NotFound from './components/layout/NotFound';
 import LoginPage from './components/layout/LoginPage';
 import ProtectedRoute from './components/layout/ProtectedRoute';
+import BiometricGate from './components/shared/BiometricGate';
 import Dashboard from './components/dashboard/Dashboard';
 import { useAuth } from './hooks/useAuth';
 import { hasTabAccess } from './config/tabs';
@@ -380,9 +381,23 @@ function AppRoutes() {
           </ProtectedRoute>
         } />
         {/* Employee portal */}
-        <Route path="my-salary" element={<MySalaryPreview />} />
-        <Route path="my-payslips" element={<MyPayslips />} />
-        <Route path="my-documents" element={<MyDocuments />} />
+        {/* The three screens that hold somebody's money and their ת.ז. Signing
+            in already proved who she is; this is about the gap between signing
+            in and reading, on a phone that gets put down on a table. See
+            BiometricGate — it is a second deliberate act, not a server-side
+            boundary, and it says so. */}
+        <Route
+          path="my-salary"
+          element={<BiometricGate title="צפי השכר שלי"><MySalaryPreview /></BiometricGate>}
+        />
+        <Route
+          path="my-payslips"
+          element={<BiometricGate title="התלושים שלי"><MyPayslips /></BiometricGate>}
+        />
+        <Route
+          path="my-documents"
+          element={<BiometricGate title="המסמכים שלי"><MyDocuments /></BiometricGate>}
+        />
         <Route path="my-attendance" element={<MyAttendance />} />
         <Route path="my-shifts" element={<MyShifts />} />
         <Route path="my-vacation" element={<MyVacation />} />

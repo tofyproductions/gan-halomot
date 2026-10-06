@@ -70,17 +70,35 @@ export default function MySalaryPreview() {
                 </Stack>
               ))}
 
+              {/*
+                Two different screens, and calling both of them "סה״כ צפי" is
+                what made the old one frightening. A finished month is a
+                statement. A month still being lived is a running total, and
+                saying so is the whole fix: the settlement — the salary
+                completion, the absence deduction it is paired with, the loan
+                — happens at the end, and until then this is simply what has
+                been earned so far.
+              */}
               <Stack direction="row" justifyContent="space-between">
-                <Typography variant="h6" sx={{ fontWeight: 800 }}>סה"כ צפי</Typography>
+                <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                  {salary.in_progress ? 'נצבר עד היום' : 'סה"כ צפי'}
+                </Typography>
                 <Typography variant="h6" sx={{ fontWeight: 800, color: 'success.main' }}>
                   {formatCurrency(salary.total || 0)}
                 </Typography>
               </Stack>
 
               <Typography variant="caption" color="text.secondary">
-                צפי {salary.salary_is_net ? 'נטו' : 'ברוטו'} לפני ניכויי מס וביטוח לאומי. הסכום עשוי
-                להשתנות עד סגירת החודש.
+                {salary.in_progress
+                  ? `זה מה שנצבר מתחילת החודש ועד היום, ${salary.salary_is_net ? 'נטו' : 'ברוטו'} לפני ניכויי מס וביטוח לאומי. החודש עוד לא נגמר — השלמת השכר וההתחשבנות הסופית מחושבות בסגירת החודש.`
+                  : `צפי ${salary.salary_is_net ? 'נטו' : 'ברוטו'} לפני ניכויי מס וביטוח לאומי. הסכום עשוי להשתנות עד סגירת החודש.`}
               </Typography>
+
+              {salary.in_progress && salary.pending_loan_deduction > 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  בסגירת החודש ינוכו {formatCurrency(salary.pending_loan_deduction)} על חשבון ההלוואה.
+                </Typography>
+              )}
 
               {salary.loans_remaining > 0 && (
                 <>
