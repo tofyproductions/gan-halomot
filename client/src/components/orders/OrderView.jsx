@@ -20,6 +20,7 @@ import LoadingSpinner from '../shared/LoadingSpinner';
 import { formatCurrency } from '../../utils/hebrewYear';
 import ConfirmDialog from '../shared/ConfirmDialog';
 import ReceiveOrderDialog from './ReceiveOrderDialog';
+import { useAuth } from '../../hooks/useAuth';
 import OrderGroupPanel from './OrderGroupPanel';
 import InviteBranchDialog from './InviteBranchDialog';
 
@@ -40,8 +41,9 @@ const EMAIL_MAP = {
 };
 
 const STATUS_MAP = {
-  draft: { label: 'בהמתנה', color: 'default' },
-  pending: { label: 'ממתין לאישור', color: 'warning' },
+  draft: { label: 'טיוטה', color: 'default' },
+  awaiting_approval: { label: 'ממתין לאישור', color: 'warning' },
+  pending: { label: 'נשלח לספק', color: 'info' },
   approved: { label: 'מאושר', color: 'success' },
   sent: { label: 'נשלח', color: 'info' },
   pending_receive: { label: 'בדרך — ממתין לקבלה', color: 'warning' },
@@ -53,6 +55,11 @@ const STATUS_MAP = {
 export default function OrderView() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  // The same two roles the server's canApprove names. Kept in step by hand
+  // because the client has no copy of the route table; the server is what
+  // actually decides, and this only decides what to offer.
+  const canApprove = ['system_admin', 'admin_viewer'].includes(user?.role);
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [confirm, setConfirm] = useState({ open: false, action: '' });
@@ -71,11 +78,14 @@ export default function OrderView() {
       .finally(() => setLoading(false));
   }, [id]);
 
+  // Approving IS the sending, so the order comes back from the server rather
+  // than being guessed at here — it lands on 'pending' (gone to the supplier),
+  // and the delivery fields the email wrote on it are worth showing.
   const handleApprove = async () => {
     try {
-      await api.post(`/orders/${id}/approve`, { approved_by: 'מנהל' });
-      toast.success('ההזמנה אושרה!');
-      setOrder(prev => ({ ...prev, status: 'approved', approved_at: new Date() }));
+      const res = await api.post(`/orders/${id}/approve`);
+      toast.success(res.data?.message || 'ההזמנה אושרה ונשלחה לספק');
+      if (res.data?.order) setOrder(res.data.order);
       setConfirm({ open: false, action: '' });
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה');
@@ -206,7 +216,7 @@ export default function OrderView() {
     try {
       const res = await api.post(`/orders/${id}/send`);
       const n = res.data.sent_count || 1;
-      toast.success(n > 1 ? `נשלח לספק — ${n} סניפים` : 'נשלח לספק');
+      toast.success(n > 1 ? `נשלח לאישור — ${n} סניפים` : 'נשלח לאישור');
       const fresh = await api.get(`/orders/${id}`);
       setOrder(fresh.data.order);
       setGroupKey(k => k + 1);
@@ -372,7 +382,7 @@ export default function OrderView() {
             onClick={() => setConfirm({ open: true, action: 'send' })}
             disabled={sending || !canSend}
           >
-            {order.group_id ? 'שלח לספק — כל הסניפים' : 'שלח לספק'}
+            {order.group_id ? 'שלח לאישור — כל הסניפים' : 'שלח לאישור'}
           </Button>
           <Button
             variant="contained" color="primary" size="large"
@@ -398,15 +408,20 @@ export default function OrderView() {
         </Stack>
       )}
 
-      {order.status === 'pending' && (
+      {order.status === 'awaiting_approval' && (
         <Stack direction="row" spacing={2} flexWrap="wrap" gap={1}>
-          <Button
-            variant="contained" color="success" size="large"
-            startIcon={<CheckCircleIcon />}
-            onClick={() => setConfirm({ open: true, action: 'approve' })}
-          >
-            אשר הזמנה
-          </Button>
+          {/* Only the office. Everyone else sees the order and its state and
+              can still edit it — they simply have no button that spends
+              money, rather than a button that answers 403. */}
+          {canApprove && (
+            <Button
+              variant="contained" color="success" size="large"
+              startIcon={<CheckCircleIcon />}
+              onClick={() => setConfirm({ open: true, action: 'approve' })}
+            >
+              אשר ושלח לספק
+            </Button>
+          )}
           <Button
             variant="contained" color="primary" size="large"
             startIcon={<EditIcon />}
@@ -422,6 +437,12 @@ export default function OrderView() {
             בטל הזמנה
           </Button>
         </Stack>
+      )}
+
+      {order.status === 'awaiting_approval' && !canApprove && (
+        <Alert severity="info" sx={{ borderRadius: 2, mt: 2 }}>
+          ההזמנה ממתינה לאישור ההנהלה. היא תישלח לספק ברגע שתאושר.
+        </Alert>
       )}
 
       {(order.status === 'approved' || order.status === 'sent') && (
@@ -495,15 +516,20 @@ export default function OrderView() {
           : handleCancel
         }
         title={
-          confirm.action === 'approve' ? 'אישור הזמנה'
+          confirm.action === 'approve' ? 'אישור ושליחה לספק'
           : confirm.action === 'arrived' ? 'סימון כהגיע'
-          : confirm.action === 'send' ? 'שליחה לספק'
+          : confirm.action === 'send' ? 'שליחה לאישור'
           : 'ביטול הזמנה'
         }
         message={
-          confirm.action === 'approve' ? 'לאשר את ההזמנה?'
+          // Said plainly, because approving is the irreversible half: the
+          // letter goes out on this click and cannot be recalled.
+          confirm.action === 'approve'
+            ? (order.group_id
+              ? 'לאשר ולשלוח לספק את ההזמנות של כל הסניפים בקבוצה? המייל יוצא עכשיו.'
+              : 'לאשר את ההזמנה ולשלוח אותה לספק במייל? לא ניתן לבטל אחרי השליחה.')
           : confirm.action === 'arrived' ? 'לסמן את ההזמנה כהגיעה? תוכל לאשר קבלה ולעדכן מלאי בשלב הבא.'
-          : confirm.action === 'send' ? (order.group_id ? 'לשלוח לספק את ההזמנות של כל הסניפים בקבוצה? סניף שלא הוסיף פריטים לא יישלח.' : 'לשלוח את ההזמנה לספק במייל?')
+          : confirm.action === 'send' ? (order.group_id ? 'לשלוח לאישור את ההזמנות של כל הסניפים בקבוצה? סניף שלא הוסיף פריטים לא יישלח.' : 'לשלוח את ההזמנה לאישור ההנהלה?')
           : 'לבטל את ההזמנה?'
         }
       />

@@ -169,6 +169,29 @@ function isWriteBlockedForViewer(url) {
     || WRITE_BLOCKED_PATTERNS.some(re => re.test(path));
 }
 
+/**
+ * The writes a viewer makes FOR REAL, rather than as a proposal.
+ *
+ * The default is right and this list should stay almost empty: a viewer's
+ * write becomes a change somebody else approves, which is the entire role.
+ * But approving a supply order is a decision the gan has deliberately given
+ * to this role, and a decision that only files a proposal for somebody else
+ * to approve is not a decision — it is the same wait, one step further on.
+ *
+ * Exact patterns rather than prefixes, for the reason WRITE_BLOCKED_PATTERNS
+ * is: `/api/orders` as a prefix would hand a viewer every order write there
+ * is, including building and editing them. What was granted is the approval.
+ */
+const WRITE_ALLOWED_PATTERNS = [
+  // POST /api/orders/:id/approve — approving is what sends it to the supplier.
+  /^\/api\/orders\/[^/]+\/approve\/?$/,
+];
+
+function isWriteAllowedForViewer(url) {
+  const path = pathOnly(url);
+  return WRITE_ALLOWED_PATTERNS.some(re => re.test(path));
+}
+
 function isMultipart(req) {
   const ct = req?.headers?.['content-type'] || '';
   return ct.toLowerCase().startsWith('multipart/');
@@ -264,7 +287,8 @@ function viewerMessage(approver) {
 }
 
 module.exports = {
-  showValue, isRead, isViewer, isBlockedForViewer, isWriteBlockedForViewer, isMultipart, approverFor,
+  showValue, isRead, isViewer, isBlockedForViewer, isWriteBlockedForViewer,
+  isWriteAllowedForViewer, isMultipart, approverFor,
   screenLabelFor, summarizeBody, extractBranchId, viewerMessage, FIELD_LABELS, pathOnly,
   startsWithPrefix, NO_UPLOAD,
 };

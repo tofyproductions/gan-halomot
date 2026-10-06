@@ -141,6 +141,15 @@ async function create(req, res, next) {
       return res.status(400).json({ error: 'branch_id, supplier_id, and items are required' });
     }
 
+    // Which gan this order is for comes from the BODY, and nothing checked it
+    // — `update` and `send` both guard their branch and `create` never did,
+    // so anyone who could order could order in another gan's name and on its
+    // account. It never mattered much while the ordering roles were five
+    // trusted ones; it matters now that the list is longer.
+    if (!orderInScope(req, [String(branch_id)])) {
+      return res.status(403).json({ error: 'אין לך הרשאה להזמין עבור סניף זה' });
+    }
+
     const supplier = await Supplier.findById(supplier_id);
     if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
 
@@ -166,18 +175,19 @@ async function create(req, res, next) {
       order_number, branch_id, supplier_id,
       items: processedItems, total_amount,
       notes: notes || '', created_by: created_by || req.user?.full_name || '',
-      // Every order is born a draft. Without `hold` it is sent in the same
-      // breath — which is what "create" always did, now through the one
-      // function that sending later and sending together also use.
-      status: 'draft',
+      /**
+       * An order is born a draft, and without `hold` it is submitted in the
+       * same breath — submitted, not sent. This used to email the supplier
+       * here; now nothing leaves the building until the office approves.
+       *
+       * `hold` still means what it always did: a draft the branch is not
+       * finished with, which is also what an invited branch's order looks
+       * like while it waits for the others.
+       */
+      status: req.body.hold ? 'draft' : 'awaiting_approval',
     });
 
-    if (req.body.hold) {
-      return res.status(201).json({ order: { ...order.toObject(), id: order._id } });
-    }
-
-    const [sent] = await dispatchOrders([order._id], { supplier, user: req.user });
-    res.status(201).json({ order: sent });
+    res.status(201).json({ order: { ...order.toObject(), id: order._id } });
   } catch (error) { next(error); }
 }
 
@@ -187,8 +197,11 @@ async function update(req, res, next) {
     if (!order) return res.status(404).json({ error: 'Order not found' });
     // Each branch edits only its own order, even inside a joint one.
     if (!orderInScope(req, [String(order.branch_id)])) return res.status(403).json({ error: 'אין הרשאה להזמנה זו' });
-    if (order.status !== 'pending' && order.status !== 'draft') {
-      return res.status(400).json({ error: 'ניתן לערוך רק הזמנות ממתינות' });
+    // Editable right up to the moment the office approves it — which is the
+    // moment it becomes a real bill. 'pending' now means the supplier already
+    // has it, so it is no longer on the list.
+    if (order.status !== 'awaiting_approval' && order.status !== 'draft') {
+      return res.status(400).json({ error: 'ניתן לערוך רק הזמנות שטרם אושרו' });
     }
 
     const { items, notes } = req.body;
@@ -210,9 +223,19 @@ async function update(req, res, next) {
 }
 
 /**
- * Send a draft to the supplier. If the draft belongs to a group, every draft
- * in the group with items goes out in one email; a member that never added
- * anything is cancelled rather than sent empty.
+ * Submit a draft for the office's approval. The supplier is not told.
+ *
+ * This used to be the send — it emailed the supplier and the order was gone.
+ * The button is still the last one the person building the order presses, and
+ * from where they stand nothing has changed; what changed is that the letter
+ * now waits for somebody in the office to approve it, and approving is what
+ * posts it (see `approve`).
+ *
+ * A joint order submits as a unit, the way it used to send as a unit: every
+ * member with items goes forward together, and a branch that was invited and
+ * never added anything is cancelled rather than carried along empty. The
+ * minimum is checked here, on the group's combined total, because this is the
+ * moment the order is finished being built.
  */
 async function send(req, res, next) {
   try {
@@ -248,15 +271,27 @@ async function send(req, res, next) {
       });
     }
 
-    let sent;
-    try {
-      sent = await dispatchOrders(withItems.map(m => m._id), { supplier, user: req.user });
-    } catch (err) {
-      if (err.status) return res.status(err.status).json({ error: err.message });
-      throw err;
+    // The claim, same shape the dispatch used to make: whoever's update
+    // matches is the one who submitted, so two people pressing at once cannot
+    // both win and the second is told so.
+    const ids = withItems.map(m => m._id);
+    const claim = await Order.updateMany(
+      { _id: { $in: ids }, status: 'draft' },
+      { $set: { status: 'awaiting_approval', submitted_at: new Date(), submitted_by: req.user?.full_name || '' } },
+    );
+    if (!claim.modifiedCount) {
+      return res.status(400).json({ error: 'ההזמנה כבר נשלחה לאישור' });
     }
+    if (claim.modifiedCount < ids.length) {
+      await Order.updateMany(
+        { _id: { $in: ids }, status: 'awaiting_approval' },
+        { $set: { status: 'draft', submitted_at: null, submitted_by: '' } },
+      ).catch(() => {});
+      return res.status(409).json({ error: 'חלק מהזמנות הקבוצה כבר נשלחו — רעננו את המסך ונסו שוב' });
+    }
+    const sent = await Order.find({ _id: { $in: ids } }).lean();
 
-    // Only once the send went through: a send that failed leaves every member
+    // Only once the submit went through: a failure leaves every member
     // exactly as it was, the empty ones included.
     if (empty.length) {
       await Order.updateMany(
@@ -399,32 +434,73 @@ async function invitableBranches(req, res, next) {
   } catch (error) { next(error); }
 }
 
+/**
+ * Approve — and in approving, send it to the supplier.
+ *
+ * These are one act on purpose. This function used to set a flag and send
+ * nothing (the email was a console.log waiting for someone to finish it), so
+ * "approved" meant nothing and every order reached the supplier the moment it
+ * was built. An approval that does not post the letter is a checkbox, and a
+ * checkbox nobody ticks is worse than no step at all.
+ *
+ * A joint order approves as a unit, since the supplier gets one letter for
+ * the whole group — approving one member and not the others would mean
+ * emailing a partial order, which is the thing the group exists to prevent.
+ */
 async function approve(req, res, next) {
   try {
-    const order = await Order.findById(req.params.id)
-      .populate('branch_id', 'name address')
-      .populate('supplier_id');
-    if (!order) return res.status(404).json({ error: 'Order not found' });
-    if (order.status !== 'pending') {
-      return res.status(400).json({ error: 'הזמנה זו כבר אושרה' });
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ error: 'הזמנה לא נמצאה' });
+    if (order.status === 'cancelled') return res.status(400).json({ error: 'ההזמנה בוטלה' });
+    if (order.status !== 'awaiting_approval') {
+      return res.status(400).json({ error: 'ההזמנה אינה ממתינה לאישור' });
     }
 
-    order.status = 'approved';
-    order.approved_by = req.body.approved_by || '';
-    order.approved_at = new Date();
-    await order.save();
+    const members = order.group_id
+      ? await Order.find({ group_id: order.group_id, status: 'awaiting_approval' })
+      : [order];
 
-    // Try to send email notification (don't fail if email not configured)
+    const supplier = await Supplier.findById(order.supplier_id);
+    if (!supplier) return res.status(404).json({ error: 'הספק לא נמצא' });
+
+    const withItems = members.filter(m => (m.items || []).length > 0);
+    if (!withItems.length) return res.status(400).json({ error: 'אין פריטים לשליחה' });
+
+    const approvedBy = req.user?.full_name || req.body.approved_by || '';
+    const approvedAt = new Date();
+
+    // dispatchOrders claims on `draft` — it is the one place that talks to the
+    // supplier and its claim is what makes a double-click safe, so the orders
+    // are handed back to that state for it to take rather than giving it a
+    // second claim to keep in step with this one.
+    const ids = withItems.map(m => m._id);
+    await Order.updateMany(
+      { _id: { $in: ids }, status: 'awaiting_approval' },
+      { $set: { status: 'draft', approved_by: approvedBy, approved_at: approvedAt } },
+    );
+
+    let sent;
     try {
-      if (env.SMTP_USER) {
-        // Email would be sent here when SMTP is configured
-        console.log('Order approved:', order.order_number);
-      }
-    } catch (emailErr) {
-      console.error('Email failed:', emailErr.message);
+      sent = await dispatchOrders(ids, { supplier, user: req.user });
+    } catch (err) {
+      // Put them back where they were: an approval that could not be posted
+      // must leave the order waiting, not stranded as an editable draft.
+      await Order.updateMany(
+        { _id: { $in: ids }, status: 'draft' },
+        { $set: { status: 'awaiting_approval', approved_by: '', approved_at: null } },
+      ).catch(() => {});
+      if (err.status) return res.status(err.status).json({ error: err.message });
+      throw err;
     }
 
-    res.json({ message: 'ההזמנה אושרה', order: { ...order.toObject(), id: order._id } });
+    await Promise.all(members.map(m => resolveEvents({ ref_collection: 'Order', ref_id: m._id })));
+
+    let mine = sent.find(o => String(o._id) === String(order._id));
+    if (!mine) {
+      const refetched = await Order.findById(order._id).lean();
+      mine = { ...refetched, id: refetched._id };
+    }
+    res.json({ message: 'ההזמנה אושרה ונשלחה לספק', order: mine, sent_count: sent.length });
   } catch (error) { next(error); }
 }
 

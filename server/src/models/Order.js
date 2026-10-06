@@ -28,15 +28,34 @@ const orderSchema = new mongoose.Schema({
   supplier_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', required: true },
   status: {
     type: String,
-    // 'receiving' is transient: the receive endpoint's claim, held only while
-    // the stock is being booked in, so a double-click cannot book it twice.
-    enum: ['draft', 'pending', 'approved', 'sent', 'pending_receive', 'receiving', 'received', 'received_partial', 'cancelled'],
-    default: 'pending',
+    /**
+     * draft             — being built, or waiting for the other branches in a
+     *                     joint order to add their own items.
+     * awaiting_approval — submitted. The supplier has NOT been told. Only the
+     *                     office moves it from here, and moving it is what
+     *                     sends it.
+     * pending           — gone to the supplier, waiting to arrive. The name is
+     *                     older than the approval step and is left alone
+     *                     because every receive path downstream keys on it.
+     * receiving         — transient: the receive endpoint's claim, held only
+     *                     while the stock is booked in, so a double-click
+     *                     cannot book it twice.
+     *
+     * 'approved' and 'sent' are kept for rows written before the approval step
+     * existed. Nothing produces them now.
+     */
+    enum: ['draft', 'awaiting_approval', 'pending', 'approved', 'sent', 'pending_receive', 'receiving', 'received', 'received_partial', 'cancelled'],
+    default: 'awaiting_approval',
   },
   items: [orderItemSchema],
   total_amount: { type: Number, default: 0 },
   notes: { type: String, default: '' },
   created_by: { type: String, default: '' },
+  // Who finished building it and sent it to the office, and when. Separate
+  // from approved_by, because the point of the step is that they are two
+  // different people.
+  submitted_by: { type: String, default: '' },
+  submitted_at: { type: Date, default: null },
   approved_by: { type: String, default: '' },
   approved_at: { type: Date, default: null },
   pending_receive_at: { type: Date, default: null },
