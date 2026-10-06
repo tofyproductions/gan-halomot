@@ -98,8 +98,16 @@ async function htmlToPdf(html) {
  *
  * deviceScaleFactor 2 because the result is read on a telephone, where a 1x
  * screenshot of 15pt text is soft enough to look like a bad scan.
+ *
+ * `format: 'jpeg'` for anything that gets PRINTED rather than read on a
+ * screen: the print shops and the photo kiosks the gan uses take a JPEG and
+ * argue about a PNG. It costs nothing here and the quality is set high
+ * enough that the compression does not show on flat colour, which is what a
+ * card in the gan's palette mostly is. Note JPEG has no transparency, so a
+ * template bound for it must paint its own background — all of ours do.
  */
-async function htmlToPng(html, { width = 1400, maxHeightPx = 20000 } = {}) {
+async function htmlToPng(html, { width = 1400, maxHeightPx = 20000, format = 'png', quality = 92 } = {}) {
+  const type = format === 'jpeg' || format === 'jpg' ? 'jpeg' : 'png';
   const run = async () => {
     let browser;
     try {
@@ -123,7 +131,10 @@ async function htmlToPng(html, { width = 1400, maxHeightPx = 20000 } = {}) {
         if (h > maxHeightPx) {
           throw new Error(`התוכנית ארוכה מדי לתמונה אחת (${h}px)`);
         }
-        return Buffer.from(await page.screenshot({ type: 'png', fullPage: true, timeout: 120000 }));
+        return Buffer.from(await page.screenshot({
+          type, fullPage: true, timeout: 120000,
+          ...(type === 'jpeg' ? { quality } : {}),
+        }));
       } finally { try { await page.close(); } catch (e) { /* ignore */ } }
     } finally {
       if (browser) { try { await browser.close(); } catch (e) { /* ignore */ } }

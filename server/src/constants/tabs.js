@@ -78,6 +78,7 @@ const TAB_DEFAULT_ROLES = {
   parent_signups: ['system_admin', 'admin_viewer', 'branch_manager'],
   photos: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'teacher', 'assistant'],
   gifts: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'accountant'],
+  graphics: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader'],
   gantt: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader'],
   classes: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'accountant'],
   events: ['system_admin', 'admin_viewer', 'branch_manager'],

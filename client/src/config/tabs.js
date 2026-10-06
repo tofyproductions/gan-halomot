@@ -148,6 +148,11 @@ export const TAB_GROUPS = [
       // OPENING a round sets dates for every branch, so the server keeps that
       // to management.
       { id: 'gifts', label: 'מתנות', path: '/gifts', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'accountant'] },
+      // Printables made from the gan's own records — the birthday card first,
+      // and more to come. A class leader is on the list because the person who
+      // wants a card is standing in the room on the morning of the birthday,
+      // and one she has to ask the office for arrives the day after.
+      { id: 'graphics', label: 'הגרפיקות שלנו', path: '/graphics', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader'] },
       { id: 'gantt',      label: 'גאנט',       path: '/gantt',      defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader'] },
       { id: 'classes',    label: 'מעקב חוגים', path: '/classes',    defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'accountant'] },
       { id: 'events',     label: 'אירועים',    path: '/events',     defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager'] },

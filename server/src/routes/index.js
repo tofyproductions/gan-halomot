@@ -185,6 +185,9 @@ router.use('/documents', require('./documents.routes'));
 router.use('/supplies', require('./supplies.routes'));
 router.use('/holidays', require('./holiday.routes'));
 router.use('/parent-supply-list', require('./supplyList.routes'));
+// הגרפיקות שלנו — printables made from the gan's own records, starting with
+// the birthday card. Rendered on demand, never stored.
+router.use('/graphics', require('./graphics.routes'));
 router.use('/activities', require('./activity.routes'));
 router.use('/gantt', require('./gantt.routes'));
 // בנק תוכן — the ideas a week is built from, indexed by its subject. Feeds the

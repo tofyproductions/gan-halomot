@@ -224,4 +224,169 @@ function buildSupplyListPosterHtml({ title, subtitle, lead, callout, footer, ite
 </body></html>`;
 }
 
-module.exports = { buildVacationPosterHtml, buildSupplyListPosterHtml, DEFAULT_PALETTE };
+/* ------------------------------------------------------------------ *
+ * כרטיס יום הולדת
+ * ------------------------------------------------------------------ */
+
+/**
+ * A4 portrait at 150dpi. htmlToPng renders at deviceScaleFactor 2, so what
+ * comes out is 2480×3508 — A4 at 300dpi, which is what a print shop asks for
+ * and what the gan's own printer wants. A card sized in `mm` would be the
+ * tidier markup and would also be the wrong number of pixels: this path is a
+ * screenshot, not a print job, and nothing here honours a page size.
+ */
+const CARD_W = 1240;
+const CARD_H = 1754;
+
+/**
+ * The gan's palette rather than the poster templates' — those two are pink
+ * and teal, which is the equipment list, not the brand. These four are the
+ * application's own (client/src/theme/parentTheme.js), so a card printed off
+ * the system and the portal a parent opens look like the same gan.
+ */
+const CARD_CSS = `
+  :root{
+    --ink:#2B2119; --brand:#B4540A; --brand-soft:#F2A03D;
+    --paper:#FAF6F0; --light:#FFF1DC;
+    --font-head:'Fredoka','Rubik','Heebo','Arial',sans-serif;
+    --font-body:'Rubik','Heebo','Arial',sans-serif;
+  }
+  /* JPEG has no transparency: whatever is behind the card IS in the file. */
+  body{background:#fff;margin:0}
+  /* Centred rather than top-aligned: the greeting is four short lines, and
+     stacked from the top they leave a third of the page empty under them —
+     which reads as a card that failed to finish rather than one with air. */
+  .card{width:${CARD_W}px;height:${CARD_H}px;position:relative;overflow:hidden;
+        background:
+          radial-gradient(900px 420px at 50% -120px, #FFF1DC 0%, rgba(255,241,220,0) 72%),
+          linear-gradient(180deg,#FFFDF9 0%,var(--paper) 100%);
+        display:flex;flex-direction:column;align-items:center;justify-content:center;
+        padding:84px 84px 132px}
+  /* The rainbow is the logo's own, so the frame belongs to the gan rather
+     than being a generic border. */
+  .card::before{content:'';position:absolute;inset:0;
+        border:18px solid transparent;
+        border-image:linear-gradient(135deg,#e8443b,#f5871f,#f0a500,#2bb673,#2e7dd7,#8e44ad) 1}
+  .deco{position:absolute;font-size:96px;line-height:1;opacity:.5;z-index:1}
+  .deco.a{top:58px;inset-inline-start:58px;transform:rotate(-14deg)}
+  .deco.b{top:58px;inset-inline-end:58px;transform:rotate(12deg)}
+  .deco.c{bottom:54px;inset-inline-start:62px;transform:rotate(9deg)}
+  .deco.d{bottom:54px;inset-inline-end:62px;transform:rotate(-10deg)}
+  .logo{position:relative;z-index:3;margin-bottom:10px}
+  .logo img{height:300px;width:auto}
+  .kicker{position:relative;z-index:3;font-family:var(--font-head);font-weight:700;
+          font-size:62px;color:var(--brand);letter-spacing:.5px;margin:0}
+  .rule{position:relative;z-index:3;width:300px;height:12px;border-radius:12px;margin:30px 0 14px;
+        background:linear-gradient(90deg,#e8443b,#f5871f,#2bb673,#2e7dd7,#8e44ad)}
+  /* The biggest thing on the page on purpose — this is a card for one child,
+     and the child reads their own name before anything else. The size comes
+     in as a variable because a long name at a fixed size runs off the paper
+     (see nameFontSize). */
+  .name{position:relative;z-index:3;font-family:var(--font-head);font-weight:700;
+        font-size:var(--name-size,104px);line-height:1.1;color:var(--ink);
+        margin:14px 0 0;text-align:center;white-space:nowrap}
+  /* Blank card: a line to write the name on, sitting INSIDE the greeting line
+     where the name would have been — "______ היקר שלנו", the way the card the
+     office has always handed out is written. On its own row it reads as a
+     rule above a heading rather than as a space to fill in. */
+  .name .blank{display:inline-block;width:420px;vertical-align:baseline;
+               border-bottom:7px dashed var(--brand-soft)}
+  /* The lines are broken by hand below, so nothing here may re-break them:
+     a wrapped line leaves one word stranded and the blessing reads as a
+     typing mistake. */
+  .body{position:relative;z-index:3;font-family:var(--font-body);font-weight:500;
+        font-size:46px;line-height:1.66;color:var(--ink);text-align:center;
+        margin:48px 0 0;white-space:nowrap}
+  .foot{position:absolute;z-index:3;bottom:76px;inset-inline:0;text-align:center;
+         font-family:var(--font-head);font-weight:700;font-size:44px;color:var(--brand)}
+`;
+
+/**
+ * The greeting, in the child's gender when the gan knows it.
+ *
+ * The text the office asked for is written to a boy — היקר, שתצעד, שתבקש —
+ * and handing a girl a card addressed to a boy is worse than any amount of
+ * tidy code. Child.gender is blank for most children (it is filled in one tap
+ * at a time, from the שבת rotation picker), so the masculine wording stays
+ * the default: it is the text as given, and it is what a blank card has to
+ * say anyway.
+ */
+function birthdayGreeting(gender) {
+  const girl = gender === 'girl';
+  return {
+    dear: girl ? 'היקרה שלנו' : 'היקר שלנו',
+    // Broken by hand, and short enough that the widest line fits the card:
+    // the CSS forbids re-wrapping, so a line that does not fit would be a
+    // line that runs off the paper.
+    lines: [
+      'היום יש לך יום הולדת וזה יום כה מיוחד.',
+      'רצינו לאחל לך הרבה מהכל ובעיקר',
+      'שמחה ואושר, בריאות והרבה חברים.',
+      girl ? 'שתצעדי תמיד בדרך הטובה' : 'שתצעד תמיד בדרך הטובה',
+      girl ? 'ושכל מה שתבקשי יתממש ובמהרה.' : 'ושכל מה שתבקש יתממש ובמהרה.',
+    ],
+  };
+}
+
+/**
+ * A size at which the name still fits across the card.
+ *
+ * The line must not wrap — "שירה לוי היקרה" on one line and "שלנו" on the
+ * next is not a card anybody hands to a parent — so the type shrinks instead.
+ * The steps are measured against the usable width (the card less its padding)
+ * at the heading font's roughly 0.52em average advance in Hebrew; they are
+ * deliberately conservative, because a name two sizes too small still reads
+ * and a name one pixel too wide is cut off.
+ */
+function nameFontSize(line) {
+  const n = String(line || '').length;
+  if (n <= 16) return 104;
+  if (n <= 20) return 92;
+  if (n <= 25) return 78;
+  if (n <= 32) return 64;
+  return 54;
+}
+
+/**
+ * @param {Object} opts
+ * @param {string} [opts.name]   the child's name; empty = a line to fill in
+ * @param {string} [opts.gender] 'boy' | 'girl' | '' — inflects the greeting
+ * @param {string} [opts.footer]
+ */
+function buildBirthdayCardHtml({ name = '', gender = '', footer = 'באהבה, צוות גן החלומות 🌈' } = {}) {
+  const logo = letterhead.logoDataUrl();
+  const g = birthdayGreeting(gender);
+  const trimmed = String(name || '').trim();
+  // The blank rule is 420px wide; counted as the characters it stands in for
+  // so an empty card is sized by the same rule as a named one.
+  const line = trimmed ? `${trimmed} ${g.dear}` : `${'_'.repeat(8)} ${g.dear}`;
+  const size = nameFontSize(line);
+
+  const nameBlock = trimmed
+    ? `<div class="name">${esc(line)}</div>`
+    : `<div class="name"><span class="blank"></span> ${esc(g.dear)}</div>`;
+
+  return `<!doctype html>
+<html lang="he" dir="rtl"><head>${BASE_HEAD}<style>${CARD_CSS}</style>
+<style>:root{--name-size:${size}px}</style></head>
+<body>
+  <div class="card">
+    <span class="deco a">🎈</span><span class="deco b">🎂</span>
+    <span class="deco c">🎁</span><span class="deco d">⭐</span>
+    ${logo ? `<div class="logo"><img src="${logo}" alt="גן החלומות"/></div>` : ''}
+    <h1 class="kicker">מזל טוב!</h1>
+    <div class="rule"></div>
+    ${nameBlock}
+    <div class="body">${g.lines.map(l => esc(l)).join('<br>')}</div>
+    <div class="foot">${esc(footer)}</div>
+  </div>
+</body></html>`;
+}
+
+module.exports = {
+  buildVacationPosterHtml,
+  buildSupplyListPosterHtml,
+  buildBirthdayCardHtml,
+  CARD_W,
+  DEFAULT_PALETTE,
+};
