@@ -717,6 +717,15 @@ async function setVisibility(req, res, next) {
     const { branch_id: branchId, week } = req.body || {};
     if (!branchId || !week) return res.status(400).json({ error: 'יש לציין סניף ושבוע' });
 
+    // The branch arrives in the BODY. attachBranchScope validates ?branch and
+    // nothing else, so without this a branch manager could flip the switch
+    // that publishes another gan's month to that gan's parents. null scope is
+    // system_admin / accountant — every branch.
+    const scope = req.branchScope;
+    if (Array.isArray(scope) && !scope.map(String).includes(String(branchId))) {
+      return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
+    }
+
     // Only the switches actually sent are written, so a screen that shows one
     // of them cannot silently reset the other.
     const set = {

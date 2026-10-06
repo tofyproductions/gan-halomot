@@ -314,6 +314,28 @@ function authMiddleware(req, res, next) {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
 
+    /**
+     * Not a parent, whatever it was signed with.
+     *
+     * The staff side and the parent portal are kept apart by key derivation —
+     * PARENT_SECRET is HMAC(JWT_SECRET, …), so neither key verifies the
+     * other's tokens (middleware/parentAuth.js). That works, and it was the
+     * ONLY thing working: this function never looked at `typ`, so a token
+     * shaped like a parent's and signed with the staff key walked into every
+     * authenticate-only route in the system — and dozens of them carry no role
+     * gate, so a token with no role at all is enough.
+     *
+     * Nothing mints such a token today. The check is here because "nothing
+     * mints one" is a fact about the whole codebase that has to stay true
+     * forever, and one day somebody will simplify the derivation away or copy
+     * a claim between the two sign functions. parentAuthMiddleware refuses
+     * `typ !== 'parent'` for the same reason, from the other side; this is the
+     * mirror it was missing.
+     */
+    if (decoded.typ === 'parent' || decoded.typ === 'parent_setup') {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
     // A support session may look at everything and change nothing. Fixing a
     // customer's payroll while signed in as one of their managers leaves a
     // record saying the manager did it, and no support call is worth that —

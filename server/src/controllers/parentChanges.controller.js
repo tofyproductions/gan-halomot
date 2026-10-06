@@ -1,4 +1,4 @@
-const { ParentPortalChange, ParentAccount } = require('../models');
+const { ParentPortalChange, ParentAccount, Child } = require('../models');
 
 /**
  * What parents changed about their own children, for the staff to read.
@@ -158,6 +158,26 @@ async function approveAccess(req, res) {
     account.access_approved_by = req.user.id;
     account.access_approved_at = new Date();
     await account.save();
+
+    // And NOW the phone lands on the child's record.
+    //
+    // The portal deliberately does not write it when the second parent is
+    // named (see addSecondParent): parent2_phone is where findParent resolves
+    // a login destination from, so a parent who could write it could redirect
+    // somebody else's one-time code. Approving is the moment a member of staff
+    // has looked at the number on this very screen and agreed it is that
+    // person's — so it is the moment it becomes an address the system will
+    // send a code to.
+    //
+    // Matched on the ID number rather than on this row's child, so every year
+    // of every child this person was named on agrees, and so a second
+    // approval after a correction in the office still converges.
+    if (account.phone) {
+      await Child.updateMany(
+        { parent2_id_number: account.id_number },
+        { $set: { parent2_phone: account.phone } },
+      );
+    }
   }
 
   // Approving is also reading it. Asking for two taps on one decision only

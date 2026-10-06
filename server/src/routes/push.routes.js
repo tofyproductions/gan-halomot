@@ -8,7 +8,7 @@ router.use(authMiddleware);
 // Which device this person wants notifications on. Signed for the same reason
 // the read receipt is: it is about her phone, not about a gan.
 router.post('/register', allowSelfWrite('push'), c.registerStaff);
-router.post('/unregister', allowSelfWrite('push'), c.unregister);
+router.post('/unregister', allowSelfWrite('push'), c.unregisterStaff);
 router.post('/register-web', allowSelfWrite('push'), c.registerWeb);
 router.post('/unregister-web', allowSelfWrite('push'), c.unregisterWeb);
 router.get('/vapid-public-key', c.vapidPublicKey);

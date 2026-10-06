@@ -32,17 +32,30 @@ async function register(ownerField, ownerId, req, res) {
   res.json({ ok: true });
 }
 
-/** A logout, or a token the client is discarding — stop sending to it. */
-async function unregister(req, res) {
+/**
+ * A logout, or a token the client is discarding — stop sending to it.
+ *
+ * Scoped to the caller's own row, which it was not: the delete was keyed on
+ * the token alone and the handler was shared verbatim between the staff route
+ * and the parent one. Anyone holding another device's FCM token could silence
+ * it — a parent could switch off a branch manager's phone — and an FCM token
+ * is a long opaque string, not a secret anybody treats like one.
+ *
+ * A row that does not belong to the caller is simply not deleted, and the
+ * answer is the same `ok` either way: the client is discarding a token it will
+ * not use again, and whether a row existed is not its business.
+ */
+async function unregister(ownerField, ownerId, req, res) {
   const { fcm_token } = req.body || {};
   if (!fcm_token) return res.status(400).json({ error: 'fcm_token נדרש' });
-  await PushSubscription.deleteOne({ fcm_token });
+  await PushSubscription.deleteOne({ fcm_token, [ownerField]: ownerId });
   res.json({ ok: true });
 }
 
 exports.registerStaff = (req, res) => register('user_id', req.user.id, req, res);
 exports.registerParent = (req, res) => register('parent_id', req.parent.pid, req, res);
-exports.unregister = unregister;
+exports.unregisterStaff = (req, res) => unregister('user_id', req.user.id, req, res);
+exports.unregisterParent = (req, res) => unregister('parent_id', req.parent.pid, req, res);
 
 /** POST /api/push/register-web — upsert this browser's Web Push subscription. */
 async function registerWeb(req, res) {

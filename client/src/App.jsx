@@ -289,7 +289,13 @@ function AppRoutes() {
             by branch scope. */}
         <Route path="nursery" element={<NurseryBoard />} />
         <Route path="supplies" element={<SuppliesBoard />} />
-        <Route path="gantt/parents" element={<ParentVisibilityPanel />} />
+        {/* The switch that publishes a month to a branch's parents. Gated
+            here as well as on the server, so the screen is not offered to
+            somebody whose save will come back 403. */}
+        <Route
+          path="gantt/parents"
+          element={<ProtectedRoute tab="gantt"><ParentVisibilityPanel /></ProtectedRoute>}
+        />
         <Route path="photos" element={<PhotosManager />} />
         <Route
           path="announcements"

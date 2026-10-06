@@ -12,6 +12,7 @@ const giftService = require('../services/gift.service');
 const { findParent, contactFromChild, normalizeIdNumber } = require('../services/parentDirectory.service');
 const { EDITABLE, diffEditable, recordChange } = require('../services/parentChanges.service');
 const { normalizePhone, sendSms } = require('../services/sms.service');
+const { isValidIsraeliID } = require('../utils/id-generator');
 const otp = require('../services/parentOtp.service');
 
 /**
@@ -738,7 +739,7 @@ async function confirmPhoneChange(req, res) {
  * gan has a phone number for on paper and nothing for in the database. This
  * lets the parent who is already here fill that in.
  *
- * Two rules make it safe, and both are refusals rather than warnings.
+ * Four rules make it safe, and all four are refusals rather than warnings.
  *
  * It only ADDS. A second parent already on the record cannot be edited or
  * replaced from here: changing their phone would redirect the one-time codes
@@ -746,11 +747,32 @@ async function confirmPhoneChange(req, res) {
  * takeover the whole login design exists to prevent. Corrections go through
  * the office.
  *
- * And it grants nothing. The details land immediately — the gan needs a second
- * contact for a child today, not after a queue is read — but the account is
- * created unapproved, so nobody can see a child's records until the staff say
- * so. One parent naming a second person is not the same as the gan agreeing to
- * it, and a separated family is exactly where the difference matters.
+ * And it grants nothing. The account is created unapproved, so nobody can see a
+ * child's records until the staff say so. One parent naming a second person is
+ * not the same as the gan agreeing to it, and a separated family is exactly
+ * where the difference matters.
+ *
+ * THE PERSON NAMED MUST BE A STRANGER TO THIS SYSTEM. Both of the rules above
+ * guard the child's own record and neither guarded anybody else's, so the
+ * takeover walked in through the side door: name an ID number that belongs to
+ * another family's parent, and two things happened at once. The "unless they
+ * already have an account" branch below handed them this child without the
+ * gan — an account already approved stays approved — and, worse, the phone
+ * written into parent2_phone became an answer to "how do we reach this ID
+ * number". findParent resolves the login phone from whichever child row names
+ * the ID, so `/auth/start` for that person's ID sent THEIR one-time code to a
+ * number this parent typed. Activation after that is three screens, and it
+ * opens their children, not this one. So an ID that is already known here —
+ * as an account or as any other child's parent — is refused outright and sent
+ * to the office, where a human can see that two families are involved.
+ *
+ * AND THE PHONE WAITS. The name and the ID land on the record immediately —
+ * the gan needs a second contact for a child today, not after a queue is read
+ * — but the phone number is held on the pending account until the staff
+ * approve it, because parent2_phone is a login destination and not merely a
+ * contact detail. The gan sees the number the moment it is submitted, in the
+ * approvals queue (recordChange below carries it), which is the place where
+ * agreeing to it is a decision somebody made.
  */
 async function addSecondParent(req, res) {
   const own = await loadOwnChild(req);
@@ -763,7 +785,10 @@ async function addSecondParent(req, res) {
   const phone = normalizePhone(req.body?.phone);
 
   if (!name) return res.status(400).json({ error: 'יש להזין שם' });
-  if (idNumber.length < 8 || idNumber.length > 9) {
+  // Length AND checksum. The checksum is what makes a typo a typo rather than
+  // a stranger's real ID number, and isValidIsraeliID alone accepts five
+  // digits, which no adult's is.
+  if (idNumber.length < 8 || idNumber.length > 9 || !isValidIsraeliID(idNumber)) {
     return res.status(400).json({ error: 'מספר תעודת זהות אינו תקין' });
   }
   if (!phone) return res.status(400).json({ error: 'יש להזין מספר טלפון נייד תקין' });
@@ -782,27 +807,43 @@ async function addSecondParent(req, res) {
     });
   }
 
+  // Known here already? Then this is not one parent filling in the other, and
+  // it is not a decision the portal gets to make. Both answers are the same
+  // refusal, deliberately: distinguishing them would turn this form into a
+  // lookup for whether a given ID number is a parent at this gan.
+  const refuseKnown = () => res.status(409).json({
+    error: 'תעודת הזהות הזו מוכרת לנו כבר במערכת. להוספת ההורה יש לפנות לגן.',
+    code: 'KNOWN_ELSEWHERE',
+  });
+
+  const hasAccount = await ParentAccount.findOne({ id_number: idNumber }).select('_id').lean();
+  if (hasAccount) return refuseKnown();
+
+  // A parent of some other child. Their own children are not disqualifying —
+  // a parent naming themselves is caught above, and two parents of the same
+  // child reach here only on a child that has no second parent yet.
+  const alreadyParent = await findParent(idNumber);
+  if (alreadyParent) {
+    const mine = new Set(parent.children.map(c => String(c._id)));
+    if (alreadyParent.children.some(c => !mine.has(String(c._id)))) return refuseKnown();
+  }
+
   // Written onto every year of this child, so the record agrees with itself
-  // and a login resolves the same family whichever year it lands on.
+  // and a login resolves the same family whichever year it lands on. The phone
+  // is NOT written here — see the header. It lands on approval.
   await Child.updateMany(
     { _id: { $in: group.years.map(y => y._id) } },
-    { $set: { parent2_name: name, parent2_id_number: idNumber, parent2_phone: phone } }
+    { $set: { parent2_name: name, parent2_id_number: idNumber } }
   );
 
-  // Created unapproved — unless this person already has an account of their
-  // own, in which case they are an existing parent here and downgrading them
-  // would lock them out of a child they already have.
-  let invited = await ParentAccount.findOne({ id_number: idNumber });
-  if (!invited) {
-    invited = await ParentAccount.create({
-      id_number: idNumber,
-      full_name: name,
-      phone,
-      access_approved: false,
-      invited_by: account._id,
-      invited_at: new Date(),
-    });
-  }
+  const invited = await ParentAccount.create({
+    id_number: idNumber,
+    full_name: name,
+    phone,
+    access_approved: false,
+    invited_by: account._id,
+    invited_at: new Date(),
+  });
 
   await recordChange({
     account,
@@ -922,6 +963,45 @@ async function childPhotos(req, res) {
 }
 
 /**
+ * The photograph at :photoId, if this family may see it at all.
+ *
+ * `childPhotos` above is careful about which photographs it hands out, and the
+ * actions below were not: they took the id straight from the URL. A parent
+ * legitimately holds dozens of real photograph ids from their own gallery, ids
+ * are sequential enough to walk, and "זה כן הילד שלי" WRITES — it put the child
+ * on the photograph, which then returned it, with a signed URL, through the
+ * `mine` stream. One request with a neighbouring id was another branch's
+ * photograph of somebody else's children, and from there it was giftable.
+ *
+ * So the same two streams that decide what a parent may SEE now decide what
+ * they may act on, and nothing else is reachable: their own child's
+ * photographs across every year, and this week of their own classroom's staff
+ * photographs. Resolved as one query rather than checked afterwards, for the
+ * reason `childPhotos` gives — a photograph that reaches the wrong family
+ * cannot be recalled.
+ *
+ * A 404, like `loadOwnChild`: "forbidden" would confirm the id exists.
+ */
+async function visiblePhoto(own, photoId) {
+  // Guarded before the query: a malformed id is a CastError, i.e. a 500.
+  if (!/^[0-9a-fA-F]{24}$/.test(String(photoId || ''))) return null;
+
+  const childIds = own.group.years.map(y => y._id);
+  const classroomId = own.child.classroom_id?._id || own.child.classroom_id || null;
+
+  const since = new Date();
+  since.setDate(since.getDate() - CLASSROOM_WINDOW_DAYS);
+  const sinceKey = nursery.todayKey(since);
+
+  const reachable = [{ child_ids: { $in: childIds } }];
+  if (classroomId) {
+    reachable.push({ classroom_id: classroomId, source: 'staff', date: { $gte: sinceKey } });
+  }
+
+  return Photo.findOne({ _id: photoId, $or: reachable }).select('_id').lean();
+}
+
+/**
  * A parent's three answers about who is in a photograph.
  *
  * POST .../photos/:photoId/faces  { action, face_index }
@@ -995,8 +1075,11 @@ async function decidePhotoFace(req, res) {
   const own = await loadOwnChild(req);
   if (!own) return res.status(404).json({ error: 'לא נמצא' });
 
+  // Before anything else: is this photograph one this family may touch?
+  const photo = await visiblePhoto(own, req.params.photoId);
+  if (!photo) return res.status(404).json({ error: 'לא נמצא' });
+
   const childIds = own.group.years.map(y => y._id);
-  const { photoId } = req.params;
   const { action } = req.body || {};
   const faceIndex = Number(req.body?.face_index);
 
@@ -1004,7 +1087,7 @@ async function decidePhotoFace(req, res) {
     parentId: own.account._id,
     childId: own.child._id,
     childIds,
-    photoId,
+    photoId: photo._id,
     faceIndex,
   };
 
@@ -1250,7 +1333,11 @@ async function childSupplies(req, res) {
   const { ChildSupplies } = require('../models');
   const suppliesService = require('../services/supplies');
 
-  const row = await ChildSupplies.findOne({ child_id: own.child?._id || req.params.childId }).lean();
+  // own.child only. The fallback to the raw parameter that used to be here was
+  // harmless — loadOwnChild had already proved it was one of this parent's own
+  // children — but an unscoped id in a query reads as a hole whether or not it
+  // is one, and the next person to copy this line will not know the difference.
+  const row = await ChildSupplies.findOne({ child_id: own.child._id }).lean();
   res.json({
     missing: (row?.missing || []).map(suppliesService.decorate),
     note: suppliesService.CATALOGUE_NOTE,
