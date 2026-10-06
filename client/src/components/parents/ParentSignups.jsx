@@ -11,6 +11,7 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useAuth } from '../../hooks/useAuth';
+import { ganMarkerByName } from '../../utils/branchColors';
 import LoadingSpinner from '../shared/LoadingSpinner';
 
 /**
@@ -75,6 +76,38 @@ const csvCell = (v) => {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
+/**
+ * The branch, in the colour it wears everywhere else in the application.
+ *
+ * Scanning 333 rows across four gans for the one family you meant is reading,
+ * and reading is slow; a colour is seen. The marker comes from the shared
+ * palette rather than from anything local, so משה דיין is the same orange
+ * here as it is in the header and on the attendance board — a branch that
+ * changes colour between screens is a branch nobody learns.
+ *
+ * The name is shortened because every one of them starts "כפר סבא - ", and a
+ * column where four values share a prefix is a column that distinguishes
+ * nothing. The full name stays in the tooltip and in the export.
+ */
+const shortBranch = (name) => String(name || '').split(' - ').pop().trim();
+
+function BranchChip({ name }) {
+  const mk = ganMarkerByName(name);
+  return (
+    <Tooltip title={name || ''}>
+      <Chip
+        size="small"
+        label={shortBranch(name)}
+        sx={{
+          bgcolor: mk?.strip || 'grey.300',
+          color: mk?.stripText || 'text.primary',
+          fontWeight: 700,
+        }}
+      />
+    </Tooltip>
+  );
+}
+
 export default function ParentSignups() {
   const { user } = useAuth();
   const [data, setData] = useState(null);
@@ -100,7 +133,7 @@ export default function ParentSignups() {
   const rows = useMemo(() => {
     const all = data?.parents || [];
     const q = search.trim();
-    return all.filter((p) => {
+    const kept = all.filter((p) => {
       if (filter === 'needs_chasing' && p.state !== 'not_signed_up') return false;
       if (filter === 'blocked' && p.state !== 'blocked') return false;
       if (filter === 'active' && p.state !== 'active') return false;
@@ -108,7 +141,17 @@ export default function ParentSignups() {
       const hay = `${p.name} ${p.id_number} ${p.phone || ''} ${p.children.map(c => c.name).join(' ')}`;
       return hay.includes(q);
     });
-  }, [data, filter, search]);
+
+    // Across every gan the list is hundreds of rows, and the office works one
+    // gan at a time — so the branches come grouped rather than interleaved.
+    // Looking at a single branch there is nothing to group, and alphabetical
+    // by parent is what you want for finding somebody.
+    if (branch !== 'all') return kept;
+    return [...kept].sort((a, b) => {
+      const byBranch = (a.branches[0] || '').localeCompare(b.branches[0] || '', 'he');
+      return byBranch || (a.name || '').localeCompare(b.name || '', 'he');
+    });
+  }, [data, filter, search, branch]);
 
   const exportCsv = () => {
     const lines = [['מצב', 'תעודת זהות', 'נייד', 'שם ההורה', 'ילדים', 'כיתה', 'סניף', 'סיבת חסימה']
@@ -235,6 +278,7 @@ export default function ParentSignups() {
               <TableCell>תעודת זהות</TableCell>
               <TableCell>ילדים</TableCell>
               <TableCell>כיתה</TableCell>
+              <TableCell>סניף</TableCell>
               <TableCell align="center">וואטסאפ</TableCell>
             </TableRow>
           </TableHead>
@@ -265,6 +309,14 @@ export default function ParentSignups() {
                   </TableCell>
                   <TableCell>{p.children.map(c => c.name).join(', ')}</TableCell>
                   <TableCell>{p.classrooms.join(', ')}</TableCell>
+                  <TableCell>
+                    {/* A family with children in two gans gets two chips —
+                        it happens, and showing only the first would be a
+                        quieter kind of wrong than showing none. */}
+                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                      {p.branches.map(b => <BranchChip key={b} name={b} />)}
+                    </Stack>
+                  </TableCell>
                   <TableCell align="center">
                     {p.phone ? (
                       <Tooltip title={p.state === 'active' ? 'כבר נכנס — אפשר לשלוח בכל זאת' : 'שלח הזמנה אישית'}>
@@ -285,7 +337,7 @@ export default function ParentSignups() {
             })}
             {!rows.length && (
               <TableRow>
-                <TableCell colSpan={7} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                <TableCell colSpan={8} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                   אין הורים להצגה
                 </TableCell>
               </TableRow>
