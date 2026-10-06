@@ -11,7 +11,22 @@ const path = require('path');
 
 const SERVER = '/Users/amitkohta/Desktop/Claude Code Apps/אפליקציות/gan-halomot/server';
 const puppeteer = require(path.join(SERVER, 'node_modules/puppeteer-core'));
+const QRCode = require('qrcode');
 const LOGO = fs.readFileSync(path.join(__dirname, 'logo.b64'), 'utf8');
+
+/**
+ * The address as a square somebody points a camera at.
+ *
+ * A printed URL is a thing to be retyped, and this one has a hyphen, a dot
+ * nobody expects and a path — on a page that is otherwise Hebrew, where the
+ * reader has to switch keyboards to type it. The code is high-correction so it
+ * still scans off a photocopy pinned to a noticeboard, and black on white
+ * because a tinted one is what phone cameras fail on.
+ */
+const qrSvg = (text) => QRCode.toString(text, {
+  type: 'svg', errorCorrectionLevel: 'H', margin: 0,
+  color: { dark: '#2B2119', light: '#FFFFFF' },
+});
 
 function findChrome() {
   const base = `${process.env.HOME}/.cache/puppeteer/chrome`;
@@ -55,7 +70,7 @@ const CSS = `
      millimetre over — so a one-page handout printed as two, the second
      holding nothing but the footer. */
   .page {
-    width: 210mm; height: 297mm; overflow: hidden;
+    width: 210mm; height: 297mm;
     padding: 13mm 15mm 10mm;
     display: flex; flex-direction: column;
     background:
@@ -85,7 +100,7 @@ const CSS = `
 
   h2 {
     font-size: 13.5pt; font-weight: 700;
-    margin: 0 0 4mm; padding-bottom: 2mm;
+    margin: 0 0 3.2mm; padding-bottom: 1.6mm;
     border-bottom: 1.5pt solid var(--brand);
     display: inline-block;
   }
@@ -119,16 +134,25 @@ const CSS = `
     border-radius: 2mm; padding: 0.4mm 1.6mm; font-size: 9.6pt;
   }
 
-  .link-card {
-    text-align: center;
+  /* The scan block: the square big enough to read across a corridor, the
+     address beside it in small type for anyone without a working camera. */
+  .scan {
+    display: flex; align-items: center; gap: 6mm;
     background: var(--brand); color: #fff;
-    border-radius: 4mm; padding: 4mm 5mm; margin: 2mm 0 6mm;
+    border-radius: 4mm; padding: 5mm 6mm; margin: 0 0 5mm;
   }
-  .link-card .label { font-size: 10pt; opacity: 0.9; margin-bottom: 1.5mm; }
-  .link-card .url {
-    direction: ltr; unicode-bidi: isolate;
+  .scan .qr {
+    flex: 0 0 auto; width: 32mm; height: 32mm;
+    background: #fff; border-radius: 2.5mm; padding: 2mm;
+  }
+  .scan .qr svg { width: 100%; height: 100%; display: block; }
+  .scan .txt { flex: 1 1 auto; }
+  .scan .big { font-size: 14pt; font-weight: 700; line-height: 1.35; margin-bottom: 1.5mm; }
+  .scan .small { font-size: 9.6pt; opacity: 0.92; line-height: 1.55; }
+  .scan .url {
+    direction: ltr; unicode-bidi: isolate; display: inline-block;
     font-family: "SF Mono", Menlo, monospace;
-    font-size: 11.5pt; font-weight: 700; word-break: break-all;
+    font-size: 9.2pt; margin-top: 1.5mm; opacity: 0.92;
   }
 
   .note {
@@ -143,8 +167,8 @@ const CSS = `
   ul.plain { padding-inline-start: 5mm; margin: 0 0 5mm; font-size: 10.6pt; line-height: 1.8; }
   ul.plain li { margin-bottom: 1.5mm; }
 
-  table { border-collapse: collapse; width: 100%; font-size: 10.3pt; margin-bottom: 5mm; }
-  th, td { border: 1pt solid var(--line); padding: 2.6mm 3.5mm; text-align: right; vertical-align: top; }
+  table { border-collapse: collapse; width: 100%; font-size: 10.2pt; margin-bottom: 4mm; }
+  th, td { border: 1pt solid var(--line); padding: 2.2mm 3.2mm; text-align: right; vertical-align: top; }
   th { background: var(--ground); font-weight: 700; }
 
   footer {
@@ -171,28 +195,28 @@ const foot = (right) => `<footer><span>${right}</span><span>גן החלומות 
 const PORTAL = 'gan-halomot.onrender.com/parents';
 const PLAY = 'bit.ly — או חיפוש "גן החלומות" בחנות';
 
-const parents = page(`
+const parents = (qr) => page(`
 ${head('התחדשנו באפליקציה', 'כל מה שקורה לילד/ה שלכם בגן — במקום אחד, בטלפון')}
 
 <div class="lead">
   מהיום אפשר לראות את <strong>היום של הילד/ה בגן</strong> — מה אכל/ה, מתי ישן/ה,
   איך עבר היום — וגם תמונות, הודעות מהגן, תשלומים ודיווח על היעדרות.
-  הכניסה היא <strong>אישית ומאובטחת</strong>, וכל הורה רואה רק את הילדים שלו.
+  הכניסה <strong>אישית ומאובטחת</strong>, וכל הורה רואה רק את הילדים שלו.
 </div>
 
-<div class="link-card">
-  <div class="label">נכנסים מהטלפון לכתובת</div>
-  <div class="url">${PORTAL}</div>
-</div>
-
-<h2>איך נכנסים — 4 צעדים</h2>
-<ol class="steps">
-  <li>
-    <div class="t">פותחים את הכתובת שלמעלה בטלפון</div>
-    <div class="d">
-      עובד בכל טלפון, אייפון ואנדרואיד, בלי להתקין כלום.
+<div class="scan">
+  <div class="qr">${qr}</div>
+  <div class="txt">
+    <div class="big">סורקים את הקוד<br>עם מצלמת הטלפון</div>
+    <div class="small">
+      פותחים מצלמה, מכוונים לריבוע, ולוחצים על הקישור שקופץ.
+      <span class="url">${PORTAL}</span>
     </div>
-  </li>
+  </div>
+</div>
+
+<h2>ואז — 3 צעדים</h2>
+<ol class="steps">
   <li>
     <div class="t">מזינים תעודת זהות ולוחצים "כניסה ראשונה"</div>
     <div class="d">
@@ -202,22 +226,20 @@ ${head('התחדשנו באפליקציה', 'כל מה שקורה לילד/ה ש
   </li>
   <li>
     <div class="t">מקלידים את הקוד ובוחרים סיסמה</div>
-    <div class="d">
-      בפעמים הבאות נכנסים עם תעודת זהות וסיסמה בלבד.
-    </div>
+    <div class="d">בפעמים הבאות נכנסים עם תעודת זהות וסיסמה בלבד.</div>
   </li>
   <li>
     <div class="t">מוסיפים למסך הבית — וזה נראה כמו אפליקציה</div>
     <div class="d">
-      <strong>אייפון:</strong> כפתור השיתוף למטה ← "הוספה למסך הבית".<br>
-      <strong>אנדרואיד:</strong> שלוש הנקודות למעלה ← "הוספה למסך הבית".
+      <strong>אייפון:</strong> כפתור השיתוף ← "הוספה למסך הבית".
+      <strong>אנדרואיד:</strong> שלוש הנקודות ← "הוספה למסך הבית".
     </div>
   </li>
 </ol>
 
 <div class="note">
   <span class="h">לא קיבלתם קוד?</span>
-  סימן שהמספר שרשום אצלנו בגן אינו מעודכן, או שהוקלדה תעודת זהות של הילד/ה
+  סימן שהמספר שרשום אצלנו אינו מעודכן, או שהוקלדה תעודת זהות של הילד/ה
   במקום של ההורה. דברו איתנו במשרד ונסדר את זה בדקה.
 </div>
 
@@ -225,12 +247,6 @@ ${head('התחדשנו באפליקציה', 'כל מה שקורה לילד/ה ש
   <span class="h">חשוב לדעת</span>
   המערכת <strong>לא שולחת התראות</strong> על עדכונים חדשים. נמשיך לעדכן אתכם
   בקבוצת הוואטסאפ כרגיל — זה המקום לראות בו את הפרטים, לא תחליף להודעות.
-</div>
-
-<div class="note">
-  <span class="h">ומה עם אפליקציה מהחנות?</span>
-  יש לנו אפליקציה בגוגל פליי ובקרוב גם באפל. בינתיים הכניסה מהכתובת
-  שלמעלה היא המעודכנת ביותר — נעדכן אתכם כשכדאי להחליף.
 </div>
 
 ${foot('הוראות התחברות להורים')}
@@ -286,8 +302,8 @@ ${head('הלוח היומי במערכת', 'מה משתנה בתינוקייה, 
 
 <div class="note">
   <span class="h">ההורים ממלאים את "הבוקר בבית"</span>
-  בדיוק כמו בלוח הישן — מה אכל/ה בבית ומתי קם/ה. זה מופיע לכן בכרטיס הילד/ה.
-  הם יכולים למלא <strong>רק על היום עצמו</strong>, לא על ימים שעברו.
+  כמו בלוח הישן — מה אכל/ה בבית ומתי קם/ה. זה מופיע לכן בכרטיס הילד/ה,
+  ורק על היום עצמו, לא על ימים שעברו.
 </div>
 
 <div class="note">
@@ -309,26 +325,45 @@ const doc = (title, body) => `<!doctype html>
 <html lang="he" dir="rtl"><meta charset="utf-8"><title>${title}</title>
 <style>${CSS}</style><body>${body}</body></html>`;
 
+/**
+ * Each handout is one sheet, and the check is on the PDF rather than on the
+ * eye: these were clipped once already — an exact page height with hidden
+ * overflow silently cut the last paragraph off, and a page that LOOKS finished
+ * is exactly the failure that reaches a noticeboard. Overflow now spills to a
+ * second page, which is loud, and this counts them.
+ */
+const pageCount = (file) => {
+  const buf = fs.readFileSync(file);
+  return (buf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
+};
+
 (async () => {
+  const qr = await qrSvg(`https://${PORTAL}`);
+
   const browser = await puppeteer.launch({
     executablePath: findChrome(), headless: true,
     args: ['--no-sandbox', '--font-render-hinting=none'],
   });
+  let bad = 0;
   try {
     const jobs = [
-      ['הורים — איך נכנסים לאפליקציה.pdf', doc('הורים — התחברות', parents)],
+      ['הורים — איך נכנסים לאפליקציה.pdf', doc('הורים — התחברות', parents(qr))],
       ['צוות — הלוח היומי במערכת.pdf', doc('צוות — הלוח היומי', staff)],
     ];
     for (const [name, html] of jobs) {
+      const file = path.join(__dirname, name);
       const p = await browser.newPage();
       await p.setContent(html, { waitUntil: 'load', timeout: 60000 });
       await p.pdf({
-        path: path.join(__dirname, name),
-        format: 'A4', printBackground: true,
+        path: file, format: 'A4', printBackground: true,
         margin: { top: 0, bottom: 0, left: 0, right: 0 },
       });
       await p.close();
-      console.log(`✅ ${name}`);
+
+      const pages = pageCount(file);
+      if (pages === 1) console.log(`✅ ${name}`);
+      else { bad++; console.log(`❌ ${name} — ${pages} עמודים, התוכן גולש`); }
     }
   } finally { await browser.close(); }
+  if (bad) process.exit(1);
 })().catch((e) => { console.error(`❌ ${e.message}`); process.exit(1); });
