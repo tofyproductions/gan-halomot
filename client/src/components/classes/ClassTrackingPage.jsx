@@ -14,74 +14,103 @@ import { toast } from 'react-toastify';
 import api, { apiError } from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
 import { useConfirm } from '../shared/ConfirmProvider';
+import ProvidersDialog from './ProvidersDialog';
 
 const DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי'];
 const CATEGORIES = ['תינוקייה', 'צעירים', 'בוגרים', 'קבוצה'];
 const STATUS = {
   scheduled: { label: 'מתוכנן', color: 'default' },
   occurred: { label: 'התקיים', color: 'success' },
+  partial: { label: 'חלקית', color: 'warning' },
   no_show: { label: 'לא הגיע', color: 'error' },
   postponed: { label: 'נדחה', color: 'warning' },
 };
 const thisMonth = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' }).slice(0, 7);
 const ils = (n) => `₪${Math.round(Number(n) || 0).toLocaleString('he-IL')}`;
 
-// ---------- Providers manager (ספקי גנים) ----------
-function ProvidersDialog({ open, onClose }) {
-  const confirm = useConfirm();
-  const [providers, setProviders] = useState([]);
-  const [draft, setDraft] = useState({ name: '', field: '', phone: '', email: '' });
-  const load = () => api.get('/classes/providers').then(r => setProviders(r.data.providers || [])).catch(() => {});
-  useEffect(() => { if (open) { load(); setDraft({ name: '', field: '', phone: '', email: '' }); } }, [open]);
-  const [adding, setAdding] = useState(false);
-  const add = () => {
-    if (adding) return; // double-tap = two identical suppliers
-    if (!draft.name.trim()) return toast.error('שם ספק נדרש');
-    setAdding(true);
-    api.post('/classes/providers', draft).then(() => { toast.success('נוסף'); setDraft({ name: '', field: '', phone: '', email: '' }); load(); })
-      .catch(e => toast.error(e.response?.data?.error || 'שגיאה'))
-      .finally(() => setAdding(false));
-  };
-  const del = async (p) => {
-    if (!(await confirm({ title: 'הסרת ספק', message: `להסיר את "${p.name}"?` }))) return;
-    api.delete(`/classes/providers/${p._id}`).then(() => load()).catch(err => toast.error(apiError(err, 'המחיקה נכשלה')));
-  };
+
+// ---------- What each provider is owed this month ----------
+/**
+ * Grouped by provider, not by class, because that is what gets invoiced: one
+ * instructor who takes three groups at two rates sends one bill. The per-group
+ * rows stay underneath for the month somebody questions in February — which is
+ * exactly why the old spreadsheet kept its blocks above the summary.
+ */
+function PaymentSummary({ branchId, month, refreshKey }) {
+  const [data, setData] = useState(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!branchId) return;
+    api.get('/classes/payment-summary', { params: { branch: branchId, month } })
+      .then(r => setData(r.data)).catch(() => setData(null));
+  }, [branchId, month, refreshKey]);
+
+  if (!data || !(data.providers || []).length) return null;
+
   return (
-    <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><PeopleIcon color="primary" /> ספקי גנים</DialogTitle>
-      <DialogContent>
-        <Stack spacing={2} sx={{ mt: 1 }}>
-          {providers.length > 0 && (
-            <Table size="small">
-              <TableHead><TableRow><TableCell>שם</TableCell><TableCell>תחום</TableCell><TableCell>טלפון</TableCell><TableCell /></TableRow></TableHead>
-              <TableBody>
-                {providers.map(p => (
-                  <TableRow key={p._id}>
-                    <TableCell sx={{ fontWeight: 600 }}>{p.name}</TableCell>
-                    <TableCell>{p.field || '—'}</TableCell>
-                    <TableCell>{p.phone || '—'}</TableCell>
-                    <TableCell align="left"><IconButton size="small" color="error" onClick={() => del(p)}><DeleteIcon fontSize="small" /></IconButton></TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-          <Divider />
-          <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>הוספת ספק</Typography>
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            <TextField size="small" label="שם" value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} />
-            <TextField size="small" label="תחום" value={draft.field} onChange={e => setDraft(d => ({ ...d, field: e.target.value }))} />
-            <TextField size="small" label="טלפון" value={draft.phone} onChange={e => setDraft(d => ({ ...d, phone: e.target.value }))} />
-            <Button variant="contained" startIcon={<AddIcon />} onClick={add} disabled={adding}>הוסף</Button>
+    <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+      <Stack direction="row" alignItems="center" spacing={1}>
+        <Typography sx={{ fontWeight: 700 }}>לתשלום בחודש זה</Typography>
+        <Box sx={{ flex: 1 }} />
+        <Typography sx={{ fontWeight: 700 }}>{ils(data.grand_total)}</Typography>
+        <Button size="small" onClick={() => setOpen(o => !o)}>{open ? 'סגור' : 'פירוט'}</Button>
+      </Stack>
+
+      {open && (
+        <Box sx={{ mt: 1.5 }}>
+          {data.providers.map(p => (
+            <Box key={p.provider_id || p.provider_name} sx={{ mb: 2 }}>
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Typography sx={{ fontWeight: 600 }}>{p.provider_name}</Typography>
+                <Chip size="small" variant="outlined"
+                  label={p.vat_mode === 'registered' ? 'עוסק מורשה' : 'פטור'} />
+                <Box sx={{ flex: 1 }} />
+                <Typography variant="body2" color="text.secondary">
+                  {p.vat ? `${ils(p.subtotal)} + מע״מ ${ils(p.vat)} = ` : ''}
+                </Typography>
+                <Typography sx={{ fontWeight: 700 }}>{ils(p.total)}</Typography>
+              </Stack>
+              {/* Seven columns do not fit a phone; scroll the table, not the page. */}
+              <Box sx={{ overflowX: 'auto' }}>
+              <Table size="small" sx={{ minWidth: 560 }}>
+                <TableHead><TableRow>
+                  <TableCell>קבוצה</TableCell><TableCell>חוג</TableCell>
+                  <TableCell align="center">התקיימו</TableCell>
+                  <TableCell align="center">חלקית</TableCell>
+                  <TableCell align="center">לא הגיע</TableCell>
+                  <TableCell align="center">נדחו</TableCell>
+                  <TableCell align="left">סכום</TableCell>
+                </TableRow></TableHead>
+                <TableBody>
+                  {p.programs.map(g => (
+                    <TableRow key={g.program_id}>
+                      <TableCell>{g.classroom_category || '—'}</TableCell>
+                      <TableCell>{g.program_name}</TableCell>
+                      <TableCell align="center">{g.occurred || 0}</TableCell>
+                      <TableCell align="center">{g.partial || 0}</TableCell>
+                      <TableCell align="center">{g.no_show || 0}</TableCell>
+                      <TableCell align="center">{g.postponed || 0}</TableCell>
+                      <TableCell align="left">{ils(g.amount)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              </Box>
+            </Box>
+          ))}
+          <Divider sx={{ my: 1 }} />
+          <Stack direction="row" spacing={2} justifyContent="flex-start">
+            <Typography variant="body2">לפני מע״מ: {ils(data.grand_subtotal)}</Typography>
+            <Typography variant="body2">מע״מ: {ils(data.grand_vat)}</Typography>
+            <Typography variant="body2" sx={{ fontWeight: 700 }}>סה״כ: {ils(data.grand_total)}</Typography>
           </Stack>
-        </Stack>
-      </DialogContent>
-      <DialogActions><Button onClick={onClose}>סגור</Button></DialogActions>
-    </Dialog>
+        </Box>
+      )}
+    </Paper>
   );
 }
 
-// ---------- Program create/edit dialog ----------
 function ProgramDialog({ open, program, branchId, providers, onClose, onSaved }) {
   const [d, setD] = useState({});
   useEffect(() => {
@@ -256,6 +285,8 @@ export default function ClassTrackingPage() {
         <Button variant="outlined" startIcon={<PeopleIcon />} onClick={() => setProvidersOpen(true)}>ספקי גנים</Button>
         <Button variant="contained" startIcon={<AddIcon />} onClick={() => setProgDlg({ open: true, program: null })}>חוג חדש</Button>
       </Stack>
+
+      <PaymentSummary branchId={selectedBranch} month={month} refreshKey={refreshKey} />
 
       {loading ? (
         <Box sx={{ textAlign: 'center', py: 4 }}><CircularProgress /></Box>
