@@ -12,12 +12,14 @@ import AutorenewIcon from '@mui/icons-material/Autorenew';
 import DescriptionIcon from '@mui/icons-material/Description';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import NotificationsIcon from '@mui/icons-material/NotificationsNone';
+import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import { toast } from 'react-toastify';
 import api, { openApiFile, apiError, UPLOAD_TIMEOUT_MS } from '../../api/client';
 import { FilePickButton, BusyButton } from '../shared/UploadControls';
 import { useAuth } from '../../hooks/useAuth';
 import { useConfirm } from '../shared/ConfirmProvider';
 import { pluralDays } from '../../utils/ilDates';
+import DriveImportDialog from './DriveImportDialog';
 
 /**
  * אישורי מעון — the papers each branch operates under, and when they run out.
@@ -51,6 +53,7 @@ export default function BranchCertificationsPage() {
   const [form, setForm] = useState(null);        // {mode:'create'|'edit'|'renew', id?, ...EMPTY_FORM}
   const [saving, setSaving] = useState(false);
   const [recipients, setRecipients] = useState(null); // {emails: 'a, b'}
+  const [driveOpen, setDriveOpen] = useState(false);
 
   const isOffice = ['system_admin', 'accountant'].includes(user?.role);
 
@@ -176,6 +179,14 @@ export default function BranchCertificationsPage() {
           {isOffice && (
             <Tooltip title="נמעני ההתראות במייל">
               <IconButton onClick={openRecipients}><NotificationsIcon /></IconButton>
+            </Tooltip>
+          )}
+          {isOffice && (
+            <Tooltip title="קורא את שמות הקבצים בתיקיות הדרייב ומציע מה הם. שום דבר לא נכנס בלי אישור שלך.">
+              <Button variant="outlined" startIcon={<CloudDownloadIcon />}
+                onClick={() => setDriveOpen(true)}>
+                ייבוא מהדרייב
+              </Button>
             </Tooltip>
           )}
           <Button variant="contained" startIcon={<AddIcon />}
@@ -377,6 +388,14 @@ export default function BranchCertificationsPage() {
           <Button variant="contained" onClick={saveRecipients}>שמירה</Button>
         </DialogActions>
       </Dialog>
+      <DriveImportDialog
+        open={driveOpen}
+        onClose={() => setDriveOpen(false)}
+        branches={branches}
+        certTypes={certTypes}
+        onImported={load}
+      />
+
     </Box>
   );
 }
