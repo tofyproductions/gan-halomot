@@ -40,6 +40,20 @@ const rateLabel = (rate, vatMode) => vatMode === 'registered'
   ? `${ils(withVat(rate, vatMode))}/מפגש כולל מע״מ`
   : `${ils(rate)}/מפגש`;
 
+/**
+ * Each program's color — the same tint its cell wears on the gantt, so a class
+ * is the same color wherever it appears.
+ */
+const progColor = (p) => p?.color || '#fce7f3';
+const ColorDot = ({ color }) => (
+  <Box component="span" sx={{
+    width: 13, height: 13, borderRadius: '50%', bgcolor: color,
+    border: '1px solid rgba(0,0,0,0.25)', display: 'inline-block', flexShrink: 0,
+  }} />
+);
+/** The chips worth a glance — group, day, hour — filled in the class's color and bold. */
+const boldChip = (color) => ({ bgcolor: color, fontWeight: 700, border: '1px solid rgba(0,0,0,0.12)' });
+
 
 // ---------- What each provider is owed this month ----------
 /**
@@ -439,6 +453,7 @@ export default function ClassTrackingPage() {
             <Accordion key={g.key} defaultExpanded={providerGroups.length <= 3} sx={{ mb: 1 }}>
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                 <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ width: '100%' }}>
+                  {single && <ColorDot color={progColor(first)} />}
                   <Typography sx={{ fontWeight: 700 }}>{g.provider?.name || first.name}</Typography>
                   {g.provider && (
                     <Chip size="small" variant="outlined"
@@ -449,13 +464,18 @@ export default function ClassTrackingPage() {
                     <>
                       {first.instructor_name && <Chip size="small" label={first.instructor_name} />}
                       {/* "תינוקייה + צעירים" when they sit together — one meeting. */}
-                      {catOf(first) && <Chip size="small" variant="outlined" label={catOf(first)} />}
-                      {first.default_day != null && <Chip size="small" variant="outlined"
-                        label={`יום ${DAY_NAMES[first.default_day]}${first.default_time ? ` ${first.default_time}` : ''}`} />}
+                      {catOf(first) && <Chip size="small" sx={boldChip(progColor(first))} label={catOf(first)} />}
+                      {first.default_day != null && <Chip size="small" sx={boldChip(progColor(first))}
+                        label={`יום ${DAY_NAMES[first.default_day]}`} />}
+                      {first.default_time && <Chip size="small" sx={boldChip(progColor(first))} label={first.default_time} />}
                       <Chip size="small" variant="outlined" label={rateLabel(first.default_rate, vatMode)} />
                     </>
                   ) : (
-                    <Chip size="small" variant="outlined" label={`${g.programs.length} קבוצות`} />
+                    <>
+                      <Chip size="small" variant="outlined" label={`${g.programs.length} קבוצות`} />
+                      {/* One dot per group — the same colors waiting inside. */}
+                      {g.programs.map(p => <ColorDot key={p._id} color={progColor(p)} />)}
+                    </>
                   )}
                   <Box sx={{ flex: 1 }} />
                   {/* The month's figure, same one as the accountant's table above. */}
@@ -479,15 +499,17 @@ export default function ClassTrackingPage() {
               </AccordionSummary>
               <AccordionDetails>
                 {g.programs.map((p, i) => (
-                  <Box key={p._id}>
-                    {i > 0 && <Divider sx={{ my: 2 }} />}
+                  <Box key={p._id}
+                    sx={single ? {} : { borderInlineStart: `4px solid ${progColor(p)}`, paddingInlineStart: 1.5, mt: i > 0 ? 2 : 0 }}>
                     {!single && (
                       <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 1 }}>
+                        <ColorDot color={progColor(p)} />
                         <Typography sx={{ fontWeight: 600 }}>{p.name}</Typography>
                         {p.instructor_name && <Chip size="small" label={p.instructor_name} />}
-                        {catOf(p) && <Chip size="small" variant="outlined" label={catOf(p)} />}
-                        {p.default_day != null && <Chip size="small" variant="outlined"
-                          label={`יום ${DAY_NAMES[p.default_day]}${p.default_time ? ` ${p.default_time}` : ''}`} />}
+                        {catOf(p) && <Chip size="small" sx={boldChip(progColor(p))} label={catOf(p)} />}
+                        {p.default_day != null && <Chip size="small" sx={boldChip(progColor(p))}
+                          label={`יום ${DAY_NAMES[p.default_day]}`} />}
+                        {p.default_time && <Chip size="small" sx={boldChip(progColor(p))} label={p.default_time} />}
                         <Chip size="small" variant="outlined" label={rateLabel(p.default_rate, vatMode)} />
                         <Box sx={{ flex: 1 }} />
                         <IconButton size="small" color="error" onClick={() => delProgram(p)}>
