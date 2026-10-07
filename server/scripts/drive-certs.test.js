@@ -164,6 +164,39 @@ const eq = (a, b, label) => ok(a === b, label, `קיבלנו ${JSON.stringify(a)
   eq(r3.status, 503, 'הסריקה אומרת שהגישה לא מוגדרת, ולא קורסת');
   eq((await r3.json()).code, 'DRIVE_NOT_CONFIGURED', 'עם קוד שאפשר לפעול לפיו');
 
+  // -------------------------------------- a back-office role, based on a teacher
+  console.log('\nתפקיד בק-אופיס שמבוסס על גננת');
+  const asUser = (claims) => {
+    const t = jwt.sign({ id: String(new mongoose.Types.ObjectId()), ...claims },
+      process.env.JWT_SECRET, { expiresIn: '1h' });
+    return async (method, path, body) => {
+      const r = await fetch(base + path, {
+        method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t}` },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      return { status: r.status, body: await r.json().catch(() => ({})) };
+    };
+  };
+  const plainTeacher = asUser({ role: 'teacher', branch_id: String(ks._id) });
+  eq((await plainTeacher('GET', '/')).status, 403, 'גננת רגילה — אין גישה');
+
+  const readerOnly = asUser({ role: 'teacher', branch_id: String(ks._id),
+    role_tab_add: ['branch_certifications'] });
+  eq((await readerOnly('GET', '/')).status, 200,
+    'מי שקיבלה את הטאב רואה את המסך — זה הבאג של עינת');
+  eq((await readerOnly('POST', '/', { branch_id: String(hz._id), cert_type: 'sanitarian' })).status, 403,
+    'אבל בלי הרשאת כתיבה לא משנה כלום');
+
+  const filer = asUser({ role: 'teacher', branch_id: String(ks._id),
+    role_tab_add: ['branch_certifications', 'branch_certifications_write'] });
+  const seen = await filer('GET', '/');
+  eq(seen.status, 200, 'עם הרשאת כתיבה — רואה');
+  eq((seen.body.branches || []).length, 2, 'ואת כל הסניפים, לא רק את שלה');
+  const made = await filer('POST', '/', {
+    branch_id: String(hz._id), cert_type: 'electrician', external_url: 'https://x/file/d/ZZZZZZZZZZZZ/view',
+  });
+  eq(made.status, 201, 'ומעלה אישור לסניף שאינו שלה');
+
   // ------------------------------------------------------------ the gaps
   console.log('\nמה שחסר — ולא נראה בטבלה');
   const certGaps = require('../src/services/certGaps.service');

@@ -116,6 +116,7 @@ export const TAB_GROUPS = [
       // The tracking sheet, moved in: every עובדת's מד"א and התנהלות בטוחה,
       // when they run out, and the certificate one click away.
       { id: 'courses',            label: 'קורסים והכשרות', path: '/courses',       defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
+      { id: 'courses_write',      label: 'קורסים והכשרות — העלאה ועריכה', path: null, defaultRoles: ['system_admin', 'branch_manager', 'accountant'], writeGrantFor: 'courses' },
     ],
   },
   {
@@ -203,6 +204,9 @@ export const TAB_GROUPS = [
       // The papers each branch operates under — רישיון הפעלה, חשמלאי, גילוי
       // אש — with the expiry dates the mail digest watches.
       { id: 'branch_certifications', label: 'אישורי מעון', path: '/branch-certifications', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
+      // Seeing the licence folder and changing it are two grants. Whoever holds
+      // this one files for every branch, not only her own.
+      { id: 'branch_certifications_write', label: 'אישורי מעון — העלאה ועריכה', path: null, defaultRoles: ['system_admin', 'branch_manager', 'accountant'], writeGrantFor: 'branch_certifications' },
       // Both of these were real routes in App.jsx with no entry here, which
       // meant no row in the rail and no link anywhere in the client — the
       // screen where the 43 screens are handed out was reachable only by

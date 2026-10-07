@@ -28,6 +28,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useConfirm } from '../shared/ConfirmProvider';
 import { pluralDays } from '../../utils/ilDates';
 import DriveImportDialog from './DriveImportDialog';
+import { hasTabAccess } from '../../config/tabs';
 
 /**
  * אישורי מעון — the papers each branch operates under, and when they run out.
@@ -101,6 +102,9 @@ export default function BranchCertificationsPage() {
   };
 
   const isOffice = ['system_admin', 'accountant'].includes(user?.role);
+  // Whoever files the folder — the office, a branch manager, or anybody the
+  // permissions screen handed the write grant to (the back-office role).
+  const canWrite = hasTabAccess(user, 'branch_certifications_write');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -229,7 +233,7 @@ export default function BranchCertificationsPage() {
               <IconButton onClick={openRecipients}><NotificationsIcon /></IconButton>
             </Tooltip>
           )}
-          {isOffice && (
+          {canWrite && (
             <Tooltip title="קורא את שמות הקבצים בתיקיות הדרייב ומציע מה הם. שום דבר לא נכנס בלי אישור שלך.">
               <Button variant="outlined" startIcon={<CloudDownloadIcon />}
                 onClick={() => setDriveOpen(true)}>

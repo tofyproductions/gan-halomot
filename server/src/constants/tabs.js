@@ -50,6 +50,8 @@ const TAB_DEFAULT_ROLES = {
   pricing: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'],
   archive: ['system_admin', 'admin_viewer', 'branch_manager'],
   branch_certifications: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'],
+  // Not a screen — the write grant for אישורי מעון. See the client file.
+  branch_certifications_write: ['system_admin', 'branch_manager', 'accountant'],
   // Real routes that had no tab entry at all, so they were unreachable from
   // the rail — adopted in client/src/config/tabs.js, mirrored here.
   branches:    ['system_admin', 'admin_viewer'],
@@ -69,6 +71,8 @@ const TAB_DEFAULT_ROLES = {
   employee_letters: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'],
   form_101: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'],
   courses: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'],
+  // Not a screen — the write grant for קורסים והכשרות. See the client file.
+  courses_write: ['system_admin', 'branch_manager', 'accountant'],
 
   // תפעול
   nursery: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'teacher', 'assistant'],

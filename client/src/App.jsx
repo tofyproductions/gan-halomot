@@ -373,12 +373,12 @@ function AppRoutes() {
           </ProtectedRoute>
         } />
         <Route path="branch-certifications" element={
-          <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager', 'accountant']}>
+          <ProtectedRoute tab="branch_certifications">
             <BranchCertificationsPage />
           </ProtectedRoute>
         } />
         <Route path="courses" element={
-          <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager', 'accountant']}>
+          <ProtectedRoute tab="courses">
             <CoursesPage />
           </ProtectedRoute>
         } />
