@@ -6,12 +6,13 @@ import {
 } from '@mui/material';
 import LoginIcon from '@mui/icons-material/Login';
 import FingerprintIcon from '@mui/icons-material/Fingerprint';
-import { startAuthentication } from '@simplewebauthn/browser';
+import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import { useAuth } from '../../hooks/useAuth';
 import api from '../../api/client';
 
 const SAVED_CREDS_KEY = 'gan_saved_credentials';
 const SAVED_USER_ID_KEY = 'gan_biometric_user_id';
+const bioSupported = typeof window !== 'undefined' && !!window.PublicKeyCredential;
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -28,7 +29,14 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [hasBiometric, setHasBiometric] = useState(false);
-  const [step, setStep] = useState('creds'); // 'creds' | 'password' | 'reset'
+  const [step, setStep] = useState('creds'); // 'creds' | 'password' | 'reset' | 'biometric'
+  /**
+   * A FIRST sign-in and a forgotten password are the same three screens, so
+   * they are the same code — this only changes the words, because somebody
+   * being asked for a code on their very first login has not forgotten
+   * anything and should not be told that they have.
+   */
+  const [activating, setActivating] = useState(false);
   // The forgotten-password leg. `phoneHint` is a masked number, so the person
   // can tell which of their phones to go and look at.
   const [phoneHint, setPhoneHint] = useState('');
@@ -37,6 +45,7 @@ export default function LoginPage() {
   const [sending, setSending] = useState(false);
   const [password, setPassword] = useState('');
   const [bioForStep2, setBioForStep2] = useState(false); // user has fingerprint set
+  const [bioUserId, setBioUserId] = useState(''); // for the enrolment step
 
   // Load saved credentials on mount
   useEffect(() => {
@@ -74,6 +83,20 @@ export default function LoginPage() {
           setBioForStep2(false);
         }
         setStep('password');
+        setLoading(false);
+        return;
+      }
+      /**
+       * No password chosen yet. The server has texted a code and issued no
+       * token — the first sign-in runs through the code, a password and a
+       * fingerprint before anything opens.
+       */
+      if (result.needs_activation) {
+        setActivating(true);
+        setPhoneHint(result.phone_hint || '');
+        setResetCode('');
+        setNewPassword('');
+        setStep('reset');
         setLoading(false);
         return;
       }
@@ -168,11 +191,43 @@ export default function LoginPage() {
     e.preventDefault();
     setError(''); setLoading(true);
     try {
-      await resetWithCode(fullName, idNumber, resetCode, newPassword, rememberMe);
+      const result = await resetWithCode(fullName, idNumber, resetCode, newPassword, rememberMe);
+      // Signed in already — resetWithCode applied the token. On a first
+      // sign-in the fingerprint is offered here, while the session is fresh
+      // and the person is still at the screen; after that the phone itself is
+      // the second factor and there is nothing to type.
+      if (activating && bioSupported) {
+        setBioUserId(result?.user?.id || '');
+        setLoading(false);
+        setStep('biometric');
+        return;
+      }
       navigate(afterLogin, { replace: true });
     } catch (err) {
       setError(err.response?.data?.error || 'איפוס הסיסמה נכשל');
     } finally { setLoading(false); }
+  };
+
+  /**
+   * Enrol this device's fingerprint / Face, then go in.
+   *
+   * Skipping is allowed: a phone without a sensor, a borrowed computer, a
+   * person who would rather type. The password is already set, so skipping
+   * costs convenience and not the guard — and refusing to let somebody past
+   * this screen would strand whoever cannot satisfy it.
+   */
+  const enrollBiometric = async () => {
+    setError(''); setLoading(true);
+    try {
+      const optionsRes = await api.post('/auth/webauthn/register/options');
+      const credential = await startRegistration({ optionsJSON: optionsRes.data });
+      await api.post('/auth/webauthn/register/verify', { credential });
+      if (bioUserId) localStorage.setItem(SAVED_USER_ID_KEY, bioUserId);
+      navigate(afterLogin, { replace: true });
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'הוספת הזיהוי הביומטרי נכשלה');
+      setLoading(false);
+    }
   };
 
   return (
@@ -239,12 +294,37 @@ export default function LoginPage() {
                 </Button>
               </Stack>
             </Box>
+          ) : step === 'biometric' ? (
+            <Stack spacing={2.5}>
+              <Alert severity="success" sx={{ borderRadius: 2 }}>
+                הסיסמה נקבעה. מעתה רק את נכנסת לחשבון הזה.
+              </Alert>
+              <Box sx={{ textAlign: 'center' }}>
+                <FingerprintIcon sx={{ fontSize: 56, color: 'primary.main' }} />
+                <Typography variant="h6" sx={{ fontWeight: 700, mt: 1 }}>
+                  להוסיף כניסה בטביעת אצבע?
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                  בפעם הבאה תיכנסי בנגיעה אחת, בלי להקליד סיסמה.
+                </Typography>
+              </Box>
+              <Button variant="contained" size="large" fullWidth onClick={enrollBiometric}
+                      disabled={loading} startIcon={<FingerprintIcon />}>
+                {loading ? 'מוסיף…' : 'הוספת טביעת אצבע'}
+              </Button>
+              <Button variant="text" size="small" disabled={loading}
+                      onClick={() => navigate(afterLogin, { replace: true })}>
+                בפעם אחרת — כניסה למערכת
+              </Button>
+            </Stack>
           ) : step === 'reset' ? (
             <Box component="form" onSubmit={handleResetSubmit}>
               <Stack spacing={2.5}>
                 <Alert severity="info" sx={{ borderRadius: 2 }}>
+                  {activating ? 'כניסה ראשונה למערכת. ' : ''}
                   שלחנו קוד בהודעת SMS{phoneHint ? ` למספר ${phoneHint}` : ''}.
                   הקוד תקף לחמש דקות.
+                  {activating ? ' אחרי הקוד תבחרי סיסמה אישית לאפליקציה.' : ''}
                 </Alert>
                 <TextField
                   label="הקוד מההודעה" value={resetCode} autoFocus
@@ -254,7 +334,7 @@ export default function LoginPage() {
                     style: { letterSpacing: '0.4em', fontSize: 22, textAlign: 'center' } }}
                 />
                 <TextField
-                  label="סיסמה חדשה" type="password" value={newPassword}
+                  label={activating ? 'סיסמה אישית לאפליקציה' : 'סיסמה חדשה'} type="password" value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)} fullWidth required
                   error={newPassword.length > 0 && newPassword.length < 8}
                   helperText={newPassword.length > 0 && newPassword.length < 8
@@ -264,13 +344,16 @@ export default function LoginPage() {
                 />
                 <Button type="submit" variant="contained" size="large" fullWidth
                         disabled={loading || resetCode.length < 6 || newPassword.length < 8} startIcon={<LoginIcon />}>
-                  {loading ? 'מאפס…' : 'שמירה וכניסה'}
+                  {loading ? 'שומר…' : activating ? 'קביעת סיסמה וכניסה' : 'שמירה וכניסה'}
                 </Button>
                 <Button variant="text" size="small" onClick={handleForgot} disabled={sending}>
                   {sending ? 'שולח…' : 'לא קיבלתי — שלחו שוב'}
                 </Button>
                 <Button variant="text" size="small"
-                        onClick={() => { setStep('creds'); setResetCode(''); setNewPassword(''); setError(''); }}>
+                        onClick={() => {
+                          setStep('creds'); setResetCode(''); setNewPassword('');
+                          setError(''); setActivating(false);
+                        }}>
                   חזרה
                 </Button>
               </Stack>

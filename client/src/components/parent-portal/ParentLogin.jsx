@@ -30,7 +30,24 @@ const RESEND_SECONDS = 60;
 export default function ParentLogin() {
   const navigate = useNavigate();
 
-  const [step, setStep] = useState('login'); // login | code | password
+  const [step, setStep] = useState('login'); // login | choose | code | password
+  /**
+   * The number in the first box may be the parent's or one of their children's.
+   *
+   * A parent recalling their own ת"ז from memory against the one somebody else
+   * copied off a form is the portal's commonest refusal, and a child's number
+   * is the thing a parent can always get right. When a child has two parents on
+   * file the server cannot know which of them is typing, so it answers with
+   * both — first name and masked mobile — and this is the screen that asks.
+   *
+   * `parentRef` is the server's opaque answer to that question, carried through
+   * the rest of the sign-in. The parent's real ת"ז never reaches the browser.
+   */
+  const [candidates, setCandidates] = useState([]);
+  const [parentRef, setParentRef] = useState('');
+  const [loginRef, setLoginRef] = useState('');
+  // What the picker should resume: the password login, or asking for a code.
+  const [pending, setPending] = useState({ action: 'code', mode: 'activate' });
   const [idNumber, setIdNumber] = useState('');
   const [password, setPassword] = useState('');
   const [passwordAgain, setPasswordAgain] = useState('');
@@ -66,18 +83,31 @@ export default function ParentLogin() {
   };
 
   /** Ask for a code. Shared by first activation and by a forgotten password. */
-  const requestCode = async (nextMode) => {
+  const requestCode = async (nextMode, refOverride) => {
     setError('');
     setNotice('');
-    if (idNumber.length < 5) {
+    const ref = refOverride !== undefined ? refOverride : parentRef;
+    if (!ref && idNumber.length < 5) {
       setError('יש להזין מספר תעודת זהות');
       return;
     }
     setLoading(true);
     try {
-      const { data } = await parentApi.post('/auth/start', { id_number: idNumber });
+      const { data } = await parentApi.post('/auth/start', {
+        id_number: idNumber,
+        ...(ref ? { parent_ref: ref } : {}),
+      });
+      // Two parents on the child, and no way to tell which one is here.
+      // Nothing has been texted yet; the picker sends the choice back.
+      if (data.choose_parent) {
+        setCandidates(data.candidates || []);
+        setPending({ action: 'code', mode: nextMode });
+        setStep('choose');
+        return;
+      }
       setMode(data.mode || nextMode);
       setPhoneHint(data.phone_hint || '');
+      setLoginRef(data.login_ref || '');
       setCode('');
       setStep('code');
       setCooldown(RESEND_SECONDS);
@@ -92,26 +122,49 @@ export default function ParentLogin() {
     }
   };
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
+  const handleLogin = async (e, refOverride) => {
+    if (e?.preventDefault) e.preventDefault();
     setError('');
     setLoading(true);
+    const ref = refOverride !== undefined ? refOverride : parentRef;
     try {
       const { data } = await parentApi.post('/auth/login', {
         id_number: idNumber,
+        ...(ref ? { parent_ref: ref } : {}),
         password,
       });
+      // The child's number belongs to two parents, so there is no account to
+      // check the password against yet. The password typed here is kept in
+      // state and sent again with the choice.
+      if (data.choose_parent) {
+        setCandidates(data.candidates || []);
+        setPending({ action: 'login', mode: 'activate' });
+        setStep('choose');
+        setLoading(false);
+        return;
+      }
       finish(data.token);
     } catch (err) {
       // Never activated is not a failed login — send them to activation
       // rather than making them hunt for a password they never chose.
       if (err?.response?.data?.code === 'NOT_ACTIVATED') {
         setLoading(false);
-        await requestCode('activate');
+        await requestCode('activate', ref);
         return;
       }
       setError(parentApiError(err, 'שגיאה בהתחברות'));
       setLoading(false);
+    }
+  };
+
+  /** The parent said which of the people on their child's record they are. */
+  const choose = async (candidate) => {
+    setParentRef(candidate.parent_ref);
+    setCandidates([]);
+    if (pending.action === 'login') {
+      await handleLogin(null, candidate.parent_ref);
+    } else {
+      await requestCode(pending.mode, candidate.parent_ref);
     }
   };
 
@@ -122,6 +175,9 @@ export default function ParentLogin() {
     try {
       const { data } = await parentApi.post('/auth/verify', {
         id_number: idNumber,
+        // Whichever the server handed back: the ticket from step 1, or the
+        // choice made on the picker. Either settles whose account this is.
+        login_ref: loginRef || parentRef || undefined,
         code,
       });
       setSetupToken(data.setup_token);
@@ -167,6 +223,9 @@ export default function ParentLogin() {
     setCode('');
     setPassword('');
     setPasswordAgain('');
+    setCandidates([]);
+    setParentRef('');
+    setLoginRef('');
   };
 
   return (
@@ -211,7 +270,8 @@ export default function ParentLogin() {
             <form onSubmit={handleLogin}>
               <Stack spacing={2}>
                 <TextField
-                  label="תעודת זהות של ההורה"
+                  label="תעודת זהות — שלך או של ילדך"
+                  helperText="אם המספר שלך לא מזוהה, אפשר להזין את תעודת הזהות של הילד/ה"
                   value={idNumber}
                   onChange={(e) => setIdNumber(digitsOnly(e.target.value, 9))}
                   inputMode="numeric"
@@ -250,6 +310,45 @@ export default function ParentLogin() {
                 </Stack>
               </Stack>
             </form>
+          )}
+
+          {step === 'choose' && (
+            <Stack spacing={2}>
+              <Typography variant="body2">
+                {candidates[0]?.child_name
+                  ? `על הכרטיס של ${candidates[0].child_name} רשומים שני הורים. מי מהם את/ה?`
+                  : 'על כרטיס הילד/ה רשומים שני הורים. מי מהם את/ה?'}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                הקוד יישלח רק למספר שבחרת, כפי שהוא רשום בגן.
+              </Typography>
+              {candidates.map((c) => (
+                <Button
+                  key={c.parent_ref}
+                  variant="outlined"
+                  size="large"
+                  fullWidth
+                  disabled={loading || !c.can_receive}
+                  onClick={() => choose(c)}
+                  sx={{ justifyContent: 'space-between', textAlign: 'start', py: 1.5 }}
+                >
+                  <Box component="span" sx={{ fontWeight: 700 }}>
+                    {c.first_name || 'הורה'}
+                  </Box>
+                  <Box component="span" sx={{ fontWeight: 400, fontSize: '0.9em' }}>
+                    {c.can_receive ? <Ltr>{c.phone_hint}</Ltr> : 'אין נייד רשום'}
+                  </Box>
+                </Button>
+              ))}
+              {candidates.some((c) => !c.can_receive) && (
+                <Alert severity="warning">
+                  להורה שאין לו נייד רשום בגן אי אפשר לשלוח קוד. יש לפנות לגן כדי לעדכן את המספר.
+                </Alert>
+              )}
+              <Link component="button" type="button" variant="body2" onClick={backToLogin}>
+                חזרה
+              </Link>
+            </Stack>
           )}
 
           {step === 'code' && (

@@ -4,11 +4,20 @@ const { ROLES } = require('../constants/roles');
 const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
   password_hash: { type: String, required: true },
-  // Login-password gate: false until the user deliberately chooses a login
-  // password. While false, they can still log in with name+ID (backward compat)
-  // but are nagged to set one every login. Once true, a correct password is
-  // REQUIRED to log in. Admin "reset" flips this back to false (never reveals a
-  // plaintext password — bcrypt only).
+  /**
+   * Has this person deliberately chosen their own login password?
+   *
+   * False is NOT a weaker login — since 07.10.2026 it is no login at all.
+   * Name + ת"ז used to be accepted while this was false, which meant any
+   * colleague who knew the pair (everybody knows the names, and a ת"ז is
+   * printed on documents) could open the account first. Now a false here
+   * sends the person through a code texted to the mobile on the gan's records,
+   * then a password, then a fingerprint — see auth.controller `login`.
+   *
+   * Once true, the password is required. An administrator's "reset" flips it
+   * back to false, which puts the account behind the code again rather than
+   * in front of nothing. A plaintext password is never revealed — bcrypt only.
+   */
   password_set: { type: Boolean, default: false },
   /**
    * A password somebody else chose. Set when an administrator issues a new one

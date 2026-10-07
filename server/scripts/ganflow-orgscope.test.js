@@ -23,11 +23,13 @@ try { require.resolve('mongodb-memory-server'); } catch {
 const { MongoMemoryServer } = require('mongodb-memory-server');
 const { MongoClient, ObjectId } = require('mongodb');
 const { spawn } = require('child_process');
+const bcrypt = require('bcryptjs');
 const path = require('path');
 
 const PORT = 5403;
 const B = `http://localhost:${PORT}`;
 const MONTH = '2026-07';
+const PASSWORD = 'orgscope-password';
 let failures = 0;
 
 const ok = (cond, label) => { console.log(`  ${cond ? '✅' : '❌'} ${label}`); if (!cond) failures++; };
@@ -97,8 +99,13 @@ const waitFor = async (fn, ms = 40000) => {
     { full_name: 'מנהלת דרום', id_number: '333333334', role: 'branch_manager', org_unit_id: dB },
     { full_name: 'מנהלת ללא יחידה', id_number: '444444442', role: 'branch_manager', org_unit_id: null },
   ];
+    // A password, because name + ת"ז stopped being a way in on 07.10.2026: a
+    // first sign-in costs a code texted to the mobile on file, and this test
+    // has neither a mobile nor an SMS provider.
+  const hash = await bcrypt.hash(PASSWORD, 10);
   await db.collection('users').insertMany(people.map((p) => ({
-    ...p, email: `${p.id_number}@example.invalid`, is_active: true, password_set: false,
+    ...p, email: `${p.id_number}@example.invalid`, is_active: true,
+    password_set: true, password_hash: hash,
     created_at: new Date(), updated_at: new Date(),
   })));
 
@@ -116,10 +123,10 @@ const waitFor = async (fn, ms = 40000) => {
       console.error('\n❌  השרת לא עלה\n'); await stop(); process.exit(1);
     }
 
-    const login = async (p) => (await fetch(`${B}/api/auth/login`, {
+    const login = async (p) => (await fetch(`${B}/api/auth/login-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-tenant': 'net' },
-      body: JSON.stringify({ full_name: p.full_name, id_number: p.id_number }),
+      body: JSON.stringify({ full_name: p.full_name, id_number: p.id_number, password: PASSWORD }),
     }).then((r) => r.json())).token;
 
     const [director, north, south, orphan] = await Promise.all(people.map(login));

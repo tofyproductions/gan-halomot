@@ -20,6 +20,7 @@
  *     position — those are deliberate grants that no job title implies.
  */
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { User } = require('../models');
 
 /** 9-digit ת"ז, or '' when the value can't be one. */
@@ -86,9 +87,19 @@ async function syncEmployeeUser(emp, { positionChanged = false, isNew = false } 
     if (byEmail) {
       user = byEmail;
     } else {
-      // Initial password = the ת"ז. `password_set` stays false, so she logs in
-      // with name+ID and is prompted to choose a real password (see auth flow).
-      const hash = await bcrypt.hash(idNumber, 10);
+      /**
+       * A password nobody knows, not the ת"ז.
+       *
+       * This used to hash the ת"ז itself, on the reasoning that `password_set`
+       * stays false and nothing checks the hash while it is — which was true
+       * until the day somebody flips that flag without touching the hash, and
+       * then every account's password is a number printed on documents. The
+       * value is never used, never shown and never needed: a first sign-in goes
+       * through a code texted to the mobile on the records (auth.controller
+       * `login`), and the person chooses their own password at the end of it.
+       * So it costs nothing to make it unguessable, and the trap goes away.
+       */
+      const hash = await bcrypt.hash(crypto.randomBytes(24).toString('hex'), 10);
       user = await User.create({
         email,
         password_hash: hash,

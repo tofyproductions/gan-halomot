@@ -103,6 +103,8 @@ const childSchema = new mongoose.Schema({
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 childSchema.index({ registration_id: 1 });
+// A parent signing in with their child's number instead of their own.
+childSchema.index({ child_id_number: 1, is_active: 1 });
 childSchema.index({ classroom_id: 1, academic_year: 1 });
 
 // Same reason as Employee: the list is filtered by year and sorted by name,

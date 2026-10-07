@@ -1,10 +1,13 @@
 const bcrypt = require('bcryptjs');
 const { ParentAccount } = require('../models');
-const { findParent, normalizeIdNumber, maskPhone } = require('../services/parentDirectory.service');
+const {
+  findParent, normalizeIdNumber, maskPhone, parentsOfChildIdNumber, firstNameOnly,
+} = require('../services/parentDirectory.service');
 const otp = require('../services/parentOtp.service');
 const { sendSms } = require('../services/sms.service');
 const {
   signParentToken, signSetupToken, verifySetupToken,
+  signLookupRef, verifyLookupRef,
 } = require('../middleware/parentAuth');
 
 const MIN_PASSWORD_LENGTH = 8;
@@ -43,20 +46,99 @@ function codeMessage(code) {
  * trade is worth revisiting.
  */
 
-/** Step 1 — send a code to the phone we already hold for this parent. */
-async function start(req, res) {
-  const idNumber = normalizeIdNumber(req.body?.id_number);
-  if (!idNumber) {
-    return res.status(400).json({ error: 'יש להזין מספר תעודת זהות' });
+/**
+ * The number typed into the first box may be the parent's or the child's.
+ *
+ * It was the parent's alone, and that was the portal's most frequent failure:
+ * nine digits recalled from memory against nine digits somebody else copied
+ * off a form, with no way to tell a typo from a stranger. A parent who cannot
+ * get their own number right can nearly always get their child's right, and
+ * the child's number sits on the same records.
+ *
+ * The parent's own number is tried FIRST and always wins. A number that is
+ * somehow both — a parent here and a child here — belongs to the parent; the
+ * alternative would let a child's record shadow a real account.
+ *
+ * A child with two parents on file cannot be resolved by the number alone, and
+ * the server must not guess: picking one would text a code to the wrong phone
+ * and, worse, would quietly decide whose account a sign-in is about. So the
+ * caller is handed the recorded parents — first name and masked mobile, which
+ * is what a parent needs to recognise themselves and all an outsider gets —
+ * and the choice comes back as a signed ref. The parent's real id number never
+ * reaches the browser.
+ *
+ * Nothing here is an authorisation. Every path ends at the same place it
+ * always did: a code sent to the mobile already on the gan's records.
+ */
+const NOT_REGISTERED = 'המספר שהוזן אינו רשום אצלנו — לא כהורה ולא כילד/ה פעיל/ה. אפשר להזין את תעודת הזהות שלך או של ילדך. לבירור יש לפנות לגן.';
+
+function candidatePayload(candidates) {
+  return candidates.map(c => ({
+    parent_ref: signLookupRef(c.id_number),
+    first_name: firstNameOnly(c.full_name),
+    phone_hint: maskPhone(c.phone),
+    // A parent with no mobile on file cannot be sent a code. Said here rather
+    // than discovered after the tap, so the screen can point them at the gan
+    // instead of at a button that cannot work.
+    can_receive: Boolean(c.phone),
+    // The child's FIRST name, for the same reason as the parents' — a parent
+    // recognises their own child from it, and somebody holding a child's ת"ז
+    // they should not have learns nothing they could put on a form.
+    child_name: firstNameOnly(c.child_name),
+  }));
+}
+
+/**
+ * Returns one of:
+ *   { idNumber }            — settled, carry on
+ *   { choose: [...] }       — two parents on the child; the caller must pick
+ *   { error: { status, body } } — nothing to carry on with
+ */
+async function resolveIdentity(body) {
+  // A ref from a previous call wins: the browser has already chosen, and
+  // re-deriving would offer the same choice again forever.
+  if (body?.parent_ref) {
+    try {
+      return { idNumber: verifyLookupRef(body.parent_ref) };
+    } catch {
+      return { error: { status: 401, body: { error: 'פג הזמן לבחירה. יש להתחיל מחדש.' } } };
+    }
   }
 
+  const typed = normalizeIdNumber(body?.id_number);
+  if (!typed) {
+    return { error: { status: 400, body: { error: 'יש להזין מספר תעודת זהות' } } };
+  }
+
+  if (await findParent(typed)) return { idNumber: typed };
+
+  const candidates = await parentsOfChildIdNumber(typed);
+  if (candidates.length === 0) {
+    return { error: { status: 404, body: { error: NOT_REGISTERED } } };
+  }
+  if (candidates.length === 1) return { idNumber: candidates[0].id_number };
+  return { choose: candidates };
+}
+
+/** Step 1 — send a code to the phone we already hold for this parent. */
+async function start(req, res) {
+  const resolved = await resolveIdentity(req.body);
+  if (resolved.error) {
+    return res.status(resolved.error.status).json(resolved.error.body);
+  }
+  if (resolved.choose) {
+    // Nothing has been sent yet. The code goes out on the second call, once
+    // the parent has said which of the two recorded people they are.
+    return res.json({
+      choose_parent: true,
+      candidates: candidatePayload(resolved.choose),
+    });
+  }
+
+  const idNumber = resolved.idNumber;
   const parent = await findParent(idNumber);
   if (!parent) {
-    return res.status(404).json({
-      // Said in terms of the parent, not the child: the first thing a parent
-      // types after this message used to be the child's number.
-      error: 'מספר תעודת הזהות הזה אינו רשום כהורה של ילד/ה פעיל/ה. יש להזין את תעודת הזהות של ההורה (לא של הילד/ה). לבירור יש לפנות לגן.',
-    });
+    return res.status(404).json({ error: NOT_REGISTERED });
   }
 
   let account = await ParentAccount.findOne({ id_number: idNumber });
@@ -119,13 +201,31 @@ async function start(req, res) {
     ok: true,
     mode: account.activated ? 'reset' : 'activate',
     phone_hint: maskPhone(parent.phone),
+    // Step 2 continues on this rather than on a typed number, so a sign-in
+    // begun with a child's number never needs the parent's own number in the
+    // browser. The old field is still accepted there for a cached client.
+    login_ref: signLookupRef(idNumber),
   });
 }
 
 /** Step 2 — check the code and hand back a ten-minute ticket. */
 async function verify(req, res) {
-  const idNumber = normalizeIdNumber(req.body?.id_number);
-  const account = idNumber ? await ParentAccount.findOne({ id_number: idNumber }) : null;
+  // `login_ref` is what step 1 handed back; `parent_ref` is a choice made on
+  // the picker. Either is a settled identity, so neither can land on `choose`
+  // here — and a bare number that would is sent back to the start rather than
+  // offered a list on a screen that has none.
+  const resolved = await resolveIdentity({
+    ...req.body,
+    parent_ref: req.body?.parent_ref || req.body?.login_ref,
+  });
+  if (resolved.error) {
+    return res.status(resolved.error.status).json(resolved.error.body);
+  }
+  if (resolved.choose) {
+    return res.status(409).json({ error: 'יש להתחיל מחדש ולבחור למי לשלוח את הקוד.' });
+  }
+
+  const account = await ParentAccount.findOne({ id_number: resolved.idNumber });
   if (!account) {
     return res.status(404).json({ error: 'לא נמצא חשבון. יש להתחיל מחדש.' });
   }
@@ -189,10 +289,25 @@ async function setPassword(req, res) {
 
 /** The everyday door: ID number and password. */
 async function login(req, res) {
-  const idNumber = normalizeIdNumber(req.body?.id_number);
   const { password } = req.body || {};
 
-  const account = idNumber ? await ParentAccount.findOne({ id_number: idNumber }) : null;
+  const resolved = await resolveIdentity(req.body);
+  if (resolved.error) {
+    return res.status(resolved.error.status).json(resolved.error.body);
+  }
+  if (resolved.choose) {
+    // Asked BEFORE the password is checked, because there is no account to
+    // check it against until the child's number has been narrowed to a person.
+    // The password typed on the first screen is discarded; the picker posts it
+    // again with the choice.
+    return res.json({
+      choose_parent: true,
+      candidates: candidatePayload(resolved.choose),
+    });
+  }
+
+  const idNumber = resolved.idNumber;
+  const account = await ParentAccount.findOne({ id_number: idNumber });
 
   // An account that exists but was never activated is not a login failure —
   // saying "wrong password" would send a parent hunting for a password they

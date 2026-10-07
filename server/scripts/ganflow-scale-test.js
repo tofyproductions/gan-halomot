@@ -37,6 +37,7 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
 const { MongoClient, ObjectId } = require('mongodb');
 const { spawn } = require('child_process');
 const bcrypt = require('bcryptjs');
+const SCALE_PASSWORD = 'scale-login-password';
 const path = require('path');
 
 const argv = process.argv.slice(2);
@@ -127,10 +128,13 @@ async function seed(client, dbName, branches) {
   await db.collection('orgunits').createIndex({ path: 1 });
   await db.collection('payrollrollups').createIndex({ month: 1, branch_id: 1 }, { unique: true });
 
-  // The administrator this test logs in as.
+  // The administrator this test logs in as. Carries a password because
+  // name + ת"ז stopped being a way in on 07.10.2026 — a first sign-in costs a
+  // code texted to the mobile on file, and this test has no SMS provider.
   await db.collection('users').insertOne({
     full_name: 'מנהלת עומס', id_number: '900000009', email: 'scale@example.invalid',
-    role: 'system_admin', is_active: true, password_set: false,
+    role: 'system_admin', is_active: true,
+    password_set: true, password_hash: await bcrypt.hash(SCALE_PASSWORD, 10),
     branch_id: branchIds[0], created_at: new Date(),
   });
 
@@ -283,10 +287,12 @@ const SCREENS = [
       console.log(`${((Date.now() - t0) / 1000).toFixed(0)}ש  ` +
         `(${counts.employees} עובדים, ${counts.children} ילדים, ${counts.punches} החתמות)`);
 
-      const login = await fetch(`${B}/api/auth/login`, {
+      const login = await fetch(`${B}/api/auth/login-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-tenant': slug },
-        body: JSON.stringify({ full_name: 'מנהלת עומס', id_number: '900000009' }),
+        body: JSON.stringify({
+          full_name: 'מנהלת עומס', id_number: '900000009', password: SCALE_PASSWORD,
+        }),
       }).then((r) => r.json()).catch(() => ({}));
 
       if (!login.token) { console.log(`  ⚠️  לא הצלחתי להיכנס ל-${slug} — מדלג\n`); continue; }

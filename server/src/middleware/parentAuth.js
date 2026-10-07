@@ -71,6 +71,36 @@ function verifySetupToken(token, purpose) {
 }
 
 /**
+ * A ten-minute note saying "this browser asked about a child's number, and
+ * that child belongs to THIS parent".
+ *
+ * A parent who mistypes their own id number may type their child's instead,
+ * and the lookup behind that answers with the parent's real id number. Handing
+ * that number back to the browser would mean a child's number could be traded
+ * for a parent's — so it never leaves the server. The browser carries this
+ * instead: opaque, signed, short-lived, and good for nothing but continuing
+ * the sign-in it was issued for.
+ *
+ * It is not a credential and grants nothing on its own. Everything it can do,
+ * the parent's own id number could already do: ask for a code, which is sent
+ * to the phone on the gan's records and nowhere else.
+ */
+function signLookupRef(idNumber) {
+  return jwt.sign(
+    { id_number: String(idNumber), typ: 'parent_lookup' },
+    PARENT_SECRET,
+    { expiresIn: '10m' }
+  );
+}
+
+function verifyLookupRef(token) {
+  const decoded = jwt.verify(token, PARENT_SECRET);
+  if (decoded.typ !== 'parent_lookup') throw new Error('wrong token type');
+  if (!/^\d{9}$/.test(String(decoded.id_number || ''))) throw new Error('bad id in ref');
+  return String(decoded.id_number);
+}
+
+/**
  * Guard every parent route. Attaches `req.parent` — deliberately not
  * `req.user`, so a controller written for staff cannot be pointed at a parent
  * route and quietly work.
@@ -97,5 +127,7 @@ module.exports = {
   signParentToken,
   signSetupToken,
   verifySetupToken,
+  signLookupRef,
+  verifyLookupRef,
   PARENT_SECRET,
 };

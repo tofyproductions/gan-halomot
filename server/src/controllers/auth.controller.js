@@ -210,6 +210,71 @@ async function phoneForUser(user) {
   return normalizePhone(emp?.phone);
 }
 
+/**
+ * Text a sign-in code to the mobile the records hold for this person.
+ *
+ * Shared by the forgotten-password link and by a first sign-in, because they
+ * are the same exchange: a code to a number nobody chose at the keyboard,
+ * answered back, and only then a password. The first login used not to ask for
+ * it — name and ת"ז alone opened the system — and name and ת"ז are what every
+ * member of staff knows about every other member of staff.
+ *
+ * Returns { phone } on success, or { fail: { status, body } }. It does NOT
+ * save the user: the code is committed by the caller after the SMS has gone
+ * out, so a provider failure cannot overwrite a working code with one nobody
+ * received.
+ */
+async function textLoginCode(user, { alreadySentIsOk = false } = {}) {
+  if (!smsConfigured()) {
+    return { fail: { status: 503, body: {
+      error: 'שליחת הודעות אינה מוגדרת במערכת. פנו למנהל/ת המערכת לקבלת סיסמה זמנית.',
+      code: 'SMS_NOT_CONFIGURED',
+    } } };
+  }
+
+  const phone = await phoneForUser(user);
+  if (!phone) {
+    // The one case that needs a human. Three of the gan's active accounts had
+    // no mobile anywhere — not on the user, not on the employee card — and for
+    // them this is the whole sign-in, so it says who can fix it.
+    return { fail: { status: 400, body: {
+      error: 'אין אצלנו מספר נייד עבורך, ולכן אי אפשר לשלוח קוד. פנו למנהל/ת הגן כדי לעדכן את המספר.',
+      code: 'NO_PHONE_ON_RECORD',
+    } } };
+  }
+
+  const allowed = otp.canSend(user);
+  if (!allowed.ok) {
+    // On a first sign-in a live code is not a failure — it is the code they
+    // are about to type. The screen moves on and says so, rather than sending
+    // somebody back to the start of a flow they already completed a step of.
+    if (alreadySentIsOk) {
+      return { phone, alreadySent: true, retryAfterSeconds: allowed.retryAfterSeconds };
+    }
+    return { fail: { status: 429, body: {
+      error: `כבר נשלח קוד. אפשר לנסות שוב בעוד ${Math.ceil(allowed.retryAfterSeconds / 60)} דקות.`,
+      retry_after_seconds: allowed.retryAfterSeconds,
+    } } };
+  }
+
+  const code = otp.issueCode(user);
+
+  // Texted BEFORE the code is committed. The other order overwrites a working
+  // code with one that was never delivered, and the person is left holding a
+  // code that cannot work and no way back to the one that could.
+  try {
+    await sendSms({ to: phone, text: resetMessage(code) });
+  } catch (err) {
+    console.error('[auth] login code SMS failed:', err.message);
+    return { fail: { status: 502, body: {
+      error: 'שליחת ההודעה נכשלה. נסו שוב בעוד רגע, או פנו למנהל/ת המערכת.',
+    } } };
+  }
+
+  await user.save();
+  return { phone };
+}
+
 /** Step 1 — text a code. POST /api/auth/forgot-password */
 async function forgotPassword(req, res, next) {
   try {
@@ -223,41 +288,14 @@ async function forgotPassword(req, res, next) {
     // sentence here would say "this person exists, your name is just wrong".
     if (!user) return res.status(401).json({ error: 'שם או תעודת זהות שגויים' });
 
-    if (!smsConfigured()) {
-      return res.status(503).json({
-        error: 'שליחת הודעות אינה מוגדרת במערכת. פנו למנהל/ת המערכת לקבלת סיסמה זמנית.',
-      });
-    }
+    const sent = await textLoginCode(user);
+    if (sent.fail) return res.status(sent.fail.status).json(sent.fail.body);
 
-    const phone = await phoneForUser(user);
-    if (!phone) {
-      return res.status(400).json({
-        error: 'אין אצלנו מספר נייד עבורך, ולכן אי אפשר לשלוח קוד. פנו למנהל/ת המערכת.',
-      });
-    }
-
-    const allowed = otp.canSend(user);
-    if (!allowed.ok) {
-      return res.status(429).json({
-        error: `כבר נשלח קוד. אפשר לנסות שוב בעוד ${Math.ceil(allowed.retryAfterSeconds / 60)} דקות.`,
-        retry_after_seconds: allowed.retryAfterSeconds,
-      });
-    }
-
-    const code = otp.issueCode(user);
-
-    // Texted BEFORE the code is committed. The other order overwrites a
-    // working code with one that was never delivered, and the person is left
-    // holding a code that cannot work and no way back to the one that could.
-    try {
-      await sendSms({ to: phone, text: resetMessage(code) });
-    } catch (err) {
-      console.error('[auth] reset SMS failed:', err.message);
-      return res.status(502).json({ error: 'שליחת ההודעה נכשלה. נסו שוב בעוד רגע, או פנו למנהל/ת המערכת.' });
-    }
-
-    await user.save();
-    res.json({ ok: true, phone_hint: maskPhone(phone), expires_in_minutes: Math.round(otp.TTL_MS / 60000) });
+    res.json({
+      ok: true,
+      phone_hint: maskPhone(sent.phone),
+      expires_in_minutes: Math.round(otp.TTL_MS / 60000),
+    });
   } catch (error) {
     next(error);
   }
@@ -348,34 +386,44 @@ async function login(req, res, next) {
     }
 
     /**
-     * A password-less login still opens the system, and still only nags.
+     * NO PASSWORD YET MEANS NOT IN. This is the front door, and until
+     * 07.10.2026 it was not locked.
      *
-     * makeToken takes `{ forceMustChange: true }` and the whole restricted-
-     * session path behind it works — middleware/auth.js enforces it, and
-     * SetPasswordDialog walks somebody through choosing a password and then
-     * offers biometrics. It is deliberately NOT passed here.
+     * Name and ת"ז opened the system to anybody who typed them. In a gan every
+     * member of staff knows the others' names, and a ת"ז is printed on
+     * documents, copied into forms and held by every employer a person has had
+     * — so the pair is a way of saying who you are, not a way of proving it.
+     * Sixty of seventy-three active accounts had never chosen a password, which
+     * means sixty accounts that a colleague could have opened on a first login
+     * and then set a password on, locking out the person they belong to. That
+     * is not a theoretical hole; it is the one the gan asked to have closed.
      *
-     * Turning it on is not a code decision, it is an operational one. The gan
-     * has 167 staff accounts and an unknown number of them have never chosen a
-     * password; for every one of those, the flag means locked out mid-shift,
-     * at whatever hour the deploy lands, with no warning. The security review
-     * is right that name + ת.ז is not an authenticator — ת.ז is printed on
-     * documents and held by employers — and this should be switched on. It
-     * should be switched on with the staff told first and somebody available
-     * to answer the phone, which is a different day's work from this merge.
+     * So a first sign-in now costs a code texted to the mobile ALREADY on the
+     * gan's records — not one typed at the keyboard, which would make the
+     * exercise circular. Answering it leads to choosing a password and then to
+     * offering a fingerprint, after which the phone in the person's pocket is
+     * the second factor on every later login.
      *
-     * Everything else the review found ships now: the branch boundary, the
-     * ownership checks, rate limiting, the escaping, the JWT secret. Those cost
-     * nobody a login.
+     * No token is issued here. The screen is sent to the code, and
+     * `reset-with-code` is what finally signs them in — the same three steps
+     * the forgotten-password link has always used, because activation and
+     * reset are the same risk and deserve the same guard.
      *
-     * To turn it on: pass { forceMustChange: true } below, and update
-     * ganflow-isolation / ganflow-orgscope, which log in password-less and
-     * expect a working session.
+     * A live code is not an error (`alreadySentIsOk`): somebody who reloads
+     * the page mid-flow should be shown the box for the code they already
+     * have, not told off by a 429 and sent back to the start.
      */
-    const result = makeToken(user, rememberMe, await effectiveRoleTabs(user), req);
-    result.hasWebauthn = (user.webauthn_credentials || []).length > 0;
-    result.password_prompt = true; // no password chosen yet → nag on the client
-    res.json(result);
+    const sent = await textLoginCode(user, { alreadySentIsOk: true });
+    if (sent.fail) return res.status(sent.fail.status).json(sent.fail.body);
+
+    return res.json({
+      needs_activation: true,
+      full_name: user.full_name,
+      phone_hint: maskPhone(sent.phone),
+      expires_in_minutes: Math.round(otp.TTL_MS / 60000),
+      already_sent: Boolean(sent.alreadySent),
+      retry_after_seconds: sent.retryAfterSeconds || 0,
+    });
   } catch (error) {
     next(error);
   }
@@ -621,6 +669,21 @@ async function webauthnAuthOptions(req, res, next) {
       return res.status(404).json({ error: 'משתמש לא נמצא' });
     }
 
+    /**
+     * A fingerprint is the second step, never the first one.
+     *
+     * Biometrics are only ever offered after a password has been chosen, so a
+     * credential on an account with no password should not exist. Should one
+     * ever get there — an older enrolment, a half-finished flow — it must not
+     * become a way around the code that the password-less path now demands.
+     */
+    if (!user.password_set) {
+      return res.status(403).json({
+        error: 'יש להשלים כניסה ראשונה עם קוד שנשלח בהודעה, ולבחור סיסמה.',
+        code: 'ACTIVATION_REQUIRED',
+      });
+    }
+
     // transports:['internal'] tells the browser the credential lives on THIS
     // device's built-in authenticator, so it prompts Touch ID / fingerprint
     // directly instead of offering the cross-device "Passkeys & Security Keys"
@@ -657,6 +720,21 @@ async function webauthnAuthVerify(req, res, next) {
     const user = await User.findById(userId).populate('branch_id', 'name');
     if (!user || !user.is_active) {
       return res.status(404).json({ error: 'משתמש לא נמצא' });
+    }
+
+    /**
+     * A fingerprint is the second step, never the first one.
+     *
+     * Biometrics are only ever offered after a password has been chosen, so a
+     * credential on an account with no password should not exist. Should one
+     * ever get there — an older enrolment, a half-finished flow — it must not
+     * become a way around the code that the password-less path now demands.
+     */
+    if (!user.password_set) {
+      return res.status(403).json({
+        error: 'יש להשלים כניסה ראשונה עם קוד שנשלח בהודעה, ולבחור סיסמה.',
+        code: 'ACTIVATION_REQUIRED',
+      });
     }
 
     const credIdFromClient = credential.id;

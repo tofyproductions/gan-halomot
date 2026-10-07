@@ -241,6 +241,92 @@ async function findParent(idNumber) {
  * "05••••••19" — enough for a parent to recognise their own phone, not enough
  * for anyone else to learn it.
  */
+/**
+ * Which parents does this CHILD's id number belong to?
+ *
+ * A parent mistyping their own ת"ז is the commonest way the portal refuses
+ * somebody who belongs in it — the number is nine digits typed from memory,
+ * and the one on file was typed by somebody else off a form. The child's
+ * number is the second thing a parent can be asked for, and it sits on the
+ * same records.
+ *
+ * It resolves to the PARENT, never to the child: the account, the password and
+ * the code all stay keyed on the parent's own id number. This answers only
+ * "whose child is this", from the same three places parentDirectory already
+ * trusts — the child's parent slot, the child's second-parent slot, and the
+ * registration behind the child.
+ *
+ * One entry per DISTINCT PARENT, not per child row. A family in its second
+ * year has two active rows for one child, and a father listed on both must be
+ * offered once, not twice.
+ *
+ * Only active children count, exactly as in findParent — so a child marked
+ * inactive closes this door at the same moment it closes the other one.
+ */
+async function parentsOfChildIdNumber(childIdNumber) {
+  const id = normalizeIdNumber(childIdNumber);
+  // Nine digits or nothing. A shorter string is somebody halfway through
+  // typing, and matching on it would answer about a child they did not name.
+  // 161 of 227 active children carry a number; the rest reach the portal
+  // through their parent's, which is what the caller tells them to use.
+  if (id.length !== 9) return [];
+
+  const children = await Child.find({ is_active: true, child_id_number: id })
+    .select('child_name parent_name parent_id_number phone parent2_name parent2_id_number parent2_phone registration_id')
+    .populate('registration_id', 'parent_name parent_phone parent_id_number')
+    .lean();
+  if (children.length === 0) return [];
+
+  const byParent = new Map();
+  for (const child of children) {
+    const reg = child.registration_id;
+    const slots = [
+      [child.parent_id_number, child.parent_name, child.phone],
+      [child.parent2_id_number, child.parent2_name, child.parent2_phone],
+      reg && typeof reg === 'object'
+        ? [reg.parent_id_number, reg.parent_name, reg.parent_phone]
+        : null,
+    ];
+
+    for (const slot of slots) {
+      if (!slot) continue;
+      const [rawId, name, rawPhone] = slot;
+      const parentId = normalizeIdNumber(rawId);
+      if (parentId.length !== 9) continue;
+
+      const phone = normalizePhone(rawPhone);
+      const existing = byParent.get(parentId);
+      if (!existing) {
+        byParent.set(parentId, {
+          id_number: parentId,
+          full_name: name ? String(name).trim() : '',
+          phone: phone || null,
+          child_name: child.child_name || '',
+        });
+      } else {
+        // A later row may carry what an earlier one left blank. Neither is
+        // more authoritative, so the first non-empty answer stands.
+        if (!existing.full_name && name) existing.full_name = String(name).trim();
+        if (!existing.phone && phone) existing.phone = phone;
+      }
+    }
+  }
+
+  return [...byParent.values()];
+}
+
+/**
+ * "דנה" out of "דנה לוי".
+ *
+ * What a parent sees on the list of people recorded for their own child. A
+ * first name is enough to recognise yourself and not a disclosure of somebody
+ * else's full name to whoever typed a child's number.
+ */
+function firstNameOnly(fullName) {
+  const parts = String(fullName || '').trim().split(/\s+/).filter(Boolean);
+  return parts.length ? parts[0] : '';
+}
+
 function maskPhone(phone) {
   const p = normalizePhone(phone);
   if (!p) return null;
@@ -250,4 +336,5 @@ function maskPhone(phone) {
 module.exports = {
   findParent, childrenOfParent, normalizeIdNumber, maskPhone, contactFromChild,
   childIdentityKey, groupByChild, currentEnrolment,
+  parentsOfChildIdNumber, firstNameOnly,
 };

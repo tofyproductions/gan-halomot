@@ -69,6 +69,7 @@ const waitFor = async (fn, ms = 40000) => {
 
   // Two customers, registered in the control plane by hand — provisioning has
   // its own test and this one must fail for isolation reasons or not at all.
+  const MANAGER_PASSWORD = 'isolation-manager-pw';
   const CUSTOMERS = [
     { slug: 'alef', db: 'gf_alef', kid: 'ילד של עמותת אלף', manager: 'מנהלת אלף', id: '111111118' },
     { slug: 'bet', db: 'gf_bet', kid: 'ילד של עמותת בית', manager: 'מנהלת בית', id: '222222226' },
@@ -82,9 +83,14 @@ const waitFor = async (fn, ms = 40000) => {
     });
     const db = client.db(c.db);
     await db.collection('children').insertOne({ child_name: c.kid, academic_year: '2026-2027', is_active: true });
+    // A password, because name + ת"ז stopped being a way in on 07.10.2026 —
+    // a first sign-in now costs a code texted to the mobile on file, and this
+    // test has no mobile and no SMS provider. Isolation is what it measures;
+    // how somebody proves who they are has its own test.
     await db.collection('users').insertOne({
       full_name: c.manager, id_number: c.id, email: `${c.slug}@example.invalid`,
-      role: 'system_admin', is_active: true, password_set: false,
+      role: 'system_admin', is_active: true, password_set: true,
+      password_hash: await bcrypt.hash(MANAGER_PASSWORD, 10),
       created_at: new Date(), updated_at: new Date(),
     });
   }
@@ -121,8 +127,9 @@ const waitFor = async (fn, ms = 40000) => {
     console.log('\n--- כל לקוח רואה את עצמו ---');
     const tokens = {};
     for (const c of CUSTOMERS) {
-      const login = await api('/api/auth/login', {
-        tenant: c.slug, method: 'POST', body: { full_name: c.manager, id_number: c.id },
+      const login = await api('/api/auth/login-password', {
+        tenant: c.slug, method: 'POST',
+        body: { full_name: c.manager, id_number: c.id, password: MANAGER_PASSWORD },
       });
       tokens[c.slug] = login.json && login.json.token;
       ok(Boolean(tokens[c.slug]), `${c.slug}: המנהלת נכנסת`);

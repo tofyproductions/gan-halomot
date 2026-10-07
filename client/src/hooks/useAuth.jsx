@@ -67,11 +67,18 @@ export function AuthProvider({ children }) {
     return me.data.user;
   };
 
-  // Step 1. May return { needs_password: true } (no token) → caller must then
-  // call loginWithPassword. Otherwise it logs in and may carry password_prompt.
+  /**
+   * Step 1. Never returns a token.
+   *
+   * { needs_password: true }   — a password is set; call loginWithPassword.
+   * { needs_activation: true } — no password yet, so a code has just been
+   *                              texted; call resetWithCode with it. This is a
+   *                              first sign-in, and name + ת"ז alone no longer
+   *                              opens anything.
+   */
   const login = async (full_name, id_number, rememberMe = false) => {
     const res = await api.post('/auth/login', { full_name, id_number, rememberMe });
-    if (res.data.needs_password) return res.data;
+    if (res.data.needs_password || res.data.needs_activation) return res.data;
     applyAuth(res.data);
     return res.data;
   };
