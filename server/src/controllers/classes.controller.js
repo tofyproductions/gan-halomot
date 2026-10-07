@@ -279,7 +279,7 @@ async function generateSessions(req, res, next) {
  */
 async function fillMonth(req, res, next) {
   try {
-    const { month, program_id: programId } = req.body || {};
+    const { month, program_id: programId, include_past: includePast } = req.body || {};
     // Clamped to the caller's branches — a manager may not fill a month at a
     // branch she cannot see.
     const scope = managedBranchIds(req);
@@ -287,6 +287,8 @@ async function fillMonth(req, res, next) {
       month,
       programId: programId || null,
       branchIds: scope,
+      // Only when somebody deliberately reconstructs a month that has passed.
+      includePast: includePast === true,
     });
     res.json(result);
   } catch (err) { next(err); }

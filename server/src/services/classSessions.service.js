@@ -17,8 +17,16 @@ const { ClassProgram, ClassSession } = require('../models');
  * A program with no fixed day (`default_day === null`) is deliberately skipped.
  * Those are the ad-hoc ones, and guessing dates for them would put meetings on
  * the board that nobody agreed to and then ask a manager to deny them.
+ *
+ * DATES ALREADY PAST ARE SKIPPED unless asked for. The first run of this on the
+ * live gan wrote three meetings into the week that had already gone, and the
+ * popup would have opened asking a manager whether an instructor came last
+ * Monday — a question she cannot answer from memory, about a week nobody was
+ * tracking. Two or three of those and the popup is a thing you close, which
+ * costs more than the meetings are worth. `includePast` is there for somebody
+ * deliberately reconstructing a month, and the nightly job never sets it.
  */
-async function fillMonth({ month, programId = null, branchIds = null }) {
+async function fillMonth({ month, programId = null, branchIds = null, includePast = false }) {
   if (!/^\d{4}-\d{2}$/.test(String(month || ''))) {
     throw Object.assign(new Error('חודש לא תקין'), { status: 400 });
   }
@@ -33,11 +41,14 @@ async function fillMonth({ month, programId = null, branchIds = null }) {
   // Every date in the month, as YYYY-MM-DD with its weekday. Built from UTC so
   // the day-of-month never shifts under a timezone — these are calendar dates,
   // not moments.
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
   const days = [];
   const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
   for (let d = 1; d <= daysInMonth; d++) {
+    const date = `${month}-${String(d).padStart(2, '0')}`;
+    if (!includePast && date < today) continue;
     const dt = new Date(Date.UTC(y, m - 1, d));
-    days.push({ date: `${month}-${String(d).padStart(2, '0')}`, weekday: dt.getUTCDay() });
+    days.push({ date, weekday: dt.getUTCDay() });
   }
 
   const existing = await ClassSession.find({

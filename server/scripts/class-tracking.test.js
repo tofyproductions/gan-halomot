@@ -119,14 +119,24 @@ const eq = (a, b, label) => ok(a === b, label, `קיבלנו ${JSON.stringify(a)
   // ------------------------------------------------- filling a month
   console.log('\nמילוי חודש לפי היום הקבוע');
   const progById = Object.fromEntries(sched.body.programs.map(p => [p.classroom_category + '|' + p.branch_id, p]));
-  const filled = await call('POST', '/sessions/fill-month', { month: '2026-10' });
+  // include_past, so the count is the month's arithmetic and not a function of
+  // the day this test happens to run.
+  const filled = await call('POST', '/sessions/fill-month', { month: '2026-10', include_past: true });
   eq(filled.status, 200, 'החודש מולא');
   // October 2026: Tuesdays 6,13,20,27 × 3 groups at משה דיין
   //              + Thursdays 1,8,15,22,29 × 1 group at הרצוג = 12 + 5
   eq(filled.body.created, 17, 'מספר המפגשים לפי הימים הקבועים');
-  const again = await call('POST', '/sessions/fill-month', { month: '2026-10' });
+  const again = await call('POST', '/sessions/fill-month', { month: '2026-10', include_past: true });
   eq(again.body.created, 0, 'לחיצה שנייה לא יוצרת כפילויות');
   eq(again.body.skipped, 17, 'וסופרת את מה שכבר קיים');
+
+  // A month that is entirely behind us writes nothing by default — the popup
+  // must never open on a week nobody was tracking.
+  const past = await call('POST', '/sessions/fill-month', { month: '2020-01' });
+  eq(past.body.created, 0, 'חודש שעבר לא ממולא מעצמו');
+  const pastForced = await call('POST', '/sessions/fill-month', { month: '2020-01', include_past: true });
+  ok(pastForced.body.created > 0, 'אלא אם ביקשו במפורש לשחזר אותו');
+  await ClassSession.deleteMany({ date: { $regex: '^2020' } });
 
   const tuesdays = await ClassSession.find({
     program_id: progById['תינוקייה|' + String(ks._id)]._id, date: { $regex: '^2026-10' },
