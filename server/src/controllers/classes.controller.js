@@ -410,12 +410,20 @@ async function applyAnswer(session, body, { manager, lead, userId }) {
       : Math.round(((Number(session.rate) || 0) / 2) * 100) / 100;
     session.no_show_reason = raw.reason || '';
   } else if (status === 'postponed' && raw.new_date) {
+    /**
+     * The make-up lesson, with its own hour.
+     *
+     * A lesson moved to another day is rarely moved to the same time — it
+     * lands wherever the room was free. Carrying the original hour over looked
+     * tidy and put the reminder at 09:00 on a day the instructor was coming at
+     * 14:00, which is a question asked five hours early and answered wrong.
+     */
     const replacement = await ClassSession.create({
       program_id: session.program_id,
       branch_id: session.branch_id,
       classroom_id: session.classroom_id,
       date: raw.new_date,
-      time: session.time,
+      time: raw.new_time || session.time,
       rate: session.rate,
       status: 'scheduled',
       postponed_from_session_id: session._id,

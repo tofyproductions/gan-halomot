@@ -49,6 +49,10 @@ export default function ClassPopupPoller() {
   const [reason, setReason] = useState('');      // whole-visit reason, when she did not come
   const [reschedule, setReschedule] = useState(false);
   const [newDate, setNewDate] = useState('');
+  // The hour of the make-up. A lesson moved to another day lands wherever the
+  // room is free, not at the hour it was meant to be — and the reminder goes
+  // out at the hour the session carries.
+  const [newTime, setNewTime] = useState('');
   const [saving, setSaving] = useState(false);
   const timerRef = useRef(null);
 
@@ -75,11 +79,17 @@ export default function ClassPopupPoller() {
     const next = queue[0];
     setVisit(next);
     setCame(null);
-    setReason(''); setReschedule(false); setNewDate('');
+    setReason(''); setReschedule(false); setNewDate(''); setNewTime('');
     // Every group starts at "it happened", because that is what usually
     // happened — the manager is correcting an exception, not filling a form.
     setRows(Object.fromEntries((next.classes || []).map(c => [
-      c.id, { status: 'occurred', amount: Math.round((c.rate / 2) * 100) / 100, reason: '' },
+      c.id, {
+        status: 'occurred',
+        amount: Math.round((c.rate / 2) * 100) / 100,
+        reason: '',
+        // A make-up for THIS group, when only this one was missed.
+        postpone: false, newDate: '', newTime: c.time || '',
+      },
     ])));
   }, [queue, visit]);
 
@@ -95,6 +105,13 @@ export default function ClassPopupPoller() {
   const submit = () => {
     if (came === null) return toast.info('בחר/י אם הגיע/ה');
     if (came === false && reschedule && !newDate) return toast.error('בחר/י תאריך חדש');
+    if (came === true) {
+      const missingDate = (visit.classes || []).find(c => {
+        const r = rows[c.id] || {};
+        return r.status === 'no_show' && r.postpone && !r.newDate;
+      });
+      if (missingDate) return toast.error('בחר/י תאריך למפגש ההשלמה');
+    }
 
     const answers = (visit.classes || []).map((c) => {
       if (came === false) {
@@ -102,7 +119,7 @@ export default function ClassPopupPoller() {
           id: c.id,
           status: reschedule ? 'postponed' : 'no_show',
           reason,
-          ...(reschedule ? { new_date: newDate } : {}),
+          ...(reschedule ? { new_date: newDate, new_time: newTime || c.time || '' } : {}),
         };
       }
       const r = rows[c.id] || { status: 'occurred' };
@@ -110,6 +127,13 @@ export default function ClassPopupPoller() {
         return { id: c.id, status: 'partial', partial_amount: Number(r.amount) || 0, reason: r.reason || '' };
       }
       if (r.status === 'no_show') {
+        // Only this group was missed — the make-up is for it alone.
+        if (r.postpone && r.newDate) {
+          return {
+            id: c.id, status: 'postponed', reason: r.reason || '',
+            new_date: r.newDate, new_time: r.newTime || '',
+          };
+        }
         return { id: c.id, status: 'no_show', reason: r.reason || '' };
       }
       return { id: c.id, status: 'occurred' };
@@ -194,10 +218,37 @@ export default function ClassPopupPoller() {
                       </Stack>
                     )}
                     {r.status === 'no_show' && (
-                      <TextField
-                        label="למה לא התקיימה?" size="small" fullWidth sx={{ mt: 1.5 }}
-                        value={r.reason || ''} onChange={e => setRow(c.id, { reason: e.target.value })}
-                      />
+                      <Stack spacing={1.5} sx={{ mt: 1.5 }}>
+                        <TextField
+                          label="למה לא התקיימה?" size="small" fullWidth
+                          value={r.reason || ''} onChange={e => setRow(c.id, { reason: e.target.value })}
+                        />
+                        <FormControlLabel
+                          control={<Checkbox checked={!!r.postpone}
+                            onChange={e => setRow(c.id, { postpone: e.target.checked })} />}
+                          label="נקבע מועד השלמה לקבוצה הזאת"
+                        />
+                        {r.postpone && (
+                          <Stack direction="row" spacing={1}>
+                            <TextField
+                              label="תאריך ההשלמה" type="date" size="small" sx={{ flex: 1 }}
+                              InputLabelProps={{ shrink: true }}
+                              value={r.newDate || ''} onChange={e => setRow(c.id, { newDate: e.target.value })}
+                            />
+                            <TextField
+                              label="שעה" type="time" size="small" sx={{ width: 130 }}
+                              InputLabelProps={{ shrink: true }}
+                              value={r.newTime || ''} onChange={e => setRow(c.id, { newTime: e.target.value })}
+                            />
+                          </Stack>
+                        )}
+                        {r.postpone && (
+                          <Alert severity="info" sx={{ py: 0 }}>
+                            ייווצר מפגש חדש במועד שנבחר, והשאלה תחזור באותו יום ובאותה שעה.
+                            המפגש של היום לא ייספר לתשלום.
+                          </Alert>
+                        )}
+                      </Stack>
                     )}
                   </Box>
                 );
@@ -217,15 +268,22 @@ export default function ClassPopupPoller() {
                 label="נדחה לתאריך אחר"
               />
               {reschedule && (
-                <TextField
-                  label="תאריך חדש" type="date" size="small"
-                  value={newDate} onChange={e => setNewDate(e.target.value)}
-                  InputLabelProps={{ shrink: true }} sx={{ maxWidth: 220 }}
-                />
+                <Stack direction="row" spacing={1}>
+                  <TextField
+                    label="תאריך חדש" type="date" size="small" sx={{ flex: 1, maxWidth: 220 }}
+                    value={newDate} onChange={e => setNewDate(e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                  />
+                  <TextField
+                    label="שעה" type="time" size="small" sx={{ width: 130 }}
+                    value={newTime} onChange={e => setNewTime(e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                  />
+                </Stack>
               )}
               <Alert severity="info" sx={{ py: 0 }}>
                 {reschedule
-                  ? `ייווצרו מפגשים חדשים בתאריך שנבחר עבור ${visit.classes.length} הכיתות; המפגשים של היום לא ייספרו לתשלום.`
+                  ? `ייווצרו מפגשים חדשים במועד שנבחר עבור ${visit.classes.length} הכיתות, והשאלה תחזור באותו יום. המפגשים של היום לא ייספרו לתשלום.`
                   : `${visit.classes.length} הכיתות של היום לא ייספרו לתשלום.`}
               </Alert>
             </Stack>

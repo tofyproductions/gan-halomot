@@ -5,7 +5,7 @@ import {
   Box, Typography, Card, TextField, Button, Stack,
   Table, TableBody, TableCell, TableHead, TableRow, TableContainer,
   Chip, IconButton, Tooltip, Menu, MenuItem, Drawer,
-  Dialog, DialogTitle, DialogContent, DialogActions,
+  Dialog, DialogTitle, DialogContent, DialogActions, Alert,
 } from '@mui/material';
 import SaveIcon from '@mui/icons-material/Save';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -161,7 +161,40 @@ export default function GanttEditor() {
   const [saving, setSaving] = useState(false);
   const [classroomName, setClassroomName] = useState('');
   const [classroomCategory, setClassroomCategory] = useState('');
-  const [classSessions, setClassSessions] = useState([]); // read-only reflection from מעקב חוגים
+  const [classSessions, setClassSessions] = useState([]); // reflection from מעקב חוגים
+  /**
+   * Moving a class off the day it was generated on.
+   *
+   * The dates come from the class's fixed day, which is what the arrangement
+   * says and not always what the week holds — a holiday, a trip, an instructor
+   * who swapped. The manager is the one who knows, she is already on this
+   * screen, and the session's own date is what the morning reminder reads. So
+   * moving it here moves the question with it; there is nothing else to keep
+   * in step.
+   */
+  const [moveSession, setMoveSession] = useState(null); // { id, date, time, name }
+  const [movingBusy, setMovingBusy] = useState(false);
+  // The server allows system_admin / branch_manager / accountant on the
+  // session routes; a גננת sees the lane and does not move it.
+  const canMoveSessions = isManager;
+
+  const reloadSessions = () => api
+    .get('/classes/sessions', { params: { branch: selectedBranch, month: `${year}-${String(month).padStart(2, '0')}` } })
+    .then(res => setClassSessions(res.data.sessions || []))
+    .catch(() => {});
+
+  const saveMove = () => {
+    if (!moveSession?.date) return toast.error('בחר/י תאריך');
+    setMovingBusy(true);
+    api.put(`/classes/sessions/${moveSession.id}`, { date: moveSession.date, time: moveSession.time })
+      .then(() => {
+        toast.success('המפגש הועבר — התזכורת תגיע במועד החדש');
+        setMoveSession(null);
+        return reloadSessions();
+      })
+      .catch(err => toast.error(err.response?.data?.error || 'ההעברה נכשלה'))
+      .finally(() => setMovingBusy(false));
+  };
   const [colorMenu, setColorMenu] = useState({ anchor: null, weekIdx: null, rowKey: null, dayIdx: null });
   const [specialDlg, setSpecialDlg] = useState(null);
   const [showBank, setShowBank] = useState(false);
@@ -271,8 +304,17 @@ export default function GanttEditor() {
   // (or either side is unset = general). Purely informational; never saved.
   const sessionsOnDate = (dd) => {
     const ymd = localYmd(dd);
-    return classSessions.filter(s => s.date === ymd
-      && (!classroomCategory || !s.program_id?.classroom_category || s.program_id.classroom_category === classroomCategory));
+    return classSessions.filter((s) => {
+      if (s.date !== ymd) return false;
+      // A class may serve several groups in one meeting, so the match is
+      // against the LIST; the old single field is still read for rows written
+      // before that existed.
+      const cats = s.program_id?.classroom_categories?.length
+        ? s.program_id.classroom_categories
+        : (s.program_id?.classroom_category ? [s.program_id.classroom_category] : []);
+      // Either side unset = general, and a general class shows everywhere.
+      return !classroomCategory || cats.length === 0 || cats.includes(classroomCategory);
+    });
   };
   const SESSION_TINT = { occurred: '#dcfce7', no_show: '#fee2e2', postponed: '#ffedd5', scheduled: COLOR.background.sunken };
 
@@ -1034,16 +1076,31 @@ export default function GanttEditor() {
                           {dayCells.map(({ di, sessions }) => (
                             <TableCell key={di} sx={{ bgcolor: COLOR.gantt.fixedRow.bg, border: `1px solid ${COLOR.gantt.fixedRow.border}`, p: 0.5, verticalAlign: 'top' }}>
                               <Stack spacing={0.4}>
-                                {sessions.map(s => (
-                                  <Box key={s._id} sx={{
-                                    bgcolor: SESSION_TINT[s.status] || COLOR.background.sunken, borderRadius: 1, px: 0.6, py: 0.2,
-                                    fontSize: '0.68rem', fontWeight: 700, color: '#334155',
-                                    textDecoration: s.status === 'postponed' ? 'line-through' : 'none',
-                                  }}>
-                                    {s.program_id?.name || 'חוג'}{s.time ? ` ${s.time}` : ''}
-                                    {s.status === 'postponed' && s.postponed_to_date ? ` → ${s.postponed_to_date.slice(5)}` : ''}
-                                  </Box>
-                                ))}
+                                {sessions.map(s => {
+                                  // Only a meeting still waiting can be moved: one
+                                  // already answered is a record of what happened.
+                                  const movable = canMoveSessions && s.status === 'scheduled';
+                                  return (
+                                    <Tooltip key={s._id} title={movable ? 'לחצ/י כדי להעביר ליום או לשעה אחרת' : ''}>
+                                      <Box
+                                        onClick={movable ? () => setMoveSession({
+                                          id: s._id, date: s.date, time: s.time || '',
+                                          name: s.program_id?.name || 'חוג',
+                                        }) : undefined}
+                                        sx={{
+                                          bgcolor: SESSION_TINT[s.status] || COLOR.background.sunken, borderRadius: 1, px: 0.6, py: 0.2,
+                                          fontSize: '0.68rem', fontWeight: 700, color: '#334155',
+                                          textDecoration: s.status === 'postponed' ? 'line-through' : 'none',
+                                          cursor: movable ? 'pointer' : 'default',
+                                          '&:hover': movable ? { outline: '1.5px solid #9d174d' } : {},
+                                        }}
+                                      >
+                                        {s.program_id?.name || 'חוג'}{s.time ? ` ${s.time}` : ''}
+                                        {s.status === 'postponed' && s.postponed_to_date ? ` → ${s.postponed_to_date.slice(5)}` : ''}
+                                      </Box>
+                                    </Tooltip>
+                                  );
+                                })}
                               </Stack>
                             </TableCell>
                           ))}
@@ -1455,6 +1512,37 @@ export default function GanttEditor() {
           <DialogActions>
             <Button onClick={() => setActivityDialog({ open: false, name: '', color: COLOR.gantt.defaultActivity, fixed_day: '' })}>ביטול</Button>
             <Button variant="contained" onClick={addActivity}>הוסף</Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Moving one meeting. The session's own date is what the morning
+            reminder reads, so there is nothing else to keep in step. */}
+        <Dialog open={!!moveSession} onClose={() => setMoveSession(null)} dir="rtl" maxWidth="xs" fullWidth>
+          <DialogTitle>העברת מפגש — {moveSession?.name}</DialogTitle>
+          <DialogContent>
+            <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+              <TextField
+                label="תאריך" type="date" size="small" sx={{ flex: 1 }}
+                InputLabelProps={{ shrink: true }}
+                value={moveSession?.date || ''}
+                onChange={e => setMoveSession(m => ({ ...m, date: e.target.value }))}
+              />
+              <TextField
+                label="שעה" type="time" size="small" sx={{ width: 130 }}
+                InputLabelProps={{ shrink: true }}
+                value={moveSession?.time || ''}
+                onChange={e => setMoveSession(m => ({ ...m, time: e.target.value }))}
+              />
+            </Stack>
+            <Alert severity="info" sx={{ mt: 2 }}>
+              התזכורת למנהלת תגיע ביום ובשעה שנבחרו כאן, ולא ביום הקבוע של החוג.
+            </Alert>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setMoveSession(null)} disabled={movingBusy}>ביטול</Button>
+            <Button variant="contained" onClick={saveMove} disabled={movingBusy}>
+              {movingBusy ? 'מעביר…' : 'שמירה'}
+            </Button>
           </DialogActions>
         </Dialog>
 

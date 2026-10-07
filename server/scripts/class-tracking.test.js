@@ -237,6 +237,33 @@ const eq = (a, b, label) => ok(a === b, label, `קיבלנו ${JSON.stringify(a)
   eq(after.filter(s => s.status === 'no_show').length, 1, 'ואחד לא הגיע');
   ok(after.every(s => s.manager_confirmed === true), 'וכולם מאושרים בידי המנהלת');
 
+  // -------------------------------- a make-up for ONE group, at its own hour
+  console.log('\nהשלמה לקבוצה אחת');
+  const missed = await ClassSession.findOne({ date: DAY, status: 'no_show' }).lean();
+  await ClassSession.updateOne({ _id: missed._id }, { status: 'scheduled', manager_confirmed: false });
+  const one = await callMgr('POST', '/sessions/answer-visit', {
+    answers: [{
+      id: String(missed._id), status: 'postponed', reason: 'המדריכה איחרה',
+      new_date: '2026-10-08', new_time: '14:30',
+    }],
+  });
+  eq(one.body.saved, 1, 'נשמר');
+  const movedFrom = await ClassSession.findById(missed._id).lean();
+  eq(movedFrom.status, 'postponed', 'המפגש המקורי מסומן כנדחה');
+  eq(movedFrom.postponed_to_date, '2026-10-08', 'ומצביע על המועד החדש');
+  const makeup = await ClassSession.findOne({ postponed_from_session_id: missed._id }).lean();
+  ok(Boolean(makeup), 'נוצר מפגש השלמה');
+  eq(makeup.time, '14:30',
+    'בשעה שנבחרה — ולא בשעה המקורית, כי שיעור שמוזז נוחת איפה שהחדר פנוי');
+  eq(makeup.rate, movedFrom.rate, 'ובאותו תעריף');
+  eq(makeup.status, 'scheduled', 'והוא ממתין לתשובה — השאלה תחזור באותו יום');
+  eq(await ClassSession.countDocuments({ date: DAY, status: 'postponed' }), 1,
+    'ורק הקבוצה הזאת נדחתה — לא כל הביקור');
+  // Put it back, so the month's arithmetic below is what it was.
+  await ClassSession.deleteOne({ _id: makeup._id });
+  await ClassSession.updateOne({ _id: missed._id },
+    { status: 'no_show', manager_confirmed: true, postponed_to_date: null, postponed_to_session_id: null });
+
   const dueAgain = await callMgr('GET', '/sessions/due');
   eq((dueAgain.body.visits || []).length, 0, 'והביקור לא נשאל שוב');
 
