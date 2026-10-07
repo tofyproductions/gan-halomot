@@ -18,6 +18,78 @@ import { useConfirm } from '../shared/ConfirmProvider';
 const DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי'];
 const CATEGORIES = ['תינוקייה', 'צעירים', 'בוגרים', 'קבוצה'];
 const bid = (b) => String(b._id || b.id);
+const ils = (n) => `₪${(Math.round((Number(n) || 0) * 100) / 100).toLocaleString('he-IL')}`;
+
+/** The academic year we are in, as 'YYYY-MM' bounds — September to August. */
+function academicYear() {
+  const now = new Date();
+  const y = now.getMonth() + 1 >= 9 ? now.getFullYear() : now.getFullYear() - 1;
+  return { start: `${y}-09`, end: `${y + 1}-08` };
+}
+
+/**
+ * Who owes whom, under a monthly retainer. Read-only, from the server — the
+ * arithmetic lives in classRetainer.service and is tested there.
+ */
+function SettlementCard({ providerId, billing }) {
+  const [s, setS] = useState(null);
+  useEffect(() => {
+    if (!providerId || billing?.mode !== 'monthly') { setS(null); return; }
+    api.get(`/classes/providers/${providerId}/settlement`)
+      .then(r => setS(r.data)).catch(() => setS(null));
+  }, [providerId, billing?.mode, billing?.monthly_fee, billing?.period_start, billing?.period_end]);
+
+  if (!s) return null;
+  if (!s.ok) {
+    return (
+      <Alert severity="info">
+        {s.reason === 'no_period'
+          ? 'כדי לחשב מאזן צריך חודש התחלה להסכם — שמרו אותו ונחזור לכאן.'
+          : 'המאזן יופיע אחרי השמירה.'}
+      </Alert>
+    );
+  }
+  const verdict = (bal) => (Math.abs(bal) < 0.01
+    ? { text: 'מאוזן בדיוק', sev: 'success' }
+    : bal > 0
+      ? { text: `היא חייבת לגן קיזוז של ${ils(bal)}`, sev: 'warning' }
+      : { text: `הגן חייב לה השלמה של ${ils(-bal)}`, sev: 'warning' });
+  const now = verdict(s.to_date.balance);
+  const end = verdict(s.forecast.balance);
+  return (
+    <Box sx={{ border: '1px solid #e5e7eb', borderRadius: 2, p: 1.5 }}>
+      <Typography sx={{ fontWeight: 700, mb: 1 }}>מאזן ההסכם</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+        שווי מפגש: {ils(s.unit_value)} ({ils(s.monthly_fee)} ÷ {s.meetings_per_month})
+      </Typography>
+      <Table size="small">
+        <TableHead><TableRow>
+          <TableCell /><TableCell>שולם</TableCell><TableCell>מפגשים שהתקיימו</TableCell>
+          <TableCell>שווי מה שהתקיים</TableCell><TableCell>מצב</TableCell>
+        </TableRow></TableHead>
+        <TableBody>
+          <TableRow>
+            <TableCell sx={{ fontWeight: 600 }}>עד היום ({s.to_date.months_paid} חודשים)</TableCell>
+            <TableCell>{ils(s.to_date.paid)}</TableCell>
+            <TableCell>{s.to_date.meetings_held} מתוך {s.to_date.meetings_paid_for}</TableCell>
+            <TableCell>{ils(s.to_date.earned)}</TableCell>
+            <TableCell><Chip size="small" color={now.sev} label={now.text} /></TableCell>
+          </TableRow>
+          <TableRow>
+            <TableCell sx={{ fontWeight: 600 }}>צפי לסוף ההסכם</TableCell>
+            <TableCell>{ils(s.forecast.paid)}</TableCell>
+            <TableCell>{s.forecast.meetings} (כולל המתוכננים)</TableCell>
+            <TableCell>{ils(s.forecast.earned)}</TableCell>
+            <TableCell><Chip size="small" variant="outlined" color={end.sev} label={end.text} /></TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+      <Typography variant="caption" color="text.secondary">
+        מפגש חלקי נספר לפי החלק ששולם; מפגש שלא התקיים או נדחה לא נספר (הנדחה נספר ביום שהתקיים בפועל).
+      </Typography>
+    </Box>
+  );
+}
 
 /**
  * ספקי גנים — the people who run the classes, and the arrangement each of them
@@ -100,7 +172,21 @@ export default function ProvidersDialog({ open, onClose, focus = '' }) {
     setLoading(true);
     api.get(`/classes/providers/${p._id}/schedule`)
       .then(r => {
-        setEditing({ ...r.data.provider, branch_ids: (r.data.provider.branch_ids || []).map(String) });
+        const ay = academicYear();
+        const b = r.data.provider.billing || {};
+        setEditing({
+          ...r.data.provider,
+          branch_ids: (r.data.provider.branch_ids || []).map(String),
+          billing: {
+            mode: b.mode || 'per_session',
+            monthly_fee: b.monthly_fee || '',
+            meetings_per_month: b.meetings_per_month || 4,
+            // Unset periods are offered the current academic year — confirmed
+            // by saving, never assumed silently on the server.
+            period_start: b.period_start || ay.start,
+            period_end: b.period_end || ay.end,
+          },
+        });
         setRows((r.data.programs || []).map(g => ({
           _id: g._id,
           branch_id: String(g.branch_id),
@@ -147,6 +233,7 @@ export default function ProvidersDialog({ open, onClose, focus = '' }) {
       .then(() => api.put(`/classes/providers/${editing._id}/schedule`, {
         branch_ids: editing.branch_ids,
         vat_mode: editing.vat_mode,
+        billing: editing.billing,
         rows: rows.map(r => ({ ...r, default_rate: Number(r.default_rate) || 0 })),
       }))
       .then(() => { toast.success('נשמר'); setEditing(null); load(); })
@@ -269,6 +356,50 @@ export default function ProvidersDialog({ open, onClose, focus = '' }) {
                 <MenuItem value="registered">עוסק מורשה</MenuItem>
               </TextField>
             </Stack>
+
+            {/*
+              Per meeting, or a flat monthly sum "for N meetings" settled at the
+              end of the period. The meetings are tracked either way — under a
+              retainer they are what the settlement is made of.
+            */}
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+              <TextField select size="small" label="אופן תשלום" sx={{ minWidth: 190 }}
+                value={editing.billing?.mode || 'per_session'}
+                onChange={e => setField('billing', { ...editing.billing, mode: e.target.value })}>
+                <MenuItem value="per_session">לפי מפגש</MenuItem>
+                <MenuItem value="monthly">תשלום חודשי קבוע</MenuItem>
+              </TextField>
+              {editing.billing?.mode === 'monthly' && (
+                <>
+                  <TextField size="small" label="סכום חודשי" type="number" sx={{ width: 140 }}
+                    value={editing.billing.monthly_fee}
+                    onChange={e => setField('billing', { ...editing.billing, monthly_fee: e.target.value })}
+                    InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }} />
+                  <TextField size="small" label="מפגשים בחודש" type="number" sx={{ width: 120 }}
+                    value={editing.billing.meetings_per_month}
+                    onChange={e => setField('billing', { ...editing.billing, meetings_per_month: e.target.value })} />
+                  <TextField size="small" label="מחודש" type="month" sx={{ width: 160 }}
+                    InputLabelProps={{ shrink: true }}
+                    value={editing.billing.period_start}
+                    onChange={e => setField('billing', { ...editing.billing, period_start: e.target.value })} />
+                  <TextField size="small" label="עד חודש" type="month" sx={{ width: 160 }}
+                    InputLabelProps={{ shrink: true }}
+                    value={editing.billing.period_end}
+                    onChange={e => setField('billing', { ...editing.billing, period_end: e.target.value })} />
+                </>
+              )}
+            </Stack>
+            {editing.billing?.mode === 'monthly' && (
+              <Alert severity="info" sx={{ py: 0.5 }}>
+                משלמים כל חודש את הסכום הקבוע, גם בחודש עם 3 או 5 מפגשים.
+                בסוף התקופה המערכת סוכמת כמה מפגשים התקיימו בפועל ומחשבת מי חייב למי.
+                התעריף בשורות הלוח צריך להיות שווי מפגש אחד
+                {Number(editing.billing.monthly_fee) > 0 && Number(editing.billing.meetings_per_month) > 0
+                  ? ` (${ils(Number(editing.billing.monthly_fee) / Number(editing.billing.meetings_per_month))})`
+                  : ''} — לפיו נספר מפגש חלקי.
+              </Alert>
+            )}
+            <SettlementCard providerId={editing._id} billing={editing.billing} />
 
             <Divider />
             <Stack direction="row" alignItems="center">

@@ -33,6 +33,8 @@ router.delete('/providers/:id', MANAGER, c.deleteProvider);
 // which rates — read and written in a single call. See the controller.
 router.get('/providers/:id/schedule', c.getProviderSchedule);
 router.put('/providers/:id/schedule', MANAGER, c.setProviderSchedule);
+// A monthly-retainer provider's year: paid vs held, and who owes whom.
+router.get('/providers/:id/settlement', MANAGER, c.providerSettlement);
 
 // Programs (חוגים)
 router.get('/programs', c.listPrograms);

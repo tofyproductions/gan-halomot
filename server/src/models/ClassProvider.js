@@ -44,6 +44,31 @@ const classProviderSchema = new mongoose.Schema({
    * on top. That way the rate means one thing everywhere.
    */
   vat_mode: { type: String, enum: ['exempt', 'registered'], default: 'exempt' },
+
+  /**
+   * HOW she is paid — per meeting, or a fixed sum every month.
+   *
+   * Most instructors are paid for the meetings that happened. Some have a
+   * retainer instead: a flat monthly sum "for four meetings", paid the same in
+   * a month with three Mondays as in a month with five. The month's payment is
+   * then fixed, and the truth is settled once, at the end of the period: the
+   * meetings she actually held, valued at fee / meetings_per_month, against
+   * everything paid. More paid than held → she owes a credit (קיזוז); less →
+   * the gan owes her the difference (השלמה).
+   *
+   * The meetings are still tracked one by one — the popup still asks about each
+   * Monday — because they are the whole basis of that settlement.
+   *
+   * period_start / period_end ('YYYY-MM') bound the months the fee is paid for,
+   * so the settlement knows how many months were paid without guessing.
+   */
+  billing: {
+    mode: { type: String, enum: ['per_session', 'monthly'], default: 'per_session' },
+    monthly_fee: { type: Number, default: 0 },          // pre-VAT, like every rate here
+    meetings_per_month: { type: Number, default: 4 },
+    period_start: { type: String, default: '' },        // 'YYYY-MM'
+    period_end: { type: String, default: '' },          // 'YYYY-MM'
+  },
   is_active: { type: Boolean, default: true },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 

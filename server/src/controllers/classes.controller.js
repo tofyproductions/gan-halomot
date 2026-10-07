@@ -1,6 +1,20 @@
 const { ClassProvider, ClassProgram, ClassSession, Classroom, Branch } = require('../models');
 const { getBranchFilter } = require('../utils/branch-filter');
 const classSessions = require('../services/classSessions.service');
+const retainer = require('../services/classRetainer.service');
+
+/** Accept a billing block from the screen, keeping only what the model knows. */
+function billingOf(raw) {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const ym = (v) => (/^\d{4}-\d{2}$/.test(String(v || '')) ? String(v) : '');
+  return {
+    mode: raw.mode === 'monthly' ? 'monthly' : 'per_session',
+    monthly_fee: Math.max(0, Number(raw.monthly_fee) || 0),
+    meetings_per_month: Math.max(1, Number(raw.meetings_per_month) || 4),
+    period_start: ym(raw.period_start),
+    period_end: ym(raw.period_end),
+  };
+}
 
 // Accept only a YYYY-MM month before it becomes a $regex, so a crafted value
 // can neither broaden the date filter nor pin the server with catastrophic
@@ -57,6 +71,7 @@ async function updateProvider(req, res, next) {
     if (update.vat_mode !== undefined) {
       update.vat_mode = update.vat_mode === 'registered' ? 'registered' : 'exempt';
     }
+    if (req.body.billing !== undefined) update.billing = billingOf(req.body.billing);
     const provider = await ClassProvider.findByIdAndUpdate(req.params.id, update, { new: true }).lean();
     if (!provider) return res.status(404).json({ error: 'ספק לא נמצא' });
     res.json({ provider });
@@ -105,6 +120,7 @@ async function setProviderSchedule(req, res, next) {
     if (body.vat_mode !== undefined) {
       provider.vat_mode = body.vat_mode === 'registered' ? 'registered' : 'exempt';
     }
+    if (body.billing !== undefined) provider.billing = billingOf(body.billing);
     await provider.save();
 
     const kept = [];
@@ -142,6 +158,21 @@ async function setProviderSchedule(req, res, next) {
     const programs = await ClassProgram.find({ provider_id: provider._id, is_active: true })
       .sort({ branch_id: 1, default_day: 1, default_time: 1 }).lean();
     res.json({ provider: provider.toObject(), programs });
+  } catch (err) { next(err); }
+}
+
+/**
+ * GET /classes/providers/:id/settlement?as_of=YYYY-MM
+ *
+ * For a provider on a monthly retainer: what was paid, what was held, and who
+ * owes whom — to date, and forecast to the end of the agreed period.
+ */
+async function providerSettlement(req, res, next) {
+  try {
+    const provider = await ClassProvider.findById(req.params.id).lean();
+    if (!provider) return res.status(404).json({ error: 'ספק לא נמצא' });
+    const asOf = /^\d{4}-\d{2}$/.test(String(req.query.as_of || '')) ? req.query.as_of : undefined;
+    res.json(await retainer.settlement(provider, asOf ? { asOf } : {}));
   } catch (err) { next(err); }
 }
 
@@ -642,7 +673,7 @@ async function paymentSummary(req, res, next) {
     const sessions = await ClassSession.find(filter).populate({
       path: 'program_id',
       select: 'name instructor_name classroom_category classroom_categories provider_id branch_id',
-      populate: { path: 'provider_id', select: 'name vat_mode' },
+      populate: { path: 'provider_id', select: 'name vat_mode billing' },
     }).lean();
 
     const branchIds = [...new Set(sessions.map(s => String(s.branch_id)))];
@@ -661,8 +692,10 @@ async function paymentSummary(req, res, next) {
           provider_id: provider ? String(provider._id) : null,
           provider_name: provider?.name || prog.instructor_name || 'ללא ספק',
           vat_mode: provider?.vat_mode || 'exempt',
+          provider_doc: provider,
           programs: new Map(),
           subtotal: 0,
+          held: 0,
         });
       }
       const p = byProvider.get(pKey);
@@ -691,10 +724,30 @@ async function paymentSummary(req, res, next) {
       }
       g.amount += due;
       p.subtotal += due;
+      p.held += retainer.weightOf(s);
     }
 
     const round2 = (n) => Math.round(n * 100) / 100;
+    const month = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : '';
     const providers = [...byProvider.values()].map(p => {
+      /**
+       * A retainer is paid flat: the month's sum is the agreed fee, whatever
+       * the calendar held. The meetings are still counted beside it — they are
+       * what the year-end settlement is made of.
+       */
+      const onRetainer = p.provider_doc && retainer.isRetainer(p.provider_doc);
+      let retainerInfo = null;
+      if (onRetainer && month) {
+        const b = p.provider_doc.billing;
+        const fee = retainer.inPeriod(p.provider_doc, month) ? Number(b.monthly_fee) : 0;
+        retainerInfo = {
+          monthly_fee: Number(b.monthly_fee),
+          meetings_per_month: Number(b.meetings_per_month) || 4,
+          held_this_month: round2(p.held),
+          in_period: fee > 0,
+        };
+        p.subtotal = fee;
+      }
       const subtotal = round2(p.subtotal);
       const vat = p.vat_mode === 'registered' ? round2(subtotal * VAT_RATE) : 0;
       return {
@@ -702,6 +755,7 @@ async function paymentSummary(req, res, next) {
         provider_name: p.provider_name,
         vat_mode: p.vat_mode,
         programs: [...p.programs.values()].map(g => ({ ...g, amount: round2(g.amount) })),
+        retainer: retainerInfo,
         subtotal,
         vat,
         total: round2(subtotal + vat),
@@ -731,7 +785,7 @@ async function paymentSummary(req, res, next) {
 
 module.exports = {
   listProviders, createProvider, updateProvider, deleteProvider,
-  getProviderSchedule, setProviderSchedule,
+  getProviderSchedule, setProviderSchedule, providerSettlement,
   listPrograms, createProgram, updateProgram, deleteProgram,
   listSessions, createSession, generateSessions, fillMonth, updateSession, deleteSession,
   answerSession, answerVisit, dueSessions, paymentSummary,

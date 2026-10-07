@@ -65,6 +65,11 @@ function PaymentSummary({ branchId, month, refreshKey }) {
                 <Typography sx={{ fontWeight: 600 }}>{p.provider_name}</Typography>
                 <Chip size="small" variant="outlined"
                   label={p.vat_mode === 'registered' ? 'עוסק מורשה' : 'פטור'} />
+                {/* A retainer is paid flat; the meetings beside it feed the year-end settlement. */}
+                {p.retainer && (
+                  <Chip size="small" color="info" variant="outlined"
+                    label={`חודשי קבוע · ${p.retainer.held_this_month} מתוך ${p.retainer.meetings_per_month} מפגשים החודש`} />
+                )}
                 <Box sx={{ flex: 1 }} />
                 <Typography variant="body2" color="text.secondary">
                   {p.vat ? `${ils(p.subtotal)} + מע״מ ${ils(p.vat)} = ` : ''}
