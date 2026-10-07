@@ -695,7 +695,7 @@ async function paymentSummary(req, res, next) {
           provider_doc: provider,
           programs: new Map(),
           subtotal: 0,
-          held: 0,
+          held_by_branch: new Map(),   // raw group-sessions; made into visits below
         });
       }
       const p = byProvider.get(pKey);
@@ -724,11 +724,19 @@ async function paymentSummary(req, res, next) {
       }
       g.amount += due;
       p.subtotal += due;
-      p.held += retainer.weightOf(s);
+      const bk = String(s.branch_id);
+      p.held_by_branch.set(bk, (p.held_by_branch.get(bk) || 0) + retainer.weightOf(s));
     }
 
     const round2 = (n) => Math.round(n * 100) / 100;
     const month = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : '';
+    // Retainer meetings are visits: each group's session is a share of one.
+    const groupsOf = new Map();
+    for (const p of byProvider.values()) {
+      if (p.provider_doc && retainer.isRetainer(p.provider_doc)) {
+        groupsOf.set(p.provider_id, await retainer.groupsPerVisit(p.provider_doc._id));
+      }
+    }
     const providers = [...byProvider.values()].map(p => {
       /**
        * A retainer is paid flat: the month's sum is the agreed fee, whatever
@@ -740,10 +748,13 @@ async function paymentSummary(req, res, next) {
       if (onRetainer && month) {
         const b = p.provider_doc.billing;
         const fee = retainer.inPeriod(p.provider_doc, month) ? Number(b.monthly_fee) : 0;
+        const groups = groupsOf.get(p.provider_id) || new Map();
+        let held = 0;
+        for (const [bk, w] of p.held_by_branch) held += w * retainer.visitShare(groups, bk);
         retainerInfo = {
           monthly_fee: Number(b.monthly_fee),
           meetings_per_month: Number(b.meetings_per_month) || 4,
-          held_this_month: round2(p.held),
+          held_this_month: round2(held),
           in_period: fee > 0,
         };
         p.subtotal = fee;

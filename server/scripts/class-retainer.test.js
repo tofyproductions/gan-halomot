@@ -126,6 +126,31 @@ const eq = (a, b, l) => ok(a === b, l, `קיבלנו ${JSON.stringify(a)}, צי�
   const s2 = await R.settlement(await ClassProvider.findById(B2._id).lean(), { asOf: '2026-09' });
   eq(s2.to_date.balance, -735, 'חמישה מפגשים בחודש של ארבעה — הגן חייב לה השלמה של 735');
 
+  console.log('\nמפגש = ביקור, לא קבוצה');
+  // Four groups on one morning are ONE meeting; a morning with one group of
+  // the four is a quarter of one, and the group made up later adds its quarter.
+  const B3 = await ClassProvider.create({ name: 'ארבע קבוצות', billing: { mode: 'monthly', monthly_fee: 2940, meetings_per_month: 4, period_start: '2026-09' } });
+  const groups3 = [];
+  for (const n of ['בוגרים', 'תינוקייה', 'צעירים א', 'צעירים ב']) {
+    groups3.push(await ClassProgram.create({ branch_id: hz._id, provider_id: B3._id, name: n, default_rate: 735 }));
+  }
+  const visit = async (d, statuses) => {
+    for (let i = 0; i < groups3.length; i++) {
+      await ClassSession.create({ program_id: groups3[i]._id, branch_id: hz._id, date: d, rate: 735, status: statuses[i] });
+    }
+  };
+  for (const d of ['2026-09-07', '2026-09-14', '2026-09-21']) await visit(d, ['occurred', 'occurred', 'occurred', 'occurred']);
+  await visit('2026-09-28', ['occurred', 'no_show', 'postponed', 'no_show']);
+  let s3 = await R.settlement(await ClassProvider.findById(B3._id).lean(), { asOf: '2026-09' });
+  eq(s3.to_date.meetings_held, 3.25, '3 בקרים מלאים + בוקר עם קבוצה 1 מתוך 4 = 3.25 מפגשים (לא 13)');
+  eq(s3.to_date.balance, 551.25, 'שולם 2,940 על 4, התקיימו 3.25 — היא חייבת קיזוז 551.25');
+  await ClassSession.create({ program_id: groups3[2]._id, branch_id: hz._id, date: '2026-09-30', rate: 735, status: 'occurred' });
+  s3 = await R.settlement(await ClassProvider.findById(B3._id).lean(), { asOf: '2026-09' });
+  eq(s3.to_date.meetings_held, 3.5, 'הקבוצה שנדחתה הושלמה ביום אחר — עוד רבע');
+  const sum3 = await call('GET', '/payment-summary?month=2026-09');
+  const row3 = (sum3.body.providers || []).find(p => p.provider_name === 'ארבע קבוצות');
+  eq(row3?.retainer?.held_this_month, 3.5, 'גם בסיכום החודשי: 3.5 מפגשים ולא 14');
+
   console.log(failures === 0 ? '\n✅  הכל עבר\n' : `\n❌  ${failures} נכשלו\n`);
   await mongoose.disconnect(); server.close(); await mongo.stop();
   process.exit(failures ? 1 : 0);

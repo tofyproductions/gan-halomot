@@ -21,6 +21,12 @@ const { ClassProgram, ClassSession } = require('../models');
  * postponed meeting count nothing — the postponed one is counted on the day it
  * actually happens, which is the whole point of postponing.
  *
+ * A MEETING IS A VISIT, not a group. A provider who takes four groups on one
+ * morning came once, and the retainer's "4 meetings a month" means four such
+ * mornings. Each group's session is therefore worth 1 / (groups she has at
+ * that branch) of a meeting: a morning where she took one group of four counts
+ * as a quarter, and the group she made up on another day adds its quarter then.
+ *
  * The forecast adds the meetings still on the calendar, as if they happen, so
  * the balance can be seen coming in March rather than discovered in July.
  */
@@ -76,6 +82,27 @@ function weightOf(s) {
 }
 
 /**
+ * How many groups make one visit, per branch: the provider's active programs
+ * there. Never 0, so a session at a branch with no active program (a program
+ * closed mid-year) still counts as a whole meeting rather than vanishing.
+ */
+async function groupsPerVisit(providerId) {
+  const programs = await ClassProgram.find({ provider_id: providerId, is_active: { $ne: false } })
+    .select('branch_id').lean();
+  const map = new Map();
+  for (const p of programs) {
+    const k = String(p.branch_id);
+    map.set(k, (map.get(k) || 0) + 1);
+  }
+  return map;
+}
+
+/** The share of a meeting one group's session is worth. */
+function visitShare(groups, branchId) {
+  return 1 / (groups.get(String(branchId)) || 1);
+}
+
+/**
  * The settlement, as of a month (default: this one).
  *
  * Refuses to guess a period: without period_start there is no way to say how
@@ -98,22 +125,26 @@ async function settlement(provider, { asOf = ymOf() } = {}) {
     ? await ClassSession.find({
       program_id: { $in: programs.map(p => p._id) },
       date: { $gte: `${b.period_start}-01`, $lte: `${periodEnd}-31` },
-    }).select('date status rate partial_amount').lean()
+    }).select('date status rate partial_amount branch_id').lean()
     : [];
+  const groups = await groupsPerVisit(provider._id);
 
   const byMonth = new Map(allMonths.map(m => [m, { month: m, held: 0, no_show: 0, scheduled: 0 }]));
   for (const s of sessions) {
     const m = s.date.slice(0, 7);
     const row = byMonth.get(m);
     if (!row) continue;
-    row.held += weightOf(s);
-    if (s.status === 'no_show') row.no_show += 1;
-    if (s.status === 'scheduled') row.scheduled += 1;
+    const share = visitShare(groups, s.branch_id);
+    row.held += weightOf(s) * share;
+    if (s.status === 'no_show') row.no_show += share;
+    if (s.status === 'scheduled') row.scheduled += share;
   }
 
   const months = [...byMonth.values()].map(r => ({
     ...r,
     held: round2(r.held),
+    no_show: round2(r.no_show),
+    scheduled: round2(r.scheduled),
     paid: paidMonths.includes(r.month) ? Number(b.monthly_fee) : 0,
     expected: Number(b.meetings_per_month) || 4,
   }));
@@ -156,4 +187,5 @@ async function settlement(provider, { asOf = ymOf() } = {}) {
 
 module.exports = {
   settlement, isRetainer, unitValue, inPeriod, monthsBetween, weightOf, ymOf,
+  groupsPerVisit, visitShare,
 };
