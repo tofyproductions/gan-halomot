@@ -24,6 +24,27 @@ function findChrome() {
   throw new Error('לא נמצא דפדפן לרינדור');
 }
 
+/**
+ * The gan's logo, inlined.
+ *
+ * Read off disk and embedded as a data URI rather than linked: the page is
+ * rendered from a string with no base URL, so a relative <img src> resolves to
+ * nothing and the header comes out as a broken-image box — which looks exactly
+ * like a finished document until somebody holds it.
+ *
+ * client/public/careers/logo.webp is the GAN's mark (the rainbow, the name, and
+ * "כל ילד חולם להיות בו"). brand/ belongs to the חלום product and is not this.
+ * Missing file is not an error: the document is still correct without it.
+ */
+function logoDataUri() {
+  const p = path.join(SERVER, '..', 'client', 'public', 'careers', 'logo.webp');
+  try {
+    return `data:image/webp;base64,${fs.readFileSync(p).toString('base64')}`;
+  } catch {
+    return '';
+  }
+}
+
 const esc = (s) => s
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -90,6 +111,28 @@ function toHtml(md) {
     if (/^---+\s*$/.test(line)) { closeList(); out.push('<hr>'); i++; continue; }
 
     /**
+     * A quote block.
+     *
+     * Not supported until 07.10.2026, and the failure was the quiet kind: the
+     * '>' came out as a literal character and the lines inside the block were
+     * joined into one paragraph with the markers still in it. The document
+     * rendered, looked finished, and said something different from what was
+     * written. Anything the converter does not understand should be visible as
+     * wrong — so the block types it does understand have to cover what people
+     * actually write.
+     */
+    if (/^>\s?/.test(line)) {
+      closeList();
+      const quoted = [];
+      while (i < lines.length && /^>\s?/.test(lines[i])) {
+        quoted.push(lines[i].replace(/^>\s?/, ''));
+        i++;
+      }
+      out.push(`<blockquote>${toHtml(quoted.join('\n'))}</blockquote>`);
+      continue;
+    }
+
+    /**
      * The rest of a list item that was wrapped onto the following lines.
      *
      * Markdown written by hand wraps at the margin, and every wrapped line is
@@ -153,7 +196,7 @@ function toHtml(md) {
   return out.join('\n');
 }
 
-function document(title, body) {
+function document(title, body, logo) {
   return `<!doctype html>
 <html lang="he" dir="rtl">
 <meta charset="utf-8">
@@ -199,6 +242,25 @@ function document(title, body) {
   p { margin: 0 0 8pt; }
   strong { font-weight: 700; }
   hr { border: 0; border-top: 1pt solid var(--line); margin: 16pt 0; }
+
+  /* An aside, marked on the start edge — which in an RTL document is the
+     right. border-inline-start rather than border-right, so the rule
+     follows the direction instead of being nailed to one side. */
+  blockquote {
+    margin: 10pt 0 12pt;
+    padding: 2pt 11pt 2pt 0;
+    padding-inline-start: 11pt;
+    padding-inline-end: 0;
+    border-inline-start: 2.5pt solid var(--accent);
+    color: #3a3f47;
+  }
+  blockquote > :last-child { margin-bottom: 0; }
+
+  /* The mark, once, at the top of the first page. Not repeated in the running
+     header: a logo on every page of a twelve-page document is a letterhead
+     nobody asked for, and it eats the margin the text needs. */
+  .brand { margin: 0 0 10pt; }
+  .brand img { height: 46pt; width: auto; display: block; }
 
   ul, ol { margin: 0 0 9pt; padding-inline-start: 20pt; }
   li { margin-bottom: 4pt; }
@@ -255,6 +317,7 @@ function document(title, body) {
   }
 </style>
 <body>
+${logo ? `<div class="brand"><img src="${logo}" alt=""></div>` : ''}
 ${body}
 </body>
 </html>`;
@@ -286,7 +349,8 @@ if (!input || !output) {
   });
   try {
     const page = await browser.newPage();
-    await page.setContent(document(title, body), { waitUntil: 'networkidle0', timeout: 60000 });
+    await page.setContent(document(title, body, logoDataUri()),
+      { waitUntil: 'networkidle0', timeout: 60000 });
     await page.pdf({
       path: output,
       format: 'A4',
