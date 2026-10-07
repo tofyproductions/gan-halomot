@@ -218,7 +218,7 @@ async function listPrograms(req, res, next) {
     const filter = { ...getBranchFilter(req, 'branch_id') };
     if (req.query.active === 'true') filter.is_active = true;
     const programs = await ClassProgram.find(filter)
-      .populate('provider_id', 'name phone field')
+      .populate('provider_id', 'name phone field vat_mode billing')
       .sort({ name: 1 }).lean();
     res.json({ programs });
   } catch (err) { next(err); }

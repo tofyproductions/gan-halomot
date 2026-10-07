@@ -28,6 +28,18 @@ const STATUS = {
 const thisMonth = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' }).slice(0, 7);
 const ils = (n) => `₪${Math.round(Number(n) || 0).toLocaleString('he-IL')}`;
 
+/**
+ * Mirrors the server's VAT_RATE. The rate stored on a program is always the
+ * pre-VAT figure (see ClassProvider.vat_mode); what the screen SAYS is what
+ * leaves the bank, so a registered provider's figures are shown with the VAT
+ * already on top and labelled as such.
+ */
+const VAT_RATE = 0.18;
+const withVat = (n, vatMode) => vatMode === 'registered' ? (Number(n) || 0) * (1 + VAT_RATE) : (Number(n) || 0);
+const rateLabel = (rate, vatMode) => vatMode === 'registered'
+  ? `${ils(withVat(rate, vatMode))}/מפגש כולל מע״מ`
+  : `${ils(rate)}/מפגש`;
+
 
 // ---------- What each provider is owed this month ----------
 /**
@@ -36,15 +48,11 @@ const ils = (n) => `₪${Math.round(Number(n) || 0).toLocaleString('he-IL')}`;
  * rows stay underneath for the month somebody questions in February — which is
  * exactly why the old spreadsheet kept its blocks above the summary.
  */
-function PaymentSummary({ branchId, month, refreshKey }) {
-  const [data, setData] = useState(null);
+function PaymentSummary({ data }) {
+  // The fetch moved up to the page: the provider rows below the summary show
+  // the same monthly totals in their headers, and two fetches of one figure
+  // is two figures.
   const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (!branchId) return;
-    api.get('/classes/payment-summary', { params: { branch: branchId, month } })
-      .then(r => setData(r.data)).catch(() => setData(null));
-  }, [branchId, month, refreshKey]);
 
   if (!data || !(data.providers || []).length) return null;
 
@@ -191,7 +199,7 @@ function PaymentSummary({ branchId, month, refreshKey }) {
  * opens it.
  */
 // ---------- One program's monthly sessions ----------
-function ProgramSessions({ program, month, onChanged }) {
+function ProgramSessions({ program, month, vatMode, onChanged }) {
   const confirm = useConfirm();
   const [sessions, setSessions] = useState([]);
   const [newDate, setNewDate] = useState('');
@@ -222,7 +230,8 @@ function ProgramSessions({ program, month, onChanged }) {
   };
 
   const occurred = sessions.filter(s => s.status === 'occurred');
-  const total = occurred.reduce((sum, s) => sum + (Number(s.rate) || 0), 0);
+  const subtotal = occurred.reduce((sum, s) => sum + (Number(s.rate) || 0), 0);
+  const total = withVat(subtotal, vatMode);
 
   return (
     <Box>
@@ -230,7 +239,10 @@ function ProgramSessions({ program, month, onChanged }) {
         <TextField size="small" type="date" value={newDate} onChange={e => setNewDate(e.target.value)} InputLabelProps={{ shrink: true }} />
         <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={addDate} disabled={addingDate}>הוסף מפגש</Button>
         <Box sx={{ flex: 1 }} />
-        <Chip color="success" label={`סה״כ לתשלום: ${ils(total)} (${occurred.length} מפגשים)`} sx={{ fontWeight: 700 }} />
+        <Chip color="success" sx={{ fontWeight: 700 }}
+          label={vatMode === 'registered'
+            ? `סה״כ לתשלום: ${ils(total)} כולל מע״מ (${occurred.length} מפגשים)`
+            : `סה״כ לתשלום: ${ils(total)} (${occurred.length} מפגשים)`} />
       </Stack>
       {sessions.length === 0 ? (
         <Typography variant="body2" color="text.secondary">אין מפגשים בחודש זה.</Typography>
@@ -293,6 +305,50 @@ export default function ClassTrackingPage() {
       .catch(() => {}).finally(() => setLoading(false));
   }, [selectedBranch, isAllBranches]);
   useEffect(() => { load(); }, [load, refreshKey]);
+
+  /**
+   * The month's payment summary, fetched once for the whole page: the
+   * accountant's table at the top and the total on each provider's row are
+   * the same figures, so they must come from the same answer.
+   */
+  const [summary, setSummary] = useState(null);
+  const loadSummary = useCallback(() => {
+    if (isAllBranches || !selectedBranch) { setSummary(null); return; }
+    api.get('/classes/payment-summary', { params: { branch: selectedBranch, month } })
+      .then(r => setSummary(r.data)).catch(() => setSummary(null));
+  }, [selectedBranch, isAllBranches, month]);
+  useEffect(() => { loadSummary(); }, [loadSummary, refreshKey]);
+
+  /**
+   * One row per provider, not per program.
+   *
+   * ליטף with two Wednesday groups and תנועלולה with צעירים ובוגרים used to
+   * be four rows that looked like four different arrangements. The invoice is
+   * per provider — the summary above already says so — so the list now says
+   * the same: one row with the month's total, and each group laid out inside.
+   */
+  const providerGroups = (() => {
+    const m = new Map();
+    for (const p of programs) {
+      const key = String(p.provider_id?._id || p.provider_id || `name:${p.instructor_name || p.name}`);
+      if (!m.has(key)) {
+        m.set(key, {
+          key,
+          provider: p.provider_id && typeof p.provider_id === 'object' ? p.provider_id : null,
+          programs: [],
+        });
+      }
+      m.get(key).programs.push(p);
+    }
+    return [...m.values()];
+  })();
+
+  // The provider's monthly line from the summary — total incl. VAT, retainer info.
+  const summaryOf = (g) => (summary?.providers || []).find(sp =>
+    g.provider
+      ? (sp.provider_id && String(sp.provider_id) === String(g.provider._id))
+      : (!sp.provider_id && sp.provider_name === (g.programs[0]?.instructor_name || 'ללא ספק'))
+  ) || null;
 
   /**
    * Write this month's meetings from each class's fixed day.
@@ -362,7 +418,7 @@ export default function ClassTrackingPage() {
         </Button>
       </Stack>
 
-      <PaymentSummary branchId={selectedBranch} month={month} refreshKey={refreshKey} />
+      <PaymentSummary data={summary} />
 
       {loading ? (
         <Box sx={{ textAlign: 'center', py: 4 }}><CircularProgress /></Box>
@@ -372,36 +428,80 @@ export default function ClassTrackingPage() {
           השבועי שלו/ה במסך אחד, כולל תעריף שונה לכל סניף.
         </Alert>
       ) : (
-        programs.map(p => (
-          <Accordion key={p._id} defaultExpanded={programs.length <= 3} sx={{ mb: 1 }}>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Stack direction="row" spacing={1} alignItems="center" sx={{ width: '100%' }}>
-                <Typography sx={{ fontWeight: 700 }}>{p.name}</Typography>
-                {p.instructor_name && <Chip size="small" label={p.instructor_name} />}
-                {/* "תינוקייה + צעירים" when they sit together — one meeting. */}
-                {(p.classroom_categories?.length ? p.classroom_categories.join(' + ') : p.classroom_category)
-                  && <Chip size="small" variant="outlined"
-                       label={p.classroom_categories?.length
-                         ? p.classroom_categories.join(' + ')
-                         : p.classroom_category} />}
-                {p.default_day != null && <Chip size="small" variant="outlined" label={`יום ${DAY_NAMES[p.default_day]}${p.default_time ? ` ${p.default_time}` : ''}`} />}
-                <Chip size="small" variant="outlined" label={`${ils(p.default_rate)}/מפגש`} />
-                <Box sx={{ flex: 1 }} />
-                <Tooltip title="עריכה במסך הספק — שם, סניפים, ימים ותעריפים, הכול יחד">
-                  <IconButton size="small" onClick={(e) => {
-                    e.stopPropagation();
-                    setProviderFocus(String(p.provider_id?._id || p.provider_id || ''));
-                    setProvidersOpen(true);
-                  }}><EditIcon fontSize="small" /></IconButton>
-                </Tooltip>
-                <IconButton size="small" color="error" onClick={(e) => { e.stopPropagation(); delProgram(p); }}><DeleteIcon fontSize="small" /></IconButton>
-              </Stack>
-            </AccordionSummary>
-            <AccordionDetails>
-              <ProgramSessions program={p} month={month} onChanged={() => {}} />
-            </AccordionDetails>
-          </Accordion>
-        ))
+        providerGroups.map(g => {
+          const vatMode = g.provider?.vat_mode || 'exempt';
+          const ps = summaryOf(g);
+          const single = g.programs.length === 1;
+          const first = g.programs[0];
+          const catOf = (p) => p.classroom_categories?.length
+            ? p.classroom_categories.join(' + ') : (p.classroom_category || '');
+          return (
+            <Accordion key={g.key} defaultExpanded={providerGroups.length <= 3} sx={{ mb: 1 }}>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ width: '100%' }}>
+                  <Typography sx={{ fontWeight: 700 }}>{g.provider?.name || first.name}</Typography>
+                  {g.provider && (
+                    <Chip size="small" variant="outlined"
+                      color={vatMode === 'registered' ? 'warning' : 'default'}
+                      label={vatMode === 'registered' ? 'עוסק מורשה + מע״מ' : 'עוסק פטור'} />
+                  )}
+                  {single ? (
+                    <>
+                      {first.instructor_name && <Chip size="small" label={first.instructor_name} />}
+                      {/* "תינוקייה + צעירים" when they sit together — one meeting. */}
+                      {catOf(first) && <Chip size="small" variant="outlined" label={catOf(first)} />}
+                      {first.default_day != null && <Chip size="small" variant="outlined"
+                        label={`יום ${DAY_NAMES[first.default_day]}${first.default_time ? ` ${first.default_time}` : ''}`} />}
+                      <Chip size="small" variant="outlined" label={rateLabel(first.default_rate, vatMode)} />
+                    </>
+                  ) : (
+                    <Chip size="small" variant="outlined" label={`${g.programs.length} קבוצות`} />
+                  )}
+                  <Box sx={{ flex: 1 }} />
+                  {/* The month's figure, same one as the accountant's table above. */}
+                  <Chip size="small" color={ps?.total ? 'success' : 'default'}
+                    variant={ps?.total ? 'filled' : 'outlined'} sx={{ fontWeight: 700 }}
+                    label={`לתשלום החודש: ${ils(ps?.total || 0)}`} />
+                  <Tooltip title="עריכה במסך הספק — שם, סניפים, ימים ותעריפים, הכול יחד">
+                    <IconButton size="small" onClick={(e) => {
+                      e.stopPropagation();
+                      setProviderFocus(String(g.provider?._id || ''));
+                      setProvidersOpen(true);
+                    }}><EditIcon fontSize="small" /></IconButton>
+                  </Tooltip>
+                  {single && (
+                    <IconButton size="small" color="error"
+                      onClick={(e) => { e.stopPropagation(); delProgram(first); }}>
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  )}
+                </Stack>
+              </AccordionSummary>
+              <AccordionDetails>
+                {g.programs.map((p, i) => (
+                  <Box key={p._id}>
+                    {i > 0 && <Divider sx={{ my: 2 }} />}
+                    {!single && (
+                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 1 }}>
+                        <Typography sx={{ fontWeight: 600 }}>{p.name}</Typography>
+                        {p.instructor_name && <Chip size="small" label={p.instructor_name} />}
+                        {catOf(p) && <Chip size="small" variant="outlined" label={catOf(p)} />}
+                        {p.default_day != null && <Chip size="small" variant="outlined"
+                          label={`יום ${DAY_NAMES[p.default_day]}${p.default_time ? ` ${p.default_time}` : ''}`} />}
+                        <Chip size="small" variant="outlined" label={rateLabel(p.default_rate, vatMode)} />
+                        <Box sx={{ flex: 1 }} />
+                        <IconButton size="small" color="error" onClick={() => delProgram(p)}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    )}
+                    <ProgramSessions program={p} month={month} vatMode={vatMode} onChanged={loadSummary} />
+                  </Box>
+                ))}
+              </AccordionDetails>
+            </Accordion>
+          );
+        })
       )}
 
       <ProvidersDialog
