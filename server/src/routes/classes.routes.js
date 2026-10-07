@@ -46,6 +46,9 @@ router.get('/sessions/due', c.dueSessions);
 router.get('/sessions', c.listSessions);
 router.post('/sessions', MANAGER, c.createSession);
 router.post('/sessions/generate', MANAGER, c.generateSessions);
+// Write a whole month from each class's fixed day. Idempotent — a date that
+// already has a session is untouched.
+router.post('/sessions/fill-month', MANAGER, c.fillMonth);
 router.post('/sessions/:id/answer', c.answerSession);
 // A whole visit — one instructor, one branch, one morning, every group ticked
 // at once. Permission is still checked per session inside.

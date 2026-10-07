@@ -267,6 +267,29 @@ export default function ClassTrackingPage() {
   }, [selectedBranch, isAllBranches]);
   useEffect(() => { load(); }, [load, refreshKey]);
 
+  /**
+   * Write this month's meetings from each class's fixed day.
+   *
+   * A nightly job does the same thing, so this button is for impatience and
+   * for the month somebody sets up on the 3rd — not the only way it happens.
+   * Pressing it twice is harmless: a date that already has a session is left
+   * exactly as it is, answered or not.
+   */
+  const [filling, setFilling] = useState(false);
+  const fillMonth = () => {
+    setFilling(true);
+    api.post('/classes/sessions/fill-month', { month })
+      .then(r => {
+        const { created, skipped } = r.data;
+        toast.success(created
+          ? `נוצרו ${created} מפגשים`
+          : `הכול כבר קיים${skipped ? ` (${skipped} מפגשים)` : ''}`);
+        setRefreshKey(k => k + 1);
+      })
+      .catch(err => toast.error(apiError(err, 'המילוי נכשל')))
+      .finally(() => setFilling(false));
+  };
+
   const delProgram = async (p) => {
     if (!(await confirm({ title: 'הסרת חוג', message: `להסיר את "${p.name}"?` }))) return;
     api.delete(`/classes/programs/${p._id}`).then(() => load()).catch(err => toast.error(apiError(err, 'המחיקה נכשלה')));
@@ -283,6 +306,13 @@ export default function ClassTrackingPage() {
         <Box sx={{ flex: 1 }} />
         <TextField size="small" type="month" label="חודש" value={month} onChange={e => setMonth(e.target.value)} InputLabelProps={{ shrink: true }} />
         <Button variant="outlined" startIcon={<PeopleIcon />} onClick={() => setProvidersOpen(true)}>ספקי גנים</Button>
+        <Tooltip title="יוצר את כל המפגשים של החודש לפי היום הקבוע של כל חוג. בטוח ללחוץ שוב — מה שקיים לא משתנה.">
+          <span>
+            <Button variant="outlined" onClick={fillMonth} disabled={filling || programs.length === 0}>
+              {filling ? 'ממלא…' : 'מלא את החודש'}
+            </Button>
+          </span>
+        </Tooltip>
         <Button variant="contained" startIcon={<AddIcon />} onClick={() => setProgDlg({ open: true, program: null })}>חוג חדש</Button>
       </Stack>
 

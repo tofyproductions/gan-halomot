@@ -116,14 +116,31 @@ const eq = (a, b, label) => ok(a === b, label, `קיבלנו ${JSON.stringify(a)
   ok(JSON.stringify(rates) === JSON.stringify([180, 360, 360]),
     'ותעריף שונה לתינוקייה', JSON.stringify(rates));
 
-  // ------------------------------------------------- the sessions of a day
+  // ------------------------------------------------- filling a month
+  console.log('\nמילוי חודש לפי היום הקבוע');
+  const progById = Object.fromEntries(sched.body.programs.map(p => [p.classroom_category + '|' + p.branch_id, p]));
+  const filled = await call('POST', '/sessions/fill-month', { month: '2026-10' });
+  eq(filled.status, 200, 'החודש מולא');
+  // October 2026: Tuesdays 6,13,20,27 × 3 groups at משה דיין
+  //              + Thursdays 1,8,15,22,29 × 1 group at הרצוג = 12 + 5
+  eq(filled.body.created, 17, 'מספר המפגשים לפי הימים הקבועים');
+  const again = await call('POST', '/sessions/fill-month', { month: '2026-10' });
+  eq(again.body.created, 0, 'לחיצה שנייה לא יוצרת כפילויות');
+  eq(again.body.skipped, 17, 'וסופרת את מה שכבר קיים');
+
+  const tuesdays = await ClassSession.find({
+    program_id: progById['תינוקייה|' + String(ks._id)]._id, date: { $regex: '^2026-10' },
+  }).sort({ date: 1 }).lean();
+  ok(JSON.stringify(tuesdays.map(s => s.date)) ===
+     JSON.stringify(['2026-10-06', '2026-10-13', '2026-10-20', '2026-10-27']),
+    'וכולם נפלו על יום שלישי', JSON.stringify(tuesdays.map(s => s.date)));
+  ok(tuesdays.every(s => s.time === '09:00' && s.rate === 180), 'עם השעה והתעריף של החוג');
+
+  // Everything after this point is about ONE of those Tuesdays.
   console.log('\nיום שלישי אחד');
   const DAY = '2026-10-06';
-  const progById = Object.fromEntries(sched.body.programs.map(p => [p.classroom_category + '|' + p.branch_id, p]));
-  for (const cat of ['תינוקייה', 'צעירים', 'בוגרים']) {
-    const p = progById[cat + '|' + String(ks._id)];
-    await call('POST', '/sessions/generate', { program_id: p._id, dates: [DAY] });
-  }
+  await ClassSession.deleteMany({ date: { $regex: '^2026-10' }, date: { $ne: DAY } });
+  await ClassSession.deleteMany({ branch_id: hz._id });
   const due = await call('GET', '/sessions/due');
   eq(due.status, 200, 'רשימת מה שצריך לענות עליו');
   eq((due.body.visits || []).length, 1, 'ביקור אחד — לא שלושה');

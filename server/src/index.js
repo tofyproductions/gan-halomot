@@ -377,6 +377,27 @@ connectDB().then(() => {
     // twice-at-once is how duplicate children and double pushes happen.
     const { withJobLock } = require('./services/jobLock');
 
+    /**
+     * The classes' meetings, written ahead.
+     *
+     * The occurrence popup only ever asks about a session that EXISTS, so a
+     * class with a fixed Tuesday and no Tuesdays on the board is a class
+     * nobody is asked about — indistinguishable, from the manager's chair,
+     * from a month with no classes in it. This keeps the current month and the
+     * next one filled from each class's fixed day.
+     *
+     * Idempotent: a date that already has a session is left alone whatever its
+     * status, so running it daily writes nothing on most days and can never
+     * reset an answer or duplicate a meeting. Safe per customer, since it
+     * touches only that database's own classes.
+     */
+    const fillClassSessions = () => withJobLock('class-sessions-fill', 10 * 60 * 1000,
+      () => require('./services/classSessions.service').fillUpcoming()
+        .then(r => { if (r.created) console.log(`🎪 חוגים: נוצרו ${r.created} מפגשים (${r.months.join(', ')})`); }))
+      .catch(e => console.error('🎪 class-sessions fill error:', e.message));
+    setTimeout(each('class-sessions-fill', fillClassSessions), 45000);
+    setInterval(each('class-sessions-fill', fillClassSessions), 24 * 60 * 60 * 1000);
+
     // Auto-sync from Google Sheets every hour
     const { syncFromSheets } = require('./controllers/sync.controller');
     const runSync = () => withJobLock('sheets-auto-sync', 30 * 60 * 1000, () => new Promise((resolve) => {

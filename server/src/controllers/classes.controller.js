@@ -1,5 +1,6 @@
 const { ClassProvider, ClassProgram, ClassSession, Classroom, Branch } = require('../models');
 const { getBranchFilter } = require('../utils/branch-filter');
+const classSessions = require('../services/classSessions.service');
 
 // Accept only a YYYY-MM month before it becomes a $regex, so a crafted value
 // can neither broaden the date filter nor pin the server with catastrophic
@@ -266,6 +267,28 @@ async function generateSessions(req, res, next) {
     }));
     const created = await ClassSession.insertMany(docs);
     res.status(201).json({ created: created.length });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /classes/sessions/fill-month  { month, program_id? }
+ *
+ * Writes the month's meetings from the fixed day on each class. Safe to press
+ * twice: a date that already has a session is left exactly as it is, answered
+ * or not.
+ */
+async function fillMonth(req, res, next) {
+  try {
+    const { month, program_id: programId } = req.body || {};
+    // Clamped to the caller's branches — a manager may not fill a month at a
+    // branch she cannot see.
+    const scope = managedBranchIds(req);
+    const result = await classSessions.fillMonth({
+      month,
+      programId: programId || null,
+      branchIds: scope,
+    });
+    res.json(result);
   } catch (err) { next(err); }
 }
 
@@ -650,6 +673,6 @@ module.exports = {
   listProviders, createProvider, updateProvider, deleteProvider,
   getProviderSchedule, setProviderSchedule,
   listPrograms, createProgram, updateProgram, deleteProgram,
-  listSessions, createSession, generateSessions, updateSession, deleteSession,
+  listSessions, createSession, generateSessions, fillMonth, updateSession, deleteSession,
   answerSession, answerVisit, dueSessions, paymentSummary,
 };
