@@ -57,6 +57,31 @@ const COURSE_TYPES = {
 };
 
 /**
+ * What every branch MUST hold — the folder an inspector asks for, and
+ * therefore what "חסר" means on the screen and in the weekly reminder.
+ *
+ * The rest of CERT_TYPES is real and not required of everybody: בדיקת מתקנים
+ * applies where there is play equipment, אגרונום where there are trees, and
+ * ביקורת is a thing that happened rather than a thing you hold. Listing those
+ * as missing would put permanent red on a branch that is entirely in order,
+ * and a warning that is always on is a warning nobody reads.
+ *
+ * גילוי אש is in CERT_TYPES and NOT here on purpose: it predates this list and
+ * the office has not said it is required of every branch. Add it the day they
+ * do — one line, and the reminder picks it up.
+ */
+const REQUIRED_CERT_TYPES = [
+  'operating_license',
+  'electrician',
+  'safety_inspector',
+  'gas_inspection',
+  'infrastructure',
+  'nutritionist',
+  'sanitarian',
+  'criminal_registry',
+];
+
+/**
  * The course types that have an expiry at all.
  *
  * Was a literal `['first_aid', 'safe_conduct']` in four places — the
@@ -99,6 +124,6 @@ function daysLeft(expiresAt, now = new Date()) {
 
 module.exports = {
   WARN_DAYS, CERT_TYPES, COURSE_TYPES,
-  EXPIRING_COURSE_TYPES, REQUIRED_COURSE_TYPES,
+  REQUIRED_CERT_TYPES, EXPIRING_COURSE_TYPES, REQUIRED_COURSE_TYPES,
   statusOf, daysLeft,
 };

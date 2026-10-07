@@ -3,6 +3,7 @@ const {
 } = require('../models');
 const { dispatchEmail } = require('./email.service');
 const { CERT_TYPES, COURSE_TYPES, statusOf, daysLeft, WARN_DAYS } = require('./compliance');
+const certGaps = require('./certGaps.service');
 
 /**
  * The expiry digest — אישורי מעון and קורסים in one morning mail.
@@ -16,6 +17,15 @@ const { CERT_TYPES, COURSE_TYPES, statusOf, daysLeft, WARN_DAYS } = require('./c
  * Recipients: the office (system_admin + accountant users) plus whoever is in
  * the compliance_alert_emails setting — that list is where עינת lives if she
  * has no user account.
+ *
+ * IT ALSO CARRIES WHAT IS NOT THERE. A certificate that expires can be mailed
+ * about because there is a row to look at; one that was never uploaded cannot,
+ * and an empty space on a page does not announce itself. So the digest now
+ * opens with the gaps — a required certificate with no row at all, and the
+ * quieter case of a row with a FILE AND NO EXPIRY DATE, which looks green on
+ * the screen and will never reach this mail on its own because there is no
+ * date to compare. Most of the certificates imported out of Drive start in
+ * exactly that state, because filenames do not carry an expiry.
  */
 
 const SEND_HOUR = 9;
@@ -99,14 +109,19 @@ async function collect(now = new Date()) {
       status: statusOf(c.expires_at, now),
     }));
 
-  return { dueCerts, dueCourses };
+  const gaps = (await certGaps.gaps()).filter(b => b.total_gaps > 0);
+
+  return { dueCerts, dueCourses, gaps };
 }
 
 /** What the digest is about, reduced to a change key. */
-function hashOf({ dueCerts, dueCourses }) {
+function hashOf({ dueCerts, dueCourses, gaps = [] }) {
   return JSON.stringify([
     dueCerts.map(c => [c.branch, c.type, c.status]),
     dueCourses.map(c => [c.employee, c.type, c.status]),
+    // A certificate uploaded — or one newly missing because a branch was added
+    // — is a change, so the mail goes out rather than waiting for Sunday.
+    gaps.map(b => [b.branch_name, b.missing, b.expired, b.no_expiry]),
   ]);
 }
 
@@ -126,10 +141,21 @@ async function recipients() {
 async function send({ dryRun = false } = {}) {
   const now = new Date();
   const data = await collect(now);
-  const { dueCerts, dueCourses } = data;
-  if (!dueCerts.length && !dueCourses.length) return { sent: false, empty: true };
+  const { dueCerts, dueCourses, gaps = [] } = data;
+  if (!dueCerts.length && !dueCourses.length && !gaps.length) return { sent: false, empty: true };
 
   const parts = [];
+
+  // First, because it is the part nobody can see by looking at the screen.
+  if (gaps.length) {
+    const totalGaps = gaps.reduce((t, b) => t + b.total_gaps, 0);
+    parts.push(`<h3 style="margin:8px 0 6px">חסר בתיק אישורי המעון — ${totalGaps} פריטים</h3>
+      <p style="margin:0 0 8px;color:#374151">יש להעלות את המסמכים האלה למערכת. כל עוד הם חסרים, ההודעה תחזור.</p>
+      ${rowsTable(['סניף', 'מה חסר'], certGaps.describe(gaps).map((line) => {
+        const [branch, rest] = line.split(' — ');
+        return [branch, rest || ''];
+      }))}`);
+  }
   if (dueCerts.length) {
     parts.push(`<h3 style="margin:8px 0 6px">אישורי מעון — ${dueCerts.length} לטיפול</h3>
       ${rowsTable(['סניף', 'אישור', 'תוקף', 'מצב'], dueCerts.map(c => [
@@ -146,7 +172,10 @@ async function send({ dryRun = false } = {}) {
   ]))}`);
   }
 
-  const total = dueCerts.length + dueCourses.length;
+  // The gaps count too. A subject line reading "20 לטיפולך" above a mail that
+  // opens with 32 missing certificates is a subject line nobody trusts again.
+  const total = dueCerts.length + dueCourses.length
+    + gaps.reduce((t, b) => t + b.total_gaps, 0);
   const html = `<div dir="rtl" style="font-family:Arial,Helvetica,sans-serif;color:#111827;max-width:680px">
   <h2 style="margin:0 0 4px">אישורים וקורסים — ${total} לטיפולך</h2>
   <p style="margin:0 0 16px;color:#6b7280;font-size:14px">${new Date().toLocaleDateString('he-IL')} · התראה נשלחת ${WARN_DAYS} ימים מראש</p>

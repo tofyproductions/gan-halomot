@@ -164,6 +164,53 @@ const eq = (a, b, label) => ok(a === b, label, `קיבלנו ${JSON.stringify(a)
   eq(r3.status, 503, 'הסריקה אומרת שהגישה לא מוגדרת, ולא קורסת');
   eq((await r3.json()).code, 'DRIVE_NOT_CONFIGURED', 'עם קוד שאפשר לפעול לפיו');
 
+  // ------------------------------------------------------------ the gaps
+  console.log('\nמה שחסר — ולא נראה בטבלה');
+  const certGaps = require('../src/services/certGaps.service');
+  const { REQUIRED_CERT_TYPES } = require('../src/services/compliance');
+
+  let list = await certGaps.gaps();
+  const hzGap = list.find(g => g.branch_name === 'הרצליה הרצוג');
+  eq(hzGap.required_count, REQUIRED_CERT_TYPES.length, 'נדרשים נספרים מול רשימה אחת');
+  // The sanitarian imported above has no expiry, so it is held and not missing.
+  ok(!hzGap.missing.includes('sanitarian'), 'אישור שהועלה אינו "חסר"');
+  ok(hzGap.no_expiry.includes('sanitarian'), 'אבל בלי תאריך תפוגה הוא נספר בנפרד');
+  ok(hzGap.missing.includes('operating_license'), 'ורישיון הפעלה שלא הועלה — חסר');
+
+  // A valid certificate clears the gap entirely.
+  const future = new Date(Date.now() + 200 * 86400000);
+  await BranchCertification.create({
+    branch_id: hz._id, cert_type: 'electrician', expires_at: future, external_url: 'u1',
+  });
+  list = await certGaps.gaps();
+  const after = list.find(g => g.branch_name === 'הרצליה הרצוג');
+  ok(!after.missing.includes('electrician'), 'חשמלאי בתוקף — לא חסר');
+  ok(!after.no_expiry.includes('electrician'), 'וגם לא "בלי תאריך"');
+
+  // An expired one is a different problem from a missing one.
+  await BranchCertification.create({
+    branch_id: hz._id, cert_type: 'nutritionist',
+    expires_at: new Date(Date.now() - 10 * 86400000), external_url: 'u2',
+  });
+  list = await certGaps.gaps();
+  const exp = list.find(g => g.branch_name === 'הרצליה הרצוג');
+  ok(exp.expired.includes('nutritionist'), 'תזונאית שפגה — "פג תוקף"');
+  ok(!exp.missing.includes('nutritionist'), 'ולא "חסר" — הנייר קיים');
+
+  // An ARCHIVED certificate does not cover the year.
+  await BranchCertification.create({
+    branch_id: hz._id, cert_type: 'safety_inspector', expires_at: future,
+    is_archived: true, external_url: 'u3',
+  });
+  list = await certGaps.gaps();
+  ok(list.find(g => g.branch_name === 'הרצליה הרצוג').missing.includes('safety_inspector'),
+    'אישור בארכיון לא מכסה — נשאר חסר');
+
+  const lines = certGaps.describe(list);
+  ok(lines.some(l => /הרצליה/.test(l) && /חסרים/.test(l)), 'הנוסח להודעה נבנה', JSON.stringify(lines).slice(0,120));
+  ok(certGaps.describe([{ branch_name: 'x', missing: [], expired: [], no_expiry: [], total_gaps: 0 }]).length === 0,
+    'וסניף תקין לא מופיע בהודעה בכלל');
+
   console.log(failures === 0 ? `\n✅  הכל עבר\n` : `\n❌  ${failures} נכשלו\n`);
   await mongoose.disconnect();
   server.close();

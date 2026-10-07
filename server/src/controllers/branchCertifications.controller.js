@@ -2,6 +2,8 @@ const { BranchCertification, Branch, Setting } = require('../models');
 const { resolveBranchScope, canAccessBranch } = require('../utils/branch-scope');
 const { CERT_TYPES, WARN_DAYS, statusOf, daysLeft } = require('../services/compliance');
 const driveCerts = require('../services/driveCerts.service');
+const certGaps = require('../services/certGaps.service');
+const { REQUIRED_CERT_TYPES } = require('../services/compliance');
 
 /**
  * אישורי מעון — every paper a branch operates under, with the dates that
@@ -48,10 +50,14 @@ async function list(req, res, next) {
     if (scope !== null) filter.branch_id = { $in: scope };
     if (req.query.include_archived !== '1') filter.is_archived = false;
 
-    const [rows, branches] = await Promise.all([
+    const [rows, branches, gaps] = await Promise.all([
       BranchCertification.find(filter).select('-file_data').sort({ expires_at: 1 }).lean(),
       Branch.find(scope === null ? { is_active: true } : { _id: { $in: scope } })
         .select('name').sort({ name: 1 }).lean(),
+      // What a branch does NOT hold. Not derivable from `rows` — a certificate
+      // that was never uploaded has no row to be absent from — so the screen
+      // is given it explicitly, per branch.
+      certGaps.gaps({ branchIds: scope === null ? null : scope }),
     ]);
     const branchNames = new Map(branches.map(b => [String(b._id), b.name]));
 
@@ -60,11 +66,15 @@ async function list(req, res, next) {
       certifications: shaped,
       branches: branches.map(b => ({ id: String(b._id), name: b.name })),
       cert_types: CERT_TYPES,
+      required_types: REQUIRED_CERT_TYPES,
+      gaps,
       warn_days: WARN_DAYS,
       summary: {
         expired: shaped.filter(c => !c.is_archived && c.status === 'expired').length,
         expiring: shaped.filter(c => !c.is_archived && c.status === 'expiring').length,
         no_expiry: shaped.filter(c => !c.is_archived && c.status === 'no_expiry').length,
+        // Required certificates with no row at all, across the visible branches.
+        missing: gaps.reduce((t, b) => t + b.missing.length, 0),
       },
     });
   } catch (err) { next(err); }

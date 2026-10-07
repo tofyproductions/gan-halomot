@@ -153,7 +153,10 @@ export default function BranchCertificationsPage() {
   if (loading && !data) return <Box sx={{ p: 4, textAlign: 'center' }}><CircularProgress /></Box>;
   if (!data) return null;
 
-  const { certifications, branches, cert_types: certTypes, summary, warn_days: warnDays } = data;
+  const {
+    certifications, branches, cert_types: certTypes, summary, warn_days: warnDays,
+    gaps = [],
+  } = data;
   const byBranch = new Map(branches.map(b => [b.id, []]));
   for (const c of certifications) {
     if (!byBranch.has(c.branch_id)) byBranch.set(c.branch_id, []);
@@ -212,20 +215,61 @@ export default function BranchCertificationsPage() {
         {branches.map(b => {
           const rows = byBranch.get(b.id) || [];
           const bad = rows.filter(r => !r.is_archived && ['expired', 'expiring'].includes(r.status)).length;
+          const gap = gaps.find(g => g.branch_id === b.id);
           return (
             <Card key={b.id} variant="outlined">
               <CardContent>
                 <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 1 }}>
                   <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>{b.name}</Typography>
-                  {bad > 0
-                    ? <Chip size="small" color="error" label={`${bad} לטיפול`} />
-                    : rows.length > 0 && <Chip size="small" color="success" variant="outlined" label="תקין" />}
+                  {bad > 0 && <Chip size="small" color="error" label={`${bad} לטיפול`} />}
+                  {gap?.missing?.length > 0 && (
+                    <Chip size="small" color="error" variant="outlined"
+                      label={`${gap.missing.length} חסרים`} />
+                  )}
+                  {bad === 0 && !gap?.total_gaps && rows.length > 0 && (
+                    <Chip size="small" color="success" variant="outlined" label="תקין" />
+                  )}
                   <Box sx={{ flex: 1 }} />
                   <Button size="small" startIcon={<AddIcon />}
                     onClick={() => setForm({ mode: 'create', ...EMPTY_FORM, branch_id: b.id })}>
                     הוספה
                   </Button>
                 </Stack>
+
+                {/*
+                  What this branch does NOT hold. Said out loud, because the
+                  table below can only show what exists: an אישור בודק בטיחות
+                  that was never uploaded is an empty space, and an empty space
+                  does not announce itself.
+                */}
+                {gap?.total_gaps > 0 && (
+                  <Alert severity={gap.missing.length ? 'error' : 'warning'} sx={{ mb: 1.5 }}>
+                    <AlertTitle sx={{ mb: 0.5 }}>
+                      חסר בתיק האישורים ({gap.total_gaps} מתוך {gap.required_count} הנדרשים)
+                    </AlertTitle>
+                    <Stack spacing={0.5}>
+                      {gap.missing.length > 0 && (
+                        <Typography variant="body2">
+                          <b>לא הועלו:</b>{' '}
+                          {gap.missing.map(t => certTypes[t] || t).join(' · ')}
+                        </Typography>
+                      )}
+                      {gap.expired.length > 0 && (
+                        <Typography variant="body2">
+                          <b>פגי תוקף:</b>{' '}
+                          {gap.expired.map(t => certTypes[t] || t).join(' · ')}
+                        </Typography>
+                      )}
+                      {gap.no_expiry.length > 0 && (
+                        <Typography variant="body2">
+                          <b>בלי תאריך תפוגה:</b>{' '}
+                          {gap.no_expiry.map(t => certTypes[t] || t).join(' · ')}
+                          {' '}— הקובץ קיים, אבל בלי תאריך המערכת לא תתריע לפני שהוא פג.
+                        </Typography>
+                      )}
+                    </Stack>
+                  </Alert>
+                )}
 
                 {rows.length === 0 ? (
                   <Typography variant="body2" color="text.secondary">
