@@ -298,7 +298,12 @@ export default function ClassTrackingPage() {
               <Stack direction="row" spacing={1} alignItems="center" sx={{ width: '100%' }}>
                 <Typography sx={{ fontWeight: 700 }}>{p.name}</Typography>
                 {p.instructor_name && <Chip size="small" label={p.instructor_name} />}
-                {p.classroom_category && <Chip size="small" variant="outlined" label={p.classroom_category} />}
+                {/* "תינוקייה + צעירים" when they sit together — one meeting. */}
+                {(p.classroom_categories?.length ? p.classroom_categories.join(' + ') : p.classroom_category)
+                  && <Chip size="small" variant="outlined"
+                       label={p.classroom_categories?.length
+                         ? p.classroom_categories.join(' + ')
+                         : p.classroom_category} />}
                 {p.default_day != null && <Chip size="small" variant="outlined" label={`יום ${DAY_NAMES[p.default_day]}${p.default_time ? ` ${p.default_time}` : ''}`} />}
                 <Chip size="small" variant="outlined" label={`${ils(p.default_rate)}/מפגש`} />
                 <Box sx={{ flex: 1 }} />

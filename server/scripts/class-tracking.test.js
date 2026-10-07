@@ -131,6 +131,45 @@ const eq = (a, b, label) => ok(a === b, label, `קיבלנו ${JSON.stringify(a)
   ok(JSON.stringify(rates) === JSON.stringify([180, 360, 360]),
     'ותעריף שונה לתינוקייה', JSON.stringify(rates));
 
+  // ---------------------------------------- several groups, one meeting
+  console.log('\nקבוצות שיושבות יחד');
+  // The four already exist — send them back WITH their ids, or the save
+  // replaces them and every id captured above points at a switched-off class.
+  const asRow = (p) => ({
+    _id: p._id, branch_id: String(p.branch_id),
+    classroom_categories: p.classroom_categories,
+    name: p.name, instructor_name: p.instructor_name,
+    default_day: p.default_day, default_time: p.default_time,
+    default_rate: p.default_rate,
+  });
+  const combined = await call('PUT', `/providers/${providerId}/schedule`, {
+    rows: [
+      ...sched.body.programs.map(asRow),
+      {
+        branch_id: String(hz._id),
+        classroom_categories: ['תינוקייה', 'צעירים'],
+        name: 'תנועה', instructor_name: 'אוריאן',
+        default_day: 1, default_time: '09:00', default_rate: 400,
+      },
+    ],
+  });
+  const both = combined.body.programs.find(p => (p.classroom_categories || []).length === 2);
+  ok(Boolean(both), 'שורה אחת נושאת שתי קבוצות');
+  eq(both.classroom_category, 'תינוקייה',
+    'והשדה הישן נשאר הראשונה שבהן — מסכים ותיקים ממשיכים לעבוד');
+  eq(both.default_rate, 400, 'תעריף אחד למפגש המשותף, לא אחד לכל קבוצה');
+
+  await call('POST', '/sessions/generate', { program_id: both._id, dates: ['2026-10-05'] });
+  const combinedSession = await ClassSession.findOne({ program_id: both._id });
+  eq(combinedSession.rate, 400, 'והמפגש נושא את התעריף הזה פעם אחת');
+  await ClassSession.deleteMany({ program_id: both._id });
+  // Put the arrangement back to four rows, so what follows sees what it expects.
+  await call('PUT', `/providers/${providerId}/schedule`, {
+    rows: combined.body.programs
+      .filter(p => (p.classroom_categories || []).length < 2)
+      .map(asRow),
+  });
+
   // ------------------------------------------------- filling a month
   console.log('\nמילוי חודש לפי היום הקבוע');
   const progById = Object.fromEntries(sched.body.programs.map(p => [p.classroom_category + '|' + p.branch_id, p]));

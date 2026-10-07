@@ -115,7 +115,7 @@ async function setProviderSchedule(req, res, next) {
         provider_id: provider._id,
         name: String(r.name || provider.name).trim(),
         instructor_name: r.instructor_name || '',
-        classroom_category: r.classroom_category || '',
+        ...categoriesOf(r),
         classroom_id: r.classroom_id || null,
         default_rate: Number(r.default_rate) || 0,
         default_day: r.default_day === '' || r.default_day == null ? null : Number(r.default_day),
@@ -156,6 +156,29 @@ async function getProviderSchedule(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/**
+ * One shape for the groups a class serves, whichever way the caller sent them.
+ *
+ * Accepts the list or the old single value, and always returns BOTH — the list
+ * is the truth and the singular is the first of it, because every screen and
+ * query written before today reads the singular and must keep working.
+ */
+function categoriesOf(body) {
+  const list = Array.isArray(body.classroom_categories)
+    ? body.classroom_categories
+    : (body.classroom_category ? [body.classroom_category] : []);
+  const clean = [...new Set(list.map(c => String(c || '').trim()).filter(Boolean))];
+  return { classroom_categories: clean, classroom_category: clean[0] || '' };
+}
+
+/** "תינוקייה + צעירים" — what a combined meeting is called on screen. */
+function categoryLabel(program) {
+  const list = Array.isArray(program?.classroom_categories) && program.classroom_categories.length
+    ? program.classroom_categories
+    : (program?.classroom_category ? [program.classroom_category] : []);
+  return list.join(' + ');
+}
+
 // ========================= Programs (חוגים) =========================
 async function listPrograms(req, res, next) {
   try {
@@ -178,7 +201,7 @@ async function createProgram(req, res, next) {
       provider_id: b.provider_id || null,
       name: String(b.name).trim(),
       instructor_name: b.instructor_name || '',
-      classroom_category: b.classroom_category || '',
+      ...categoriesOf(b),
       classroom_id: b.classroom_id || null,
       default_rate: Number(b.default_rate) || 0,
       default_day: b.default_day == null || b.default_day === '' ? null : Number(b.default_day),
@@ -190,10 +213,13 @@ async function createProgram(req, res, next) {
 }
 async function updateProgram(req, res, next) {
   try {
-    const fields = ['provider_id', 'name', 'instructor_name', 'classroom_category', 'classroom_id',
+    const fields = ['provider_id', 'name', 'instructor_name', 'classroom_id',
       'default_rate', 'default_day', 'default_time', 'color', 'is_active'];
     const update = {};
     for (const f of fields) if (req.body[f] !== undefined) update[f] = req.body[f];
+    if (req.body.classroom_categories !== undefined || req.body.classroom_category !== undefined) {
+      Object.assign(update, categoriesOf(req.body));
+    }
     if (update.default_day === '' ) update.default_day = null;
     // "בלי ספק" arrives from the dialog as an empty string, and Mongo refuses
     // to cast '' to an ObjectId — the whole edit died on it.
@@ -488,7 +514,7 @@ async function dueSessions(req, res, next) {
 
     const populate = {
       path: 'program_id',
-      select: 'name instructor_name classroom_category provider_id',
+      select: 'name instructor_name classroom_category classroom_categories provider_id',
       populate: { path: 'provider_id', select: 'name' },
     };
 
@@ -546,7 +572,8 @@ async function dueSessions(req, res, next) {
       v.classes.push({
         id: String(s._id),
         program_name: prog.name || 'חוג',
-        classroom_category: prog.classroom_category || '',
+        // "תינוקייה + צעירים" when they sit together: one meeting, one tick.
+        classroom_category: categoryLabel(prog),
         time: s.time || '',
         rate: Number(s.rate) || 0,
       });
@@ -606,7 +633,7 @@ async function paymentSummary(req, res, next) {
 
     const sessions = await ClassSession.find(filter).populate({
       path: 'program_id',
-      select: 'name instructor_name classroom_category provider_id branch_id',
+      select: 'name instructor_name classroom_category classroom_categories provider_id branch_id',
       populate: { path: 'provider_id', select: 'name vat_mode' },
     }).lean();
 
@@ -637,7 +664,7 @@ async function paymentSummary(req, res, next) {
         p.programs.set(gKey, {
           program_id: gKey,
           program_name: prog.name || 'חוג',
-          classroom_category: prog.classroom_category || '',
+          classroom_category: categoryLabel(prog),
           branch_id: String(s.branch_id),
           branch_name: branchName[String(s.branch_id)] || '',
           rate: Number(s.rate) || 0,

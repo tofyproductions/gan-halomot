@@ -104,7 +104,11 @@ export default function ProvidersDialog({ open, onClose, focus = '' }) {
         setRows((r.data.programs || []).map(g => ({
           _id: g._id,
           branch_id: String(g.branch_id),
-          classroom_category: g.classroom_category || '',
+          // A row may serve several groups at once — one meeting, one rate.
+          // Older rows carry only the singular, so it seeds the list.
+          classroom_categories: (g.classroom_categories || []).length
+            ? g.classroom_categories
+            : (g.classroom_category ? [g.classroom_category] : []),
           name: g.name || '',
           instructor_name: g.instructor_name || '',
           default_day: g.default_day == null ? '' : String(g.default_day),
@@ -127,7 +131,7 @@ export default function ProvidersDialog({ open, onClose, focus = '' }) {
    */
   const addRow = (branchId) => setRows(rs => [...rs, {
     branch_id: branchId || editing.branch_ids[0] || (branches[0] ? bid(branches[0]) : ''),
-    classroom_category: '', name: editing.name || '', instructor_name: '',
+    classroom_categories: [], name: editing.name || '', instructor_name: '',
     default_day: '', default_time: '', default_rate: '',
   }]);
   const dropRow = (i) => setRows(rs => rs.filter((_, j) => j !== i));
@@ -276,9 +280,12 @@ export default function ProvidersDialog({ open, onClose, focus = '' }) {
             {rows.length === 0 && (
               <Alert severity="info">
                 עוד לא הוגדר לוח. כל שורה היא קבוצה אחת בסניף אחד — יום, שעה ותעריף.
-                מדריך/ה שעושה שלוש קבוצות באותו בוקר = שלוש שורות,
+                מדריך/ה שעושה שלוש קבוצות <b>אחת אחרי השנייה</b> = שלוש שורות,
                 <b> והתעריף נקבע לכל שורה בנפרד</b> — אותה מדריכה יכולה לקבל סכום
                 אחד בסניף אחד וסכום אחר בשני.
+                <br />
+                קבוצות שיושבות <b>יחד באותה שעה</b> = שורה אחת, ומסמנים בה כמה קבוצות.
+                זה מפגש אחד ותעריף אחד.
               </Alert>
             )}
 
@@ -314,10 +321,30 @@ export default function ProvidersDialog({ open, onClose, focus = '' }) {
                         value={r.branch_id} onChange={e => setRow(i, { branch_id: e.target.value })}>
                         {branches.map(b => <MenuItem key={bid(b)} value={bid(b)}>{b.name}</MenuItem>)}
                       </TextField>
-                      <TextField select size="small" label="קבוצה" sx={{ minWidth: 130 }}
-                        value={r.classroom_category} onChange={e => setRow(i, { classroom_category: e.target.value })}>
-                        {CATEGORIES.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
-                      </TextField>
+                      {/*
+                        Several groups on one row means ONE meeting for all of
+                        them, at one rate — an instructor who sits the
+                        תינוקייה and the צעירים together at 09:00. Two groups
+                        she takes one after the other are two rows, because
+                        they are two meetings at two times.
+                      */}
+                      <FormControl size="small" sx={{ minWidth: 165 }}>
+                        <InputLabel>קבוצה</InputLabel>
+                        <Select
+                          multiple
+                          value={r.classroom_categories || []}
+                          input={<OutlinedInput label="קבוצה" />}
+                          onChange={e => setRow(i, { classroom_categories: e.target.value })}
+                          renderValue={(sel) => sel.join(' + ')}
+                        >
+                          {CATEGORIES.map(c => (
+                            <MenuItem key={c} value={c}>
+                              <Checkbox checked={(r.classroom_categories || []).includes(c)} />
+                              <ListItemText primary={c} />
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
                       <TextField size="small" label="שם החוג" sx={{ minWidth: 130 }}
                         value={r.name} onChange={e => setRow(i, { name: e.target.value })} />
                       <TextField size="small" label="שם המדריך/ה" sx={{ minWidth: 130 }}
