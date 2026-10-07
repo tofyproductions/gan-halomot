@@ -130,6 +130,27 @@ async function seed() {
     });
   }
 
+  // ---- אישורי מעון, so that screen has something to look at too ----
+  const { BranchCertification } = require('../src/models');
+  const day = (n) => new Date(Date.now() + n * 86400000);
+  const certs = [
+    [hz, 'gas_inspection', day(-300), day(56)],
+    [hz, 'infrastructure', day(-200), day(500)],
+    [hz, 'nutritionist', day(-100), day(265)],
+    [hz, 'sanitarian', day(-90), day(275)],
+    [ks, 'gas_inspection', day(-400), day(-8)],
+    [ks, 'infrastructure', day(-240), day(490)],
+    [ks, 'sanitarian', day(-110), day(250)],
+    [ks, 'operating_license', day(-30), null],
+  ];
+  for (const [b, type, issued, expires] of certs) {
+    await BranchCertification.create({
+      branch_id: b._id, cert_type: type, issued_at: issued, expires_at: expires,
+      external_url: 'https://drive.google.com/file/d/demo/view',
+      notes: 'יובא מהדרייב · הדגמה',
+    });
+  }
+
   return { branches: [ks.name, hz.name], dueCount: 3 };
 }
 

@@ -398,6 +398,21 @@ connectDB().then(() => {
     setTimeout(each('class-sessions-fill', fillClassSessions), 45000);
     setInterval(each('class-sessions-fill', fillClassSessions), 24 * 60 * 60 * 1000);
 
+    /**
+     * הדיווח החודשי למשרד הכלכלה — the nudge on the 10th.
+     *
+     * Hourly tick, fires once on the 10th and nowhere else; "once this month"
+     * is held in a Setting rather than in memory, because a deploy on the 10th
+     * restarts the process and an in-memory flag would send it twice. Per
+     * customer, since the recipients are that customer's own branch managers.
+     */
+    const daycareReport = () => withJobLock('daycare-report', 10 * 60 * 1000,
+      () => require('./services/daycareReportJob').tick()
+        .then(r => { if (r.sent) console.log(`🏛️  דיווח נוכחות: נשלח ל-${r.delivered} (${r.month})`); }))
+      .catch(e => console.error('🏛️  daycare-report error:', e.message));
+    setTimeout(each('daycare-report', daycareReport), 60000);
+    setInterval(each('daycare-report', daycareReport), 60 * 60 * 1000);
+
     // Auto-sync from Google Sheets every hour
     const { syncFromSheets } = require('./controllers/sync.controller');
     const runSync = () => withJobLock('sheets-auto-sync', 30 * 60 * 1000, () => new Promise((resolve) => {

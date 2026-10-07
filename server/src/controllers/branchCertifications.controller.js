@@ -3,6 +3,7 @@ const { resolveBranchScope, canAccessBranch } = require('../utils/branch-scope')
 const { CERT_TYPES, WARN_DAYS, statusOf, daysLeft } = require('../services/compliance');
 const driveCerts = require('../services/driveCerts.service');
 const certGaps = require('../services/certGaps.service');
+const certPortfolio = require('../services/certPortfolio.service');
 const { REQUIRED_CERT_TYPES } = require('../services/compliance');
 
 /**
@@ -364,6 +365,40 @@ async function importFromDrive(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/**
+ * GET /branch-certifications/:branchId/portfolio.pdf
+ *
+ * One file to hand an inspector: a cover page saying what the branch holds,
+ * what it does not and which papers carry no expiry, then the certificates
+ * themselves bound in behind it.
+ *
+ * What could not be bound is listed in a response header rather than left to
+ * be noticed — a portfolio quietly missing two certificates is worse than one
+ * that says which two.
+ */
+async function portfolioPdf(req, res, next) {
+  try {
+    const branchId = req.params.branchId;
+    if (!await canAccessBranch(req, branchId)) {
+      return res.status(403).json({ error: 'אין לך הרשאה לסניף הזה' });
+    }
+    const { pdf, skipped, branch } = await certPortfolio.build({ branchId });
+
+    const stamp = new Date().toISOString().slice(0, 10);
+    const name = `tik-ishurim-${stamp}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition',
+      `attachment; filename="${name}"; filename*=UTF-8''${encodeURIComponent(`תיק אישורים - ${branch.name} - ${stamp}.pdf`)}`);
+    // The client reads this to tell somebody what did not make it in.
+    res.setHeader('X-Skipped-Count', String(skipped.length));
+    res.setHeader('Access-Control-Expose-Headers', 'X-Skipped-Count');
+    if (skipped.length) {
+      console.warn('[portfolio] לא צורפו:', skipped.map(s => `${s.label} (${s.reason})`).join(', '));
+    }
+    res.send(pdf);
+  } catch (err) { next(err); }
+}
+
 async function getRecipients(req, res, next) {
   try {
     const s = await Setting.findOne({ key: RECIPIENTS_KEY }).lean();
@@ -387,4 +422,5 @@ module.exports = {
   list, create, update, renew, remove, getFile, getRecipients, setRecipients,
   RECIPIENTS_KEY,
   getDriveFolders, setDriveFolders, scanDrive, importFromDrive,
+  portfolioPdf,
 }

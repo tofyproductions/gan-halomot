@@ -20,6 +20,9 @@ router.put('/drive/folders', requireRole('system_admin', 'accountant'), c.setDri
 router.get('/drive/scan', c.scanDrive);
 router.post('/drive/import', c.importFromDrive);
 
+// The whole folder as one PDF — cover page, then the certificates themselves.
+router.get('/:branchId/portfolio.pdf', c.portfolioPdf);
+
 router.get('/:id/file', c.getFile);
 router.post('/:id/renew', c.renew);
 router.put('/:id', c.update);

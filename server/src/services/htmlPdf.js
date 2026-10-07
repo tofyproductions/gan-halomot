@@ -8,9 +8,55 @@
  * every caller wraps this in a try/catch and falls back to the HTML attachment
  * if Chromium can't launch (e.g. not enough RAM), so a send never fails.
  */
+/**
+ * A Chrome that exists on THIS machine.
+ *
+ * @sparticuz/chromium ships a Linux binary, which is right in production and
+ * unrunnable on the Mac the code is written on — it fails with `spawn ENOEXEC`,
+ * which reads like a bug in the caller and is not. The consequence is worse
+ * than inconvenience: no PDF this system produces can be looked at before it
+ * is deployed, so every rendering mistake is found by whoever opens the file
+ * in production.
+ *
+ * So on darwin we look for a Chrome that is already here — the one
+ * `npx puppeteer browsers install chrome` leaves in ~/.cache/puppeteer (the
+ * same place scripts/md-to-pdf.js uses), then the installed Google Chrome.
+ * Production is untouched: this returns null anywhere but a Mac, and the
+ * Linux binary is used exactly as before.
+ */
+function localChromePath() {
+  if (process.platform !== 'darwin') return null;
+  const fs = require('fs');
+  const path = require('path');
+  const cache = path.join(process.env.HOME || '', '.cache/puppeteer/chrome');
+  try {
+    for (const v of fs.readdirSync(cache).sort().reverse()) {
+      for (const sub of ['chrome-mac-arm64', 'chrome-mac-x64']) {
+        const p = path.join(cache, v, sub,
+          'Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing');
+        if (fs.existsSync(p)) return p;
+      }
+    }
+  } catch (e) { /* no cache dir — fall through */ }
+  for (const p of [
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+  ]) { if (fs.existsSync(p)) return p; }
+  return null;
+}
+
 async function getBrowser() {
-  const chromium = require('@sparticuz/chromium');
   const puppeteer = require('puppeteer-core');
+  const local = localChromePath();
+  if (local) {
+    return puppeteer.launch({
+      args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--font-render-hinting=none'],
+      defaultViewport: { width: 1240, height: 1754, deviceScaleFactor: 1 },
+      executablePath: local,
+      headless: true,
+    });
+  }
+  const chromium = require('@sparticuz/chromium');
   return puppeteer.launch({
     args: [...chromium.args, '--no-sandbox', '--disable-dev-shm-usage', '--single-process', '--no-zygote', '--disable-gpu'],
     defaultViewport: { width: 1240, height: 1754, deviceScaleFactor: 1 },

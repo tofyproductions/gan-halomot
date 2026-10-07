@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Box, Typography, Button, Card, CardContent, Stack, Chip, TextField, MenuItem,
+  Box, Typography, Button, Stack, Chip, TextField, MenuItem,
   Dialog, DialogTitle, DialogContent, DialogActions, Alert, AlertTitle,
   CircularProgress, IconButton, Tooltip, Table, TableHead, TableRow, TableCell,
   TableBody, FormControlLabel, Checkbox,
@@ -13,6 +13,14 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import NotificationsIcon from '@mui/icons-material/NotificationsNone';
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import CheckCircleIcon from '@mui/icons-material/CheckCircleOutline';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import LinearProgress from '@mui/material/LinearProgress';
+import Accordion from '@mui/material/Accordion';
+import AccordionSummary from '@mui/material/AccordionSummary';
+import AccordionDetails from '@mui/material/AccordionDetails';
+import FolderZipIcon from '@mui/icons-material/FolderZip';
 import { toast } from 'react-toastify';
 import api, { openApiFile, apiError, UPLOAD_TIMEOUT_MS } from '../../api/client';
 import { FilePickButton, BusyButton } from '../shared/UploadControls';
@@ -54,6 +62,43 @@ export default function BranchCertificationsPage() {
   const [saving, setSaving] = useState(false);
   const [recipients, setRecipients] = useState(null); // {emails: 'a, b'}
   const [driveOpen, setDriveOpen] = useState(false);
+  const [exporting, setExporting] = useState('');
+  // Which branch is open. One at a time: the page is a list of four מעונות and
+  // the question is always about one of them.
+  const [openBranch, setOpenBranch] = useState('');
+
+  /**
+   * One file to hand an inspector: a cover page saying what the branch holds
+   * and what it does not, then the certificates themselves bound in behind it.
+   *
+   * Downloaded through fetch rather than a plain link because the request needs
+   * the auth header, and because the response carries X-Skipped-Count — a
+   * portfolio quietly missing two certificates is worse than one that says so.
+   */
+  const exportPortfolio = async (branch) => {
+    setExporting(branch.id);
+    try {
+      const res = await api.get(`/branch-certifications/${branch.id}/portfolio.pdf`, {
+        responseType: 'blob', timeout: 180000,
+      });
+      const skipped = Number(res.headers?.['x-skipped-count'] || 0);
+      const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `תיק אישורים - ${branch.name} - ${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      if (skipped > 0) {
+        toast.warn(`${skipped} אישורים לא צורפו לקובץ — בדקו שהקובץ עצמו קיים ונגיש.`);
+      } else {
+        toast.success('התיק הופק');
+      }
+    } catch (err) {
+      toast.error(apiError(err, 'הפקת התיק נכשלה'));
+    } finally {
+      setExporting('');
+    }
+  };
 
   const isOffice = ['system_admin', 'accountant'].includes(user?.role);
 
@@ -216,23 +261,68 @@ export default function BranchCertificationsPage() {
           const rows = byBranch.get(b.id) || [];
           const bad = rows.filter(r => !r.is_archived && ['expired', 'expiring'].includes(r.status)).length;
           const gap = gaps.find(g => g.branch_id === b.id);
+          const required = gap?.required_count || 0;
+          const held = Math.max(0, required - (gap?.total_gaps || 0));
           return (
-            <Card key={b.id} variant="outlined">
-              <CardContent>
-                <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 1 }}>
-                  <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>{b.name}</Typography>
+            <Accordion
+              key={b.id} disableGutters variant="outlined"
+              expanded={openBranch === b.id}
+              onChange={(_, on) => setOpenBranch(on ? b.id : '')}
+              sx={{ borderRadius: 2, '&:before': { display: 'none' }, overflow: 'hidden' }}
+            >
+              {/*
+                Closed, a branch is one line: its name and how it stands. The
+                page is four מעונות and the question is always about one of
+                them — four open tables at once is a page you scroll past.
+              */}
+              <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: 2, py: 1 }}>
+                <Stack direction="row" alignItems="center" spacing={1.5} sx={{ width: '100%', pr: 1 }}>
+                  {held === required && bad === 0
+                    ? <CheckCircleIcon sx={{ color: 'success.main' }} />
+                    : <ErrorOutlineIcon color={gap?.missing?.length ? 'error' : 'warning'} />}
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography sx={{ fontWeight: 800, fontSize: '1.05rem', lineHeight: 1.2 }}>
+                      {b.name}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {held} מתוך {required} האישורים הנדרשים
+                      {rows.length ? ` · ${rows.length} מסמכים בתיק` : ''}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ flex: 1 }} />
                   {bad > 0 && <Chip size="small" color="error" label={`${bad} לטיפול`} />}
                   {gap?.missing?.length > 0 && (
                     <Chip size="small" color="error" variant="outlined"
                       label={`${gap.missing.length} חסרים`} />
                   )}
-                  {bad === 0 && !gap?.total_gaps && rows.length > 0 && (
+                  {held === required && bad === 0 && (
                     <Chip size="small" color="success" variant="outlined" label="תקין" />
                   )}
-                  <Box sx={{ flex: 1 }} />
-                  <Button size="small" startIcon={<AddIcon />}
+                  <Box sx={{ width: 110, display: { xs: 'none', sm: 'block' } }}>
+                    <LinearProgress
+                      variant="determinate"
+                      value={required ? Math.round((held / required) * 100) : 0}
+                      color={held === required ? 'success' : (gap?.missing?.length ? 'error' : 'warning')}
+                      sx={{ height: 7, borderRadius: 4 }}
+                    />
+                  </Box>
+                </Stack>
+              </AccordionSummary>
+
+              <AccordionDetails sx={{ px: 2, pt: 0, pb: 2 }}>
+                <Stack direction="row" spacing={1} sx={{ mb: 1.5 }}>
+                  <Tooltip title="קובץ PDF אחד: עמוד ריכוז של מה שיש ומה שחסר, ואחריו האישורים עצמם. ההפקה לוקחת כדקה.">
+                    <span>
+                      <Button size="small" variant="outlined" startIcon={<FolderZipIcon />}
+                        disabled={exporting === b.id}
+                        onClick={() => exportPortfolio(b)}>
+                        {exporting === b.id ? 'מפיק…' : 'ייצא תיק אישורים'}
+                      </Button>
+                    </span>
+                  </Tooltip>
+                  <Button size="small" variant="contained" startIcon={<AddIcon />}
                     onClick={() => setForm({ mode: 'create', ...EMPTY_FORM, branch_id: b.id })}>
-                    הוספה
+                    הוספת אישור
                   </Button>
                 </Stack>
 
@@ -350,8 +440,8 @@ export default function BranchCertificationsPage() {
                     </Table>
                   </Box>
                 )}
-              </CardContent>
-            </Card>
+              </AccordionDetails>
+            </Accordion>
           );
         })}
       </Stack>

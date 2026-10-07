@@ -292,7 +292,48 @@ async function scan(folderIds, { maxDepth = 4 } = {}) {
     || a.file_name.localeCompare(b.file_name, 'he'));
 }
 
+/** The file id inside a Drive link, or null if this is not one. */
+function fileIdFromUrl(url) {
+  const s = String(url || '');
+  const m = s.match(/\/file\/d\/([A-Za-z0-9_-]{10,})/)
+    || s.match(/[?&]id=([A-Za-z0-9_-]{10,})/)
+    || s.match(/\/d\/([A-Za-z0-9_-]{10,})/);
+  return m ? m[1] : null;
+}
+
+/**
+ * The bytes of one Drive file, for binding into the portfolio.
+ *
+ * Capped, and the cap is the point: this runs on a box with a 256MB heap that
+ * also launches Chromium to render the cover page. One 60MB scan pulled into
+ * memory beside that is not a slow portfolio, it is a dead process — and the
+ * certificate it was for is the least important page in the file.
+ *
+ * A Google Doc has no bytes to download (it is not a file, it is a document),
+ * so those are reported as unsupported rather than fetched into nothing.
+ */
+async function fetchFileBytes(url, { maxBytes = 8 * 1024 * 1024 } = {}) {
+  const id = fileIdFromUrl(url);
+  if (!id) return { error: 'not_a_drive_link' };
+
+  const meta = await driveGet(`files/${id}?fields=id,name,mimeType,size&supportsAllDrives=true`);
+  if (String(meta.mimeType || '').startsWith('application/vnd.google-apps')) {
+    return { error: 'google_doc', name: meta.name, mimeType: meta.mimeType };
+  }
+  const size = Number(meta.size) || 0;
+  if (size > maxBytes) return { error: 'too_large', name: meta.name, size };
+
+  const token = await accessToken();
+  const r = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media&supportsAllDrives=true`,
+    { headers: { Authorization: `Bearer ${token}` } });
+  if (!r.ok) return { error: `http_${r.status}`, name: meta.name };
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (buf.length > maxBytes) return { error: 'too_large', name: meta.name, size: buf.length };
+  return { bytes: buf, name: meta.name, mimeType: meta.mimeType };
+}
+
 module.exports = {
   isConfigured, serviceAccountEmail, scan, walk, classify, parseDate,
+  fileIdFromUrl, fetchFileBytes,
   CERT_RULES, COURSE_RULES, BRANCH_RULES,
 };

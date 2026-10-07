@@ -54,6 +54,11 @@ const notificationEventSchema = new mongoose.Schema({
       'rate_request', 'rate_request_decision', 'cross_placement_request', 'cross_placement_decision',
       'cross_arrangement', 'shift_attendance_report', 'shift_attendance_report_office',
       'swap_request', 'swap_response', 'swap_offer', 'swap_picked',
+      // The 10th-of-the-month nudge to file the attendance report at
+      // daycareattendance.labor.gov.il. Unlike every other type here it refers
+      // to no record — there is nothing in this database to point at — so its
+      // ref_id is derived from the reported month. See daycareReportJob.
+      'daycare_report',
     ],
     required: true,
   },
