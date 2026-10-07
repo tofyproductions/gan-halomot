@@ -1,6 +1,7 @@
 const { BranchCertification, Branch, Setting } = require('../models');
 const { resolveBranchScope, canAccessBranch } = require('../utils/branch-scope');
 const { CERT_TYPES, WARN_DAYS, statusOf, daysLeft } = require('../services/compliance');
+const driveCerts = require('../services/driveCerts.service');
 
 /**
  * אישורי מעון — every paper a branch operates under, with the dates that
@@ -199,6 +200,160 @@ async function getFile(req, res, next) {
  * Who the daily digest writes to, beyond the admins it always includes.
  * This is where עינת's address lives.
  */
+// ============================ ייבוא מהדרייב ============================
+/**
+ * The folders to scan, remembered between visits.
+ *
+ * In a Setting rather than in the environment because the office adds a folder
+ * for a new year and must not need a deploy to do it.
+ */
+const DRIVE_FOLDERS_KEY = 'drive_cert_folders';
+
+/** Accepts a Drive URL or a bare id — nobody should have to extract the id. */
+function folderIdOf(raw) {
+  const s = String(raw || '').trim();
+  const m = s.match(/\/folders\/([A-Za-z0-9_-]{10,})/) || s.match(/^([A-Za-z0-9_-]{10,})$/);
+  return m ? m[1] : null;
+}
+
+async function getDriveFolders(req, res, next) {
+  try {
+    const row = await Setting.findOne({ key: DRIVE_FOLDERS_KEY }).lean();
+    res.json({
+      folders: Array.isArray(row?.value) ? row.value : [],
+      configured: driveCerts.isConfigured(),
+      service_account: driveCerts.serviceAccountEmail(),
+    });
+  } catch (err) { next(err); }
+}
+
+async function setDriveFolders(req, res, next) {
+  try {
+    const list = Array.isArray(req.body?.folders) ? req.body.folders : [];
+    const folders = list
+      .map(f => ({ id: folderIdOf(f.id || f.url || f), label: String(f.label || '').trim() }))
+      .filter(f => f.id);
+    await Setting.findOneAndUpdate(
+      { key: DRIVE_FOLDERS_KEY }, { key: DRIVE_FOLDERS_KEY, value: folders },
+      { upsert: true },
+    );
+    res.json({ folders });
+  } catch (err) { next(err); }
+}
+
+/**
+ * GET /branch-certifications/drive/scan
+ *
+ * Reads the folders and answers with PROPOSALS. Writes nothing. Every row
+ * carries how sure it is and, where the branch cannot be derived, says so — a
+ * certificate filed under the wrong branch is a branch that looks covered and
+ * is not, which is the one mistake worth a screen to prevent.
+ */
+async function scanDrive(req, res, next) {
+  try {
+    if (!driveCerts.isConfigured()) {
+      return res.status(503).json({
+        error: 'גישת גוגל אינה מוגדרת במערכת.',
+        code: 'DRIVE_NOT_CONFIGURED',
+      });
+    }
+    const row = await Setting.findOne({ key: DRIVE_FOLDERS_KEY }).lean();
+    const stored = Array.isArray(row?.value) ? row.value.map(f => f.id) : [];
+    const asked = String(req.query.folders || '').split(',').map(folderIdOf).filter(Boolean);
+    const ids = asked.length ? asked : stored;
+    if (ids.length === 0) {
+      return res.status(400).json({ error: 'לא הוגדרו תיקיות לסריקה', code: 'NO_FOLDERS' });
+    }
+
+    const proposals = await driveCerts.scan(ids);
+
+    // Match the branch words to real branches, inside the caller's scope.
+    const scope = await resolveBranchScope(req);
+    const branches = await Branch.find(scope === null ? {} : { _id: { $in: scope } })
+      .select('name').lean();
+    const byWord = (word) => branches.find(b => String(b.name).includes(word)) || null;
+
+    // What is already linked, so a second scan does not offer the same file
+    // again. Keyed on the url, which is the only thing about a Drive file that
+    // does not change when somebody renames it.
+    const existing = await BranchCertification.find({ external_url: { $ne: '' } })
+      .select('external_url').lean();
+    const linked = new Set(existing.map(e => e.external_url));
+
+    res.json({
+      folders: ids,
+      proposals: proposals.map(p => {
+        const branch = p.branch_word ? byWord(p.branch_word) : null;
+        return {
+          ...p,
+          branch_id: branch ? String(branch._id) : null,
+          branch_name: branch ? branch.name : '',
+          // Two branches wear the name כפר סבא; the folder cannot say which.
+          needs_branch: p.needs_branch || !branch,
+          already_imported: linked.has(p.url),
+        };
+      }),
+    });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /branch-certifications/drive/import
+ *
+ * Takes the rows a person approved — each with its branch settled — and links
+ * them. The file stays in Drive: `external_url` is what the model has for the
+ * back-catalogue, and re-uploading history nobody opens again is busywork.
+ *
+ * Refuses rather than guesses: no branch, no type, or a branch outside the
+ * caller's scope is reported back by file name instead of being skipped in
+ * silence.
+ */
+async function importFromDrive(req, res, next) {
+  try {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (items.length === 0) return res.status(400).json({ error: 'לא נשלחו שורות לייבוא' });
+
+    const created = [];
+    const refused = [];
+    for (const it of items) {
+      const name = it.file_name || it.url || '—';
+      if (it.kind === 'course') {
+        refused.push({ name, reason: 'תעודה של עובדת — מיובאת במסך הקורסים, לא כאן' });
+        continue;
+      }
+      if (!it.type || !CERT_TYPES[it.type]) { refused.push({ name, reason: 'סוג אישור חסר' }); continue; }
+      if (!it.branch_id) { refused.push({ name, reason: 'לא נבחר סניף' }); continue; }
+      if (!await canAccessBranch(req, it.branch_id)) {
+        refused.push({ name, reason: 'אין הרשאה לסניף הזה' });
+        continue;
+      }
+      if (!it.url) { refused.push({ name, reason: 'אין קישור לקובץ' }); continue; }
+
+      // Already linked — a second import of the same file would give the branch
+      // two rows for one certificate and two expiry dates to disagree about.
+      const dup = await BranchCertification.findOne({
+        branch_id: it.branch_id, external_url: it.url, is_archived: false,
+      }).lean();
+      if (dup) { refused.push({ name, reason: 'כבר מקושר' }); continue; }
+
+      const doc = await BranchCertification.create({
+        branch_id: it.branch_id,
+        cert_type: it.type,
+        label: it.label || '',
+        issued_at: it.issued_at ? new Date(it.issued_at) : null,
+        expires_at: it.expires_at ? new Date(it.expires_at) : null,
+        external_url: it.url,
+        file_name: it.file_name || '',
+        notes: it.notes || `יובא מהדרייב${it.folder_path ? ` · ${it.folder_path}` : ''}`,
+        created_by: req.user?.id || null,
+      });
+      created.push(String(doc._id));
+    }
+
+    res.status(created.length ? 201 : 400).json({ created: created.length, refused });
+  } catch (err) { next(err); }
+}
+
 async function getRecipients(req, res, next) {
   try {
     const s = await Setting.findOne({ key: RECIPIENTS_KEY }).lean();
@@ -221,4 +376,5 @@ async function setRecipients(req, res, next) {
 module.exports = {
   list, create, update, renew, remove, getFile, getRecipients, setRecipients,
   RECIPIENTS_KEY,
-};
+  getDriveFolders, setDriveFolders, scanDrive, importFromDrive,
+}
