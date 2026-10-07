@@ -13,26 +13,65 @@
  *  when the renewal is a course with a waiting list or an inspector's visit. */
 const WARN_DAYS = 60;
 
-/** What a מעון has to hold to operate. 'other' keeps the list from being a cage. */
+/**
+ * What a מעון has to hold to operate. 'other' keeps the list from being a cage.
+ *
+ * The order is the order of the folder an inspector is handed: the licence
+ * first, then the trades that have to sign off on the building, then the people
+ * who have to sign off on the food and the hygiene, then the inspections.
+ *
+ * KEYS ARE PERMANENT. They are in the enum of every row ever written, so a
+ * wording that turns out to be wrong is fixed in the label and never in the
+ * key — `infrastructure` reads 'דוח התאמת תשתית לייעודה' because that is what
+ * the document is actually called, and the key stays what it was.
+ */
 const CERT_TYPES = {
   operating_license: 'רישיון הפעלה',
   electrician: 'אישור חשמלאי',
+  safety_inspector: 'אישור בודק בטיחות',
   fire_detection: 'אישור גילוי אש',
+  gas_inspection: 'בדיקה תקופתית של מתקני הגז',
   equipment_inspection: 'בדיקת מתקנים',
-  infrastructure: 'טופס התאמת תשתית',
+  infrastructure: 'דוח התאמת תשתית לייעודה',
+  nutritionist: 'אישור תזונאית',
+  sanitarian: 'אישור תברואן',
   agronomist: 'אישור אגרונום (עצים)',
+  criminal_registry: 'טפסי הסכמה למרשם הפלילי',
   inspection: 'ביקורת',
   other: 'אחר',
 };
 
-/** What every עובדת has to hold. The first two expire; the courses do not. */
+/**
+ * What every עובדת has to hold. The screen is "קורסים והרשאות", and the second
+ * word is why the consent form belongs here: it is a paper with her name on it
+ * that the gan has to be able to produce, which is the same shape as a course
+ * certificate and nothing like a branch's licence.
+ */
 const COURSE_TYPES = {
   first_aid: 'עזרה ראשונה (מד"א)',
   safe_conduct: 'התנהלות בטוחה',
   caregiver: 'קורס מטפלות',
   advanced_caregiver: 'קורס מטפלות מתקדמות',
+  criminal_registry: 'הסכמה למרשם הפלילי',
   other: 'אחר',
 };
+
+/**
+ * The course types that have an expiry at all.
+ *
+ * Was a literal `['first_aid', 'safe_conduct']` in four places — the
+ * controller, the PDF report, and twice in the matrix screen. Four copies of
+ * one fact is three chances to add a fifth type and have half the application
+ * treat it as permanent.
+ */
+const EXPIRING_COURSE_TYPES = ['first_aid', 'safe_conduct'];
+
+/**
+ * What the licence actually requires of every עובדת, and therefore what the
+ * coverage line on אישורי מעון counts. A course somebody took for herself is
+ * welcome and is not a requirement.
+ */
+const REQUIRED_COURSE_TYPES = ['first_aid', 'safe_conduct', 'criminal_registry'];
 
 /**
  * 'expired' | 'expiring' | 'ok' | 'no_expiry'
@@ -58,4 +97,8 @@ function daysLeft(expiresAt, now = new Date()) {
   return Math.ceil((exp.getTime() - now.getTime()) / 86400000);
 }
 
-module.exports = { WARN_DAYS, CERT_TYPES, COURSE_TYPES, statusOf, daysLeft };
+module.exports = {
+  WARN_DAYS, CERT_TYPES, COURSE_TYPES,
+  EXPIRING_COURSE_TYPES, REQUIRED_COURSE_TYPES,
+  statusOf, daysLeft,
+};

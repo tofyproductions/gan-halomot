@@ -29,8 +29,17 @@ import { pluralDays } from '../../utils/ilDates';
  * answers the other question the sheet couldn't: who can share one course.
  */
 
-// The two that expire come first — they are what the screen is for.
-const MATRIX_COLUMNS = ['first_aid', 'safe_conduct', 'caregiver', 'advanced_caregiver'];
+// The two that expire come first — they are what the screen is for. The
+// consent form sits at the end: required, but it does not run out.
+const MATRIX_COLUMNS = [
+  'first_aid', 'safe_conduct', 'caregiver', 'advanced_caregiver', 'criminal_registry',
+];
+/**
+ * The ones with an expiry. Was written out in three more places in this file,
+ * which is three chances to add a type and have half the screen treat it as
+ * permanent.
+ */
+const EXPIRING = ['first_aid', 'safe_conduct'];
 
 const STATUS_STYLE = {
   expired: { label: 'פג תוקף', color: 'error' },
@@ -54,7 +63,7 @@ const courseOf = (emp, type) => emp.courses.find(c => c.course_type === type) ||
 
 /** Does this employee need attention on the expiring courses? */
 function worstOf(emp) {
-  const statuses = ['first_aid', 'safe_conduct'].map(t => {
+  const statuses = EXPIRING.map(t => {
     const c = courseOf(emp, t);
     return c ? c.status : 'missing';
   });
@@ -149,7 +158,7 @@ export default function CoursesPage() {
   /** Who needs the same course — the list a group course is booked from. */
   const groupLists = useMemo(() => {
     if (!data) return [];
-    return ['first_aid', 'safe_conduct'].map(type => ({
+    return EXPIRING.map(type => ({
       type,
       label: courseTypes[type] || type,
       people: data.employees
@@ -237,7 +246,7 @@ export default function CoursesPage() {
   /** One matrix cell. */
   const cell = (emp, type) => {
     const c = courseOf(emp, type);
-    const expiring = type === 'first_aid' || type === 'safe_conduct';
+    const expiring = EXPIRING.includes(type);
     if (!c) {
       return (
         <Chip size="small" variant="outlined"

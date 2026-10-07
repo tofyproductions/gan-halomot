@@ -229,7 +229,10 @@ async function getFile(req, res, next) {
  * needs a rule about which positions require it, and that is the gan's rule to
  * state, not one to infer from a roster.
  */
-const REQUIRED_TYPES = ['first_aid', 'safe_conduct'];
+// One place for it now — see services/compliance. The consent form joins the
+// two courses here: it is a paper every עובדת must have and the licence asks
+// for, which is the same question this report answers.
+const { REQUIRED_COURSE_TYPES: REQUIRED_TYPES } = require('../services/compliance');
 
 /**
  * Of several rows of one type, the one that decides her standing.
