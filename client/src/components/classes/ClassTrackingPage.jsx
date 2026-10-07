@@ -48,17 +48,82 @@ function PaymentSummary({ branchId, month, refreshKey }) {
 
   if (!data || !(data.providers || []).length) return null;
 
+  /**
+   * The accountant's table, open by default: one line per provider with what
+   * is counted, whether VAT is added, and the figure that leaves the bank.
+   * The per-group rows underneath stay behind "פירוט" — they are for the
+   * month somebody questions, not for every glance.
+   */
+  const meetingsOf = (p) => p.programs.reduce((t, g) => t + (g.occurred || 0), 0);
+  const partialsOf = (p) => p.programs.reduce((t, g) => t + (g.partial || 0), 0);
+  const pendingOf = (p) => p.programs.reduce((t, g) => t + (g.scheduled || 0), 0);
+  const totalPending = data.providers.reduce((t, p) => t + pendingOf(p), 0);
+
   return (
     <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
       <Stack direction="row" alignItems="center" spacing={1}>
-        <Typography sx={{ fontWeight: 700 }}>לתשלום בחודש זה</Typography>
+        <Typography sx={{ fontWeight: 700 }}>סיכום להנהלת חשבונות — לתשלום בחודש זה</Typography>
         <Box sx={{ flex: 1 }} />
         <Typography sx={{ fontWeight: 700 }}>{ils(data.grand_total)}</Typography>
-        <Button size="small" onClick={() => setOpen(o => !o)}>{open ? 'סגור' : 'פירוט'}</Button>
+        <Button size="small" onClick={() => setOpen(o => !o)}>{open ? 'סגור פירוט' : 'פירוט לפי קבוצה'}</Button>
       </Stack>
+
+      <Box sx={{ overflowX: 'auto', mt: 1.5 }}>
+        <Table size="small" sx={{ minWidth: 640 }}>
+          <TableHead><TableRow>
+            <TableCell>ספק / חוג</TableCell>
+            <TableCell>מעמד</TableCell>
+            <TableCell align="center">התקיימו</TableCell>
+            <TableCell align="center">טרם סומנו</TableCell>
+            <TableCell align="left">לפני מע״מ</TableCell>
+            <TableCell align="left">מע״מ</TableCell>
+            <TableCell align="left">לתשלום</TableCell>
+          </TableRow></TableHead>
+          <TableBody>
+            {data.providers.map(p => (
+              <TableRow key={p.provider_id || p.provider_name}>
+                <TableCell sx={{ fontWeight: 600 }}>
+                  {p.provider_name}
+                  {p.retainer && (
+                    <Typography variant="caption" sx={{ display: 'block', color: 'info.main' }}>
+                      חודשי קבוע · {p.retainer.held_this_month} מתוך {p.retainer.meetings_per_month} מפגשים
+                    </Typography>
+                  )}
+                </TableCell>
+                <TableCell>
+                  <Chip size="small" variant="outlined"
+                    color={p.vat_mode === 'registered' ? 'warning' : 'default'}
+                    label={p.vat_mode === 'registered' ? 'עוסק מורשה + מע״מ' : 'עוסק פטור'} />
+                </TableCell>
+                <TableCell align="center">
+                  {meetingsOf(p)}{partialsOf(p) ? ` (+${partialsOf(p)} חלקית)` : ''}
+                </TableCell>
+                <TableCell align="center" sx={{ color: pendingOf(p) ? 'warning.main' : 'text.secondary' }}>
+                  {pendingOf(p) || '—'}
+                </TableCell>
+                <TableCell align="left">{ils(p.subtotal)}</TableCell>
+                <TableCell align="left">{p.vat ? ils(p.vat) : '—'}</TableCell>
+                <TableCell align="left" sx={{ fontWeight: 700 }}>{ils(p.total)}</TableCell>
+              </TableRow>
+            ))}
+            <TableRow>
+              <TableCell colSpan={4} sx={{ fontWeight: 700 }}>סה״כ</TableCell>
+              <TableCell align="left" sx={{ fontWeight: 700 }}>{ils(data.grand_subtotal)}</TableCell>
+              <TableCell align="left" sx={{ fontWeight: 700 }}>{data.grand_vat ? ils(data.grand_vat) : '—'}</TableCell>
+              <TableCell align="left" sx={{ fontWeight: 700 }}>{ils(data.grand_total)}</TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </Box>
+      {totalPending > 0 && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+          {totalPending} מפגשים עדיין מסומנים "מתוכנן" ואינם נספרים לתשלום עד שמסמנים אם המדריכה הגיעה.
+        </Typography>
+      )}
 
       {open && (
         <Box sx={{ mt: 1.5 }}>
+          <Divider sx={{ mb: 1.5 }} />
           {data.providers.map(p => (
             <Box key={p.provider_id || p.provider_name} sx={{ mb: 2 }}>
               <Stack direction="row" alignItems="center" spacing={1}>
@@ -104,12 +169,6 @@ function PaymentSummary({ branchId, month, refreshKey }) {
               </Box>
             </Box>
           ))}
-          <Divider sx={{ my: 1 }} />
-          <Stack direction="row" spacing={2} justifyContent="flex-start">
-            <Typography variant="body2">לפני מע״מ: {ils(data.grand_subtotal)}</Typography>
-            <Typography variant="body2">מע״מ: {ils(data.grand_vat)}</Typography>
-            <Typography variant="body2" sx={{ fontWeight: 700 }}>סה״כ: {ils(data.grand_total)}</Typography>
-          </Stack>
         </Box>
       )}
     </Paper>
@@ -244,14 +303,30 @@ export default function ClassTrackingPage() {
    * exactly as it is, answered or not.
    */
   const [filling, setFilling] = useState(false);
-  const fillMonth = () => {
+  const fillMonth = async () => {
+    /**
+     * A month already behind us is written only on purpose. The server skips
+     * past dates by default — the popup must not open on a week nobody was
+     * tracking — so reconstructing September is a deliberate act, said out
+     * loud: every meeting it writes still has to be answered, one by one.
+     */
+    const isPast = month < thisMonth();
+    if (isPast && !(await confirm({
+      title: 'שחזור חודש שעבר',
+      message: 'המפגשים ייכתבו לפי היום הקבוע של כל חוג, בלי ימים שהגן היה סגור. כל מפגש יישאר "מתוכנן" עד שמסמנים אם המדריכה הגיעה. להמשיך?',
+    }))) return;
     setFilling(true);
-    api.post('/classes/sessions/fill-month', { month })
+    api.post('/classes/sessions/fill-month', { month, include_past: isPast })
       .then(r => {
-        const { created, skipped } = r.data;
+        const { created, skipped, closed = [] } = r.data;
         toast.success(created
           ? `נוצרו ${created} מפגשים`
           : `הכול כבר קיים${skipped ? ` (${skipped} מפגשים)` : ''}`);
+        // "ראש השנה — 13.9" rather than a gap that looks like a mistake.
+        if (closed.length) {
+          const names = [...new Set(closed.map(c => c.name))].join(', ');
+          toast.info(`דולגו ${closed.length} ימים שהגן סגור: ${names}`);
+        }
         setRefreshKey(k => k + 1);
       })
       .catch(err => toast.error(apiError(err, 'המילוי נכשל')))

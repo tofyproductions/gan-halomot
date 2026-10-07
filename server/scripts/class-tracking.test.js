@@ -178,11 +178,25 @@ const eq = (a, b, label) => ok(a === b, label, `קיבלנו ${JSON.stringify(a)
   const filled = await call('POST', '/sessions/fill-month', { month: '2026-10', include_past: true });
   eq(filled.status, 200, 'החודש מולא');
   // October 2026: Tuesdays 6,13,20,27 × 3 groups at משה דיין
-  //              + Thursdays 1,8,15,22,29 × 1 group at הרצוג = 12 + 5
-  eq(filled.body.created, 17, 'מספר המפגשים לפי הימים הקבועים');
+  //              + Thursdays 8,15,22,29 × 1 group at הרצוג = 12 + 4.
+  // Thursday the 1st is inside סוכות — the gan is shut, nobody comes.
+  eq(filled.body.created, 16, 'מספר המפגשים לפי הימים הקבועים');
+  eq(JSON.stringify(filled.body.closed), JSON.stringify([{ date: '2026-10-01', name: 'סוכות' }]),
+    'ויום בחופשת הגן מדולג, בשמו');
   const again = await call('POST', '/sessions/fill-month', { month: '2026-10', include_past: true });
   eq(again.body.created, 0, 'לחיצה שנייה לא יוצרת כפילויות');
-  eq(again.body.skipped, 17, 'וסופרת את מה שכבר קיים');
+  eq(again.body.skipped, 16, 'וסופרת את מה שכבר קיים');
+
+  // September 2026: ראש השנה falls on Sunday the 13th and יום כיפור on
+  // Sunday–Monday 20–21; סוכות shuts the last week. A Tuesday class at משה
+  // דיין loses the 29th, the Thursday one at הרצוג has 3,10,17,24 and loses
+  // nothing — the holidays do not touch a Thursday that month.
+  const sept = await call('POST', '/sessions/fill-month', { month: '2026-09', include_past: true });
+  const septDates = (await ClassSession.find({ date: { $regex: '^2026-09' } }).select('date').lean()).map(s => s.date);
+  ok(!septDates.includes('2026-09-29'), 'יום שלישי בתוך סוכות לא נכתב');
+  ok(septDates.includes('2026-09-22'), 'ויום שלישי אחרי יום כיפור כן');
+  eq(sept.body.created, 3 * 4 + 4, 'ספטמבר: ארבעה ימי שלישי פתוחים × 3, ארבעה ימי חמישי × 1');
+  await ClassSession.deleteMany({ date: { $regex: '^2026-09' } });
 
   // A month that is entirely behind us writes nothing by default — the popup
   // must never open on a week nobody was tracking.
