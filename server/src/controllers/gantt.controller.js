@@ -25,7 +25,7 @@ const DEFAULT_ROWS = [
   { key: 'activity', label: 'פעילות' },
   { key: 'creation', label: 'הנגשת חומרים' },
   { key: 'story', label: 'סיפור' },
-  { key: 'misc', label: 'שונות' },
+  { key: 'misc', label: 'שונות וחוגים' },
 ];
 
 /**

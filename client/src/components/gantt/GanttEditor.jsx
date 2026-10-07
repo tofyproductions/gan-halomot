@@ -312,11 +312,16 @@ export default function GanttEditor() {
       const cats = s.program_id?.classroom_categories?.length
         ? s.program_id.classroom_categories
         : (s.program_id?.classroom_category ? [s.program_id.classroom_category] : []);
-      // Either side unset = general, and a general class shows everywhere.
-      return !classroomCategory || cats.length === 0 || cats.includes(classroomCategory);
+      // A room with no group sees everything. A group's room sees only the
+      // classes tagged for that group — an untagged class used to show on
+      // every group's plan, which read as "all the groups' classes are here".
+      return !classroomCategory || cats.includes(classroomCategory);
     });
   };
-  const SESSION_TINT = { occurred: '#dcfce7', no_show: '#fee2e2', postponed: '#ffedd5', scheduled: COLOR.background.sunken };
+  // The classes from מעקב חוגים are written into the "שונות" row, so the plan
+  // has one place for "what else happens today" instead of a separate lane.
+  const CLASS_ROW = 'misc';
+  const rowLabel = (row) => (row.key === CLASS_ROW && row.label === 'שונות' ? 'שונות וחוגים' : row.label);
 
   // Cell helpers
   const getCell = (wk, rk, di) => gantt?.weeks?.[wk]?.cells?.find(c => c.row_key === rk && c.day_index === di);
@@ -1063,55 +1068,11 @@ export default function GanttEditor() {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {/* Read-only class-tracking lane (מעקב חוגים reflection) */}
-                    {(() => {
-                      const dayCells = DAY_NAMES.map((_, di) => {
-                        const dd = dateOfColumn(di);
-                        return { di, sessions: inMonth(dd) ? sessionsOnDate(dd) : [] };
-                      });
-                      if (!dayCells.some(c => c.sessions.length)) return null;
-                      return (
-                        <TableRow>
-                          <TableCell sx={{ bgcolor: COLOR.gantt.fixedRow.bg, fontWeight: 800, fontSize: '0.82rem', textAlign: 'center', borderLeft: '2px solid #fbcfe8', color: '#9d174d', p: 1 }}>חוגים</TableCell>
-                          {dayCells.map(({ di, sessions }) => (
-                            <TableCell key={di} sx={{ bgcolor: COLOR.gantt.fixedRow.bg, border: `1px solid ${COLOR.gantt.fixedRow.border}`, p: 0.5, verticalAlign: 'top' }}>
-                              <Stack spacing={0.4}>
-                                {sessions.map(s => {
-                                  // Only a meeting still waiting can be moved: one
-                                  // already answered is a record of what happened.
-                                  const movable = canMoveSessions && s.status === 'scheduled';
-                                  return (
-                                    <Tooltip key={s._id} title={movable ? 'לחצ/י כדי להעביר ליום או לשעה אחרת' : ''}>
-                                      <Box
-                                        onClick={movable ? () => setMoveSession({
-                                          id: s._id, date: s.date, time: s.time || '',
-                                          name: s.program_id?.name || 'חוג',
-                                        }) : undefined}
-                                        sx={{
-                                          bgcolor: SESSION_TINT[s.status] || COLOR.background.sunken, borderRadius: 1, px: 0.6, py: 0.2,
-                                          fontSize: '0.68rem', fontWeight: 700, color: '#334155',
-                                          textDecoration: s.status === 'postponed' ? 'line-through' : 'none',
-                                          cursor: movable ? 'pointer' : 'default',
-                                          '&:hover': movable ? { outline: '1.5px solid #9d174d' } : {},
-                                        }}
-                                      >
-                                        {s.program_id?.name || 'חוג'}{s.time ? ` ${s.time}` : ''}
-                                        {s.status === 'postponed' && s.postponed_to_date ? ` → ${s.postponed_to_date.slice(5)}` : ''}
-                                      </Box>
-                                    </Tooltip>
-                                  );
-                                })}
-                              </Stack>
-                            </TableCell>
-                          ))}
-                        </TableRow>
-                      );
-                    })()}
                     {rows.map((row, rowIdx) => (
                       <TableRow key={row.key}>
                         <TableCell sx={{ bgcolor: COLOR.background.sunken, fontWeight: 800, fontSize: '0.9rem', textAlign: 'center', borderLeft: '2px solid #cbd5e1', p: 1 }}>
                           <Stack direction="row" justifyContent="center" alignItems="center" spacing={0.5}>
-                            <span>{row.label}</span>
+                            <span>{rowLabel(row)}</span>
                             {row.key.startsWith('c') && row.key.includes('_') && (
                               <IconButton size="small" onClick={() => removeRow(row.key)} sx={{ p: 0 }}>
                                 <DeleteIcon sx={{ fontSize: 14, color: COLOR.text.disabled }} />
@@ -1293,6 +1254,31 @@ export default function GanttEditor() {
                                 position: 'relative', '&:hover .ca': { opacity: 1 },
                               }}
                             >
+                              {row.key === CLASS_ROW && own && sessionsOnDate(dd).map((s) => {
+                                // Only a meeting still waiting can be moved: one
+                                // already answered is a record of what happened.
+                                const movable = canMoveSessions && s.status === 'scheduled';
+                                return (
+                                  <Tooltip key={s._id} title={movable ? 'לחצ/י כדי להעביר ליום או לשעה אחרת' : ''}>
+                                    <Box
+                                      onClick={movable ? (e) => { e.stopPropagation(); setMoveSession({
+                                        id: s._id, date: s.date, time: s.time || '',
+                                        name: s.program_id?.name || 'חוג',
+                                      }); } : undefined}
+                                      sx={{
+                                        fontSize: '0.9rem', lineHeight: 1.5, textAlign: 'center',
+                                        textDecoration: s.status === 'postponed' ? 'line-through' : 'none',
+                                        opacity: s.status === 'no_show' ? 0.55 : 1,
+                                        cursor: movable ? 'pointer' : 'default',
+                                        borderRadius: 1, '&:hover': movable ? { bgcolor: 'rgba(0,0,0,0.05)' } : {},
+                                      }}
+                                    >
+                                      {s.program_id?.name || 'חוג'}{s.time ? ` ${s.time}` : ''}
+                                      {s.status === 'postponed' && s.postponed_to_date ? ` → ${s.postponed_to_date.slice(5)}` : ''}
+                                    </Box>
+                                  </Tooltip>
+                                );
+                              })}
                               <TextField size="small" multiline maxRows={5} fullWidth variant="standard"
                                 value={cellContent}
                                 onChange={e => updateCell(weekIdx, row.key, si, { content: e.target.value })}

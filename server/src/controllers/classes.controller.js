@@ -277,7 +277,7 @@ async function listSessions(req, res, next) {
     const monthFilter = monthPrefixFilter(req.query.month);
     if (monthFilter) filter.date = monthFilter;
     const sessions = await ClassSession.find(filter)
-      .populate('program_id', 'name instructor_name color default_rate provider_id classroom_category')
+      .populate('program_id', 'name instructor_name color default_rate provider_id classroom_category classroom_categories')
       .sort({ date: 1, time: 1 }).lean();
     res.json({ sessions });
   } catch (err) { next(err); }
