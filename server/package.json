@@ -166,6 +166,7 @@
     "test:staff-first-login": "node scripts/staff-first-login-otp.test.js",
     "scrub:id-passwords": "node scripts/scrub-id-number-passwords.js",
     "test:parent-login-child-id": "node scripts/parent-login-child-id.test.js",
+    "test:class-tracking": "node scripts/class-tracking.test.js",
     "test:order-approval": "node scripts/order-approval-flow.test.js",
     "test:order-no-prices": "node scripts/order-email-no-prices.test.js",
     "test:parent-signups": "node scripts/parent-signups.test.js",

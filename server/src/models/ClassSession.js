@@ -6,6 +6,9 @@ const mongoose = require('mongoose');
  *
  * Status lifecycle:
  *   scheduled → occurred      (someone answered "כן, הגיע")
+ *            → partial        (came, but did not do the whole thing — half a
+ *                              lesson, or not the whole group. Paid at
+ *                              `partial_amount` instead of `rate`.)
  *            → no_show        ("לא" without a reschedule)
  *            → postponed      ("לא" + reschedule → a NEW scheduled session is
  *                              created; this one is marked postponed and is
@@ -16,8 +19,8 @@ const mongoose = require('mongoose');
  * confirmation is always required — if only the lead answered,
  * `manager_confirmed` stays false and the manager still sees it pending.
  *
- * Payment: total = Σ (sessions where status='occurred') × rate. Postponed and
- * no-show sessions contribute nothing.
+ * Payment: Σ rate over 'occurred', plus Σ partial_amount over 'partial'.
+ * Postponed and no-show sessions contribute nothing.
  */
 const classSessionSchema = new mongoose.Schema({
   program_id: { type: mongoose.Schema.Types.ObjectId, ref: 'ClassProgram', required: true, index: true },
@@ -28,9 +31,26 @@ const classSessionSchema = new mongoose.Schema({
   rate: { type: Number, default: 0 },                     // ₪ for THIS session
   status: {
     type: String,
-    enum: ['scheduled', 'occurred', 'no_show', 'postponed'],
+    enum: ['scheduled', 'occurred', 'partial', 'no_show', 'postponed'],
     default: 'scheduled',
   },
+  /**
+   * What a partial session is actually worth.
+   *
+   * The old spreadsheet carried a row reading "תשלום בחוסר שיעור - אוריאן" with
+   * -180 against it, hand-entered, because the sheet counted a DATE and the
+   * instructor had come that date and done less than she owed. The number was
+   * right and nothing in the sheet explained it — a correction with no record
+   * of what it corrected.
+   *
+   * Most of that disappears on its own now that each classroom is its own
+   * session and each is ticked separately: a group that was not done is simply
+   * a session that did not occur. What remains is the half-lesson, and this is
+   * it — the amount due for THIS session, in place of `rate`.
+   *
+   * null while the status is anything but 'partial'.
+   */
+  partial_amount: { type: Number, default: null },
   no_show_reason: { type: String, default: '' },
   // Reschedule links (postpone = new session created, this one marked postponed).
   postponed_to_date: { type: String, default: null },
