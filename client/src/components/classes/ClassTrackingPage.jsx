@@ -111,59 +111,21 @@ function PaymentSummary({ branchId, month, refreshKey }) {
   );
 }
 
-function ProgramDialog({ open, program, branchId, providers, onClose, onSaved }) {
-  const [d, setD] = useState({});
-  useEffect(() => {
-    setD(program ? {
-      name: program.name || '', provider_id: program.provider_id?._id || program.provider_id || '',
-      instructor_name: program.instructor_name || '', classroom_category: program.classroom_category || '',
-      default_rate: program.default_rate ?? '', default_day: program.default_day ?? '', default_time: program.default_time || '',
-    } : { name: '', provider_id: '', instructor_name: '', classroom_category: '', default_rate: '', default_day: '', default_time: '' });
-  }, [program, open]);
-  const [saving, setSaving] = useState(false);
-  const save = () => {
-    if (saving) return; // double-tap = duplicate program
-    if (!d.name?.trim()) return toast.error('שם חוג נדרש');
-    setSaving(true);
-    const payload = { ...d, branch_id: branchId, default_rate: Number(d.default_rate) || 0, default_day: d.default_day === '' ? null : Number(d.default_day) };
-    const req = program ? api.put(`/classes/programs/${program._id}`, payload) : api.post('/classes/programs', payload);
-    req.then(() => { toast.success('נשמר'); onSaved(); onClose(); }).catch(e => toast.error(e.response?.data?.error || 'שגיאה'))
-      .finally(() => setSaving(false));
-  };
-  return (
-    <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="sm" fullWidth>
-      <DialogTitle>{program ? 'עריכת חוג' : 'חוג חדש'}</DialogTitle>
-      <DialogContent>
-        <Stack spacing={2} sx={{ mt: 1 }}>
-          <TextField size="small" label="שם החוג" value={d.name || ''} onChange={e => setD(x => ({ ...x, name: e.target.value }))} fullWidth />
-          <Stack direction="row" spacing={2}>
-            <TextField size="small" select label="ספק" value={d.provider_id || ''} onChange={e => setD(x => ({ ...x, provider_id: e.target.value }))} fullWidth>
-              <MenuItem value="">— ללא —</MenuItem>
-              {providers.map(p => <MenuItem key={p._id} value={p._id}>{p.name}</MenuItem>)}
-            </TextField>
-            <TextField size="small" label="שם מדריך" value={d.instructor_name || ''} onChange={e => setD(x => ({ ...x, instructor_name: e.target.value }))} fullWidth />
-          </Stack>
-          <Stack direction="row" spacing={2}>
-            <TextField size="small" select label="קטגוריית כיתה" value={d.classroom_category || ''} onChange={e => setD(x => ({ ...x, classroom_category: e.target.value }))} fullWidth>
-              <MenuItem value="">— כללי —</MenuItem>
-              {CATEGORIES.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
-            </TextField>
-            <TextField size="small" type="number" label="תעריף למפגש (₪)" value={d.default_rate ?? ''} onChange={e => setD(x => ({ ...x, default_rate: e.target.value }))} fullWidth />
-          </Stack>
-          <Stack direction="row" spacing={2}>
-            <TextField size="small" select label="יום קבוע" value={d.default_day ?? ''} onChange={e => setD(x => ({ ...x, default_day: e.target.value }))} fullWidth>
-              <MenuItem value="">— גמיש —</MenuItem>
-              {DAY_NAMES.map((n, i) => <MenuItem key={i} value={i}>{n}</MenuItem>)}
-            </TextField>
-            <TextField size="small" type="time" label="שעה קבועה" value={d.default_time || ''} onChange={e => setD(x => ({ ...x, default_time: e.target.value }))} InputLabelProps={{ shrink: true }} fullWidth />
-          </Stack>
-        </Stack>
-      </DialogContent>
-      <DialogActions><Button onClick={onClose}>ביטול</Button><Button variant="contained" onClick={save} disabled={saving}>שמור</Button></DialogActions>
-    </Dialog>
-  );
-}
-
+/**
+ * The "חוג חדש" dialog used to live here, and it was the second half of one
+ * decision.
+ *
+ * Setting a class up meant this screen AND the provider screen: her name and
+ * phone over there, her day and rate over here, and the two never knew about
+ * each other — a provider at two branches with two different rates needed two
+ * passes through a dialog that only ever held one. Worse, it could create a
+ * class with no provider at all, which then had no phone number, no VAT status
+ * and nothing to invoice against.
+ *
+ * It is one screen now: ProvidersDialog. The provider and her whole week —
+ * every branch, every group, every rate — are saved together, and "חוג חדש"
+ * opens it.
+ */
 // ---------- One program's monthly sessions ----------
 function ProgramSessions({ program, month, onChanged }) {
   const confirm = useConfirm();
@@ -250,19 +212,20 @@ export default function ClassTrackingPage() {
   const confirm = useConfirm();
   const [month, setMonth] = useState(thisMonth());
   const [programs, setPrograms] = useState([]);
-  const [providers, setProviders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [providersOpen, setProvidersOpen] = useState(false);
-  const [progDlg, setProgDlg] = useState({ open: false, program: null });
+  // Which provider the one screen opens on. '' = the list, 'new' = the add form.
+  const [providerFocus, setProviderFocus] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
 
   const load = useCallback(() => {
     if (isAllBranches || !selectedBranch) { setPrograms([]); return; }
     setLoading(true);
-    Promise.all([
-      api.get('/classes/programs', { params: { branch: selectedBranch, active: 'true' } }),
-      api.get('/classes/providers', { params: { active: 'true' } }),
-    ]).then(([pr, pv]) => { setPrograms(pr.data.programs || []); setProviders(pv.data.providers || []); })
+    // Providers are no longer fetched here: the one screen that edits them
+    // loads its own list. Two components holding the same list is two lists
+    // that drift.
+    api.get('/classes/programs', { params: { branch: selectedBranch, active: 'true' } })
+      .then(pr => setPrograms(pr.data.programs || []))
       .catch(() => {}).finally(() => setLoading(false));
   }, [selectedBranch, isAllBranches]);
   useEffect(() => { load(); }, [load, refreshKey]);
@@ -313,7 +276,10 @@ export default function ClassTrackingPage() {
             </Button>
           </span>
         </Tooltip>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setProgDlg({ open: true, program: null })}>חוג חדש</Button>
+        <Button variant="contained" startIcon={<AddIcon />}
+          onClick={() => { setProviderFocus('new'); setProvidersOpen(true); }}>
+          חוג חדש
+        </Button>
       </Stack>
 
       <PaymentSummary branchId={selectedBranch} month={month} refreshKey={refreshKey} />
@@ -321,7 +287,10 @@ export default function ClassTrackingPage() {
       {loading ? (
         <Box sx={{ textAlign: 'center', py: 4 }}><CircularProgress /></Box>
       ) : programs.length === 0 ? (
-        <Alert severity="info">אין חוגים בסניף זה עדיין. לחצ/י "חוג חדש" כדי להוסיף.</Alert>
+        <Alert severity="info">
+          אין חוגים בסניף זה עדיין. לחצ/י "חוג חדש" — מגדירים את הספק ואת כל הלוח
+          השבועי שלו/ה במסך אחד, כולל תעריף שונה לכל סניף.
+        </Alert>
       ) : (
         programs.map(p => (
           <Accordion key={p._id} defaultExpanded={programs.length <= 3} sx={{ mb: 1 }}>
@@ -333,7 +302,13 @@ export default function ClassTrackingPage() {
                 {p.default_day != null && <Chip size="small" variant="outlined" label={`יום ${DAY_NAMES[p.default_day]}${p.default_time ? ` ${p.default_time}` : ''}`} />}
                 <Chip size="small" variant="outlined" label={`${ils(p.default_rate)}/מפגש`} />
                 <Box sx={{ flex: 1 }} />
-                <IconButton size="small" onClick={(e) => { e.stopPropagation(); setProgDlg({ open: true, program: p }); }}><EditIcon fontSize="small" /></IconButton>
+                <Tooltip title="עריכה במסך הספק — שם, סניפים, ימים ותעריפים, הכול יחד">
+                  <IconButton size="small" onClick={(e) => {
+                    e.stopPropagation();
+                    setProviderFocus(String(p.provider_id?._id || p.provider_id || ''));
+                    setProvidersOpen(true);
+                  }}><EditIcon fontSize="small" /></IconButton>
+                </Tooltip>
                 <IconButton size="small" color="error" onClick={(e) => { e.stopPropagation(); delProgram(p); }}><DeleteIcon fontSize="small" /></IconButton>
               </Stack>
             </AccordionSummary>
@@ -344,10 +319,10 @@ export default function ClassTrackingPage() {
         ))
       )}
 
-      <ProvidersDialog open={providersOpen} onClose={() => { setProvidersOpen(false); setRefreshKey(k => k + 1); }} />
-      <ProgramDialog
-        open={progDlg.open} program={progDlg.program} branchId={selectedBranch} providers={providers}
-        onClose={() => setProgDlg({ open: false, program: null })} onSaved={() => setRefreshKey(k => k + 1)}
+      <ProvidersDialog
+        open={providersOpen}
+        focus={providerFocus}
+        onClose={() => { setProvidersOpen(false); setProviderFocus(''); setRefreshKey(k => k + 1); }}
       />
     </Box>
   );

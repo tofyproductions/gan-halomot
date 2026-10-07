@@ -31,9 +31,15 @@ const bid = (b) => String(b._id || b.id);
  * never gets paid for, with nothing anywhere saying so.
  *
  * So this screen has two levels: the list, and one provider open — her details
- * and every line of her week in one table, saved together.
+ * and every line of her week in one table, saved together. "חוג חדש" on the
+ * tracking page opens it too; there is no second dialog, because there was
+ * never a second decision.
+ *
+ * `focus` says where to land: '' the list, 'new' the add form, or a provider's
+ * id to open straight onto her week — which is what the pencil beside a class
+ * sends, so editing a class and editing its provider are the same click.
  */
-export default function ProvidersDialog({ open, onClose }) {
+export default function ProvidersDialog({ open, onClose, focus = '' }) {
   const { branches } = useBranch();
   const confirm = useConfirm();
   const [providers, setProviders] = useState([]);
@@ -44,17 +50,39 @@ export default function ProvidersDialog({ open, onClose }) {
   const [draft, setDraft] = useState({ name: '', field: '', phone: '' });
 
   const load = () => api.get('/classes/providers')
-    .then(r => setProviders(r.data.providers || []))
-    .catch(() => {});
-  useEffect(() => { if (open) { load(); setEditing(null); } }, [open]);
+    .then(r => { setProviders(r.data.providers || []); return r.data.providers || []; })
+    .catch(() => []);
+
+  useEffect(() => {
+    if (!open) return;
+    setEditing(null);
+    load().then((list) => {
+      if (!focus || focus === 'new') return;
+      const p = list.find(x => String(x._id) === String(focus));
+      if (p) openProvider(p);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, focus]);
 
   const branchName = (id) => branches.find(b => bid(b) === String(id))?.name || '—';
 
   // ---------------------------------------------------------------- list
+  /**
+   * Added, then opened — not added and left on a list.
+   *
+   * A provider with no branches, no days and no rates runs no classes and
+   * produces no sessions, so stopping at "נוסף" is stopping halfway through
+   * the thing somebody came here to do.
+   */
   const addProvider = () => {
     if (!draft.name.trim()) return toast.error('שם ספק נדרש');
     api.post('/classes/providers', draft)
-      .then(() => { toast.success('נוסף'); setDraft({ name: '', field: '', phone: '' }); load(); })
+      .then(({ data }) => {
+        toast.success('נוסף — עכשיו הגדירו באילו סניפים, ימים ותעריפים');
+        setDraft({ name: '', field: '', phone: '' });
+        load();
+        if (data?.provider) openProvider(data.provider);
+      })
       .catch(err => toast.error(apiError(err, 'ההוספה נכשלה')));
   };
 
@@ -90,8 +118,15 @@ export default function ProvidersDialog({ open, onClose }) {
 
   const setField = (k, v) => setEditing(e => ({ ...e, [k]: v }));
   const setRow = (i, patch) => setRows(rs => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
-  const addRow = () => setRows(rs => [...rs, {
-    branch_id: editing.branch_ids[0] || (branches[0] ? bid(branches[0]) : ''),
+  /**
+   * A row belongs to a branch from the moment it exists.
+   *
+   * It used to be added to whichever branch sorted first and the person was
+   * told to change it — which is a step that is easy to forget, and forgetting
+   * it files a class at the wrong gan with the wrong rate.
+   */
+  const addRow = (branchId) => setRows(rs => [...rs, {
+    branch_id: branchId || editing.branch_ids[0] || (branches[0] ? bid(branches[0]) : ''),
     classroom_category: '', name: editing.name || '', instructor_name: '',
     default_day: '', default_time: '', default_rate: '',
   }]);
@@ -235,13 +270,15 @@ export default function ProvidersDialog({ open, onClose }) {
             <Stack direction="row" alignItems="center">
               <Typography sx={{ fontWeight: 700 }}>הלוח השבועי</Typography>
               <Box sx={{ flex: 1 }} />
-              <Button size="small" startIcon={<AddIcon />} onClick={addRow}>שורה</Button>
+              <Button size="small" startIcon={<AddIcon />} onClick={() => addRow()}>שורה</Button>
             </Stack>
 
             {rows.length === 0 && (
               <Alert severity="info">
                 עוד לא הוגדר לוח. כל שורה היא קבוצה אחת בסניף אחד — יום, שעה ותעריף.
-                מדריך/ה שעושה שלוש קבוצות באותו בוקר = שלוש שורות.
+                מדריך/ה שעושה שלוש קבוצות באותו בוקר = שלוש שורות,
+                <b> והתעריף נקבע לכל שורה בנפרד</b> — אותה מדריכה יכולה לקבל סכום
+                אחד בסניף אחד וסכום אחר בשני.
               </Alert>
             )}
 
@@ -249,10 +286,16 @@ export default function ProvidersDialog({ open, onClose }) {
               const mine = rows.map((r, i) => ({ r, i })).filter(x => x.r.branch_id === branchId);
               return (
                 <Box key={branchId} sx={{ border: '1px solid #e5e7eb', borderRadius: 2, p: 1.5 }}>
-                  <Typography sx={{ fontWeight: 600, mb: 1 }}>{branchName(branchId)}</Typography>
+                  <Stack direction="row" alignItems="center" sx={{ mb: 1 }}>
+                    <Typography sx={{ fontWeight: 600 }}>{branchName(branchId)}</Typography>
+                    <Box sx={{ flex: 1 }} />
+                    <Button size="small" startIcon={<AddIcon />} onClick={() => addRow(branchId)}>
+                      הוספת קבוצה
+                    </Button>
+                  </Stack>
                   {mine.length === 0 && (
                     <Typography variant="caption" color="text.secondary">
-                      אין שורות לסניף הזה. לחצ/י "שורה" והחלף/י את הסניף בשורה החדשה.
+                      אין קבוצות בסניף הזה. לחצ/י "הוספת קבוצה".
                     </Typography>
                   )}
                   {mine.map(({ r, i }) => (
