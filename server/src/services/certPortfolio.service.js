@@ -19,6 +19,13 @@ const driveCerts = require('./driveCerts.service');
  * certificates are BOUND IN — the branch's papers first in the order the
  * licence asks for them, then the staff's.
  *
+ * THE STAFF'S CERTIFICATES ARE PART OF THE FOLDER. עזרה ראשונה, התנהלות
+ * בטוחה, the consent forms and the caregiving courses are asked for by name at
+ * an inspection, and they live on the עובדת rather than on the branch — which
+ * is a fact about this system's tables and not about the folder. A portfolio
+ * that stops at the branch's own papers is half a folder, and the half that is
+ * missing is the half about people.
+ *
  * The cover page is the part that is worth as much as the certificates: what
  * the branch holds, what it does not, and which papers are present but carry
  * no expiry date. That last line is the one the office cannot otherwise see,
@@ -77,6 +84,7 @@ function decisive(rows) {
 
 function coverHtml({ branch, certs, employees, courses, gap }) {
   const now = new Date();
+  const docs = bindOrder({ certs, employees, courses });
 
   const certRows = REQUIRED_CERT_TYPES.map((type) => {
     const mine = certs.filter(c => c.cert_type === type);
@@ -170,7 +178,56 @@ function coverHtml({ branch, certs, employees, courses, gap }) {
   <p class="sub">
     "מחזיקות" = תעודה קיימת ובתוקף. פג תוקף נספר כחסר ומסומן בסוגריים ליד השם.
   </p>
+
+  ${docs.length ? `<h2>תוכן התיק — ${docs.length} מסמכים</h2>
+  <p class="sub">המסמכים מצורפים אחרי הדף הזה, בסדר הזה.</p>
+  <table>
+    <tr><th style="width:8%">#</th><th>המסמך</th><th style="width:26%">חלק</th></tr>
+    ${docs.map((d, i) => row([String(i + 1), esc(d.label), esc(d.section)])).join('')}
+  </table>` : `<div class="note">אין מסמכים מצורפים — לאף אישור בתיק לא צורף קובץ או קישור.</div>`}
 </body></html>`;
+}
+
+/**
+ * Everything that gets bound in, in the order it is bound.
+ *
+ * The branch's own papers first, in the order the licence asks for them, then
+ * anything extra it holds, then the staff's — grouped by certificate and
+ * alphabetical inside it, because an inspector asks "who has עזרה ראשונה" and
+ * not "what does רונית have".
+ *
+ * Only rows with something behind them. A course recorded with no file is real
+ * and belongs in the coverage table on the cover; it has no page to bind.
+ */
+function bindOrder({ certs, employees, courses }) {
+  const byId = new Map(employees.map(e => [String(e._id), e]));
+  const hasFile = (r) => Boolean(r.file_data || r.external_url);
+
+  const branchDocs = [
+    ...REQUIRED_CERT_TYPES.flatMap(t => certs.filter(c => c.cert_type === t)),
+    ...certs.filter(c => !REQUIRED_CERT_TYPES.includes(c.cert_type)),
+  ].filter(hasFile).map(row => ({
+    row,
+    section: 'אישורי המעון',
+    label: row.cert_type === 'other' ? (row.label || 'אחר') : (CERT_TYPES[row.cert_type] || row.cert_type),
+  }));
+
+  const COURSE_ORDER = [...REQUIRED_COURSE_TYPES, 'caregiver', 'advanced_caregiver', 'other'];
+  const staffDocs = [];
+  for (const type of COURSE_ORDER) {
+    const rows = courses
+      .filter(c => c.course_type === type && hasFile(c))
+      .sort((a, b) => String(byId.get(String(a.employee_id))?.full_name || '')
+        .localeCompare(String(byId.get(String(b.employee_id))?.full_name || ''), 'he'));
+    for (const row of rows) {
+      staffDocs.push({
+        row,
+        section: 'תעודות הצוות',
+        label: `${COURSE_TYPES[type] || type} — ${byId.get(String(row.employee_id))?.full_name || 'עובדת'}`,
+      });
+    }
+  }
+  return [...branchDocs, ...staffDocs];
 }
 
 /** The bytes behind one certificate row — from the database, or from Drive. */
@@ -236,17 +293,11 @@ async function build({ branchId }) {
   (await out.copyPages(coverDoc, coverDoc.getPageIndices())).forEach(p => out.addPage(p));
   tryGc();
 
-  // The branch's own papers, in the order the licence asks for them, then
-  // anything extra it holds.
-  const ordered = [
-    ...REQUIRED_CERT_TYPES.flatMap(t => data.certs.filter(c => c.cert_type === t)),
-    ...data.certs.filter(c => !REQUIRED_CERT_TYPES.includes(c.cert_type)),
-  ];
+  const ordered = bindOrder(data);
 
   const skipped = [];
   const budget = { used: 0 };
-  for (const row of ordered) {
-    const label = CERT_TYPES[row.cert_type] || row.cert_type;
+  for (const { row, label } of ordered) {
     const got = await bytesOf(row, budget);
     if (got.error || !got.bytes) {
       skipped.push({ label, reason: got.error || 'no_file' });

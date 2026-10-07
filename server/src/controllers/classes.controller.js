@@ -318,8 +318,27 @@ async function isClassLead(req, session) {
   const room = await Classroom.findById(session.classroom_id).select('lead_teacher_id').lean();
   return room && String(room.lead_teacher_id) === String(req.user?.id);
 }
+/** May this caller answer for a session, and does answering CONFIRM it. */
 function isManagerRole(req) {
   return ['system_admin', 'branch_manager', 'accountant'].includes(req.user?.role);
+}
+
+/**
+ * Who the occurrence popup is FOR — which is a narrower question than who may
+ * answer it.
+ *
+ * The branch manager is in the building. She knows whether the instructor
+ * walked in, and the question costs her two seconds. A system admin or an
+ * accountant is not there, cannot know, and was being asked anyway — about
+ * every class at every branch, every morning. A popup somebody cannot answer
+ * is a popup they learn to close, and once it is closed on reflex it is also
+ * closed on the morning it mattered.
+ *
+ * They keep every power they had: the tracking screen, and marking a session
+ * from it. What they stop getting is the interruption.
+ */
+function getsOccurrencePopup(req) {
+  return req.user?.role === 'branch_manager';
 }
 
 /**
@@ -473,13 +492,17 @@ async function dueSessions(req, res, next) {
       populate: { path: 'provider_id', select: 'name' },
     };
 
-    const manager = isManagerRole(req);
+    const manager = getsOccurrencePopup(req);
     let sessions = [];
     if (manager) {
       const scope = managedBranchIds(req);
       const filter = { ...base, manager_confirmed: { $ne: true } };
       if (scope) filter.branch_id = { $in: scope };
       sessions = await ClassSession.find(filter).populate(populate).lean();
+    } else if (isManagerRole(req)) {
+      // Management and accounting are not in the building; nothing is due
+      // from them. The screen is still theirs.
+      sessions = [];
     } else {
       const rooms = await Classroom.find({ lead_teacher_id: req.user?.id }).select('_id').lean();
       const roomIds = rooms.map(r => r._id);

@@ -10,8 +10,17 @@ import api from '../../api/client';
 import { useAuth } from '../../hooks/useAuth';
 
 const POLL_MS = 60_000;
-// Only these roles ever get the occurrence popup (managers + class leads).
-const POPUP_ROLES = ['system_admin', 'branch_manager', 'class_leader'];
+/**
+ * Who gets asked. NOT everyone who may answer.
+ *
+ * The branch manager is in the building and knows whether the instructor
+ * walked in. A system admin is not, and was being asked every morning about
+ * every class at every branch — a question they cannot answer, which is how a
+ * popup becomes a thing you close without reading, including on the morning it
+ * mattered. The server agrees (classes.controller `getsOccurrencePopup`);
+ * this list only keeps the poll from running at all.
+ */
+const POPUP_ROLES = ['branch_manager', 'class_leader'];
 
 /**
  * "Did she come this morning, and did she do all of it?"

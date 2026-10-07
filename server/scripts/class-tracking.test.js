@@ -68,14 +68,23 @@ const eq = (a, b, label) => ok(a === b, label, `קיבלנו ${JSON.stringify(a)
     { id: String(new mongoose.Types.ObjectId()), full_name: 'מנהלת', role: 'system_admin' },
     process.env.JWT_SECRET, { expiresIn: '1h' },
   );
-  const call = async (method, path, body) => {
+  /**
+   * The branch manager is the one the popup is for — she is in the building.
+   * The admin sets things up and reads the money; she is never asked whether
+   * an instructor walked in, because she cannot know.
+   */
+  // Signed once the branches exist — a branch manager's token carries the
+  // branches she manages, and without them she is scoped to nothing.
+  let callMgr;
+  const callAs = (token) => async (method, path, body) => {
     const r = await fetch(base + path, {
       method,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${admin}` },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
     return { status: r.status, body: await r.json().catch(() => ({})) };
   };
+  const call = callAs(admin);
 
   // ------------------------------------------------------------------ setup
   const ks = await Branch.create({ name: 'כפר סבא - משה דיין' });
@@ -83,6 +92,12 @@ const eq = (a, b, label) => ok(a === b, label, `קיבלנו ${JSON.stringify(a)
   for (const [b, cat] of [[ks, 'תינוקייה'], [ks, 'צעירים'], [ks, 'בוגרים'], [hz, 'צעירים']]) {
     await Classroom.create({ name: `${cat} ${b.name}`, branch_id: b._id, category: cat, academic_year: '2026-2027' });
   }
+
+  callMgr = callAs(jwt.sign({
+    id: String(new mongoose.Types.ObjectId()), full_name: 'מנהלת סניף',
+    role: 'branch_manager', branch_id: String(ks._id),
+    managed_branch_ids: [String(ks._id), String(hz._id)],
+  }, process.env.JWT_SECRET, { expiresIn: '1h' }));
 
   console.log('\n🎪 מעקב חוגים\n');
 
@@ -151,7 +166,7 @@ const eq = (a, b, label) => ok(a === b, label, `קיבלנו ${JSON.stringify(a)
   const DAY = '2026-10-06';
   await ClassSession.deleteMany({ date: { $regex: '^2026-10' }, date: { $ne: DAY } });
   await ClassSession.deleteMany({ branch_id: hz._id });
-  const due = await call('GET', '/sessions/due');
+  const due = await callMgr('GET', '/sessions/due');
   eq(due.status, 200, 'רשימת מה שצריך לענות עליו');
   eq((due.body.visits || []).length, 1, 'ביקור אחד — לא שלושה');
   const visit = due.body.visits[0];
@@ -168,7 +183,7 @@ const eq = (a, b, label) => ok(a === b, label, `קיבלנו ${JSON.stringify(a)
     const s = await ClassSession.findById(c.id).populate('program_id', 'classroom_category').lean();
     byCat[s.program_id.classroom_category] = c.id;
   }
-  const answered = await call('POST', '/sessions/answer-visit', {
+  const answered = await callMgr('POST', '/sessions/answer-visit', {
     answers: [
       { id: byCat['תינוקייה'], status: 'occurred' },
       { id: byCat['צעירים'], status: 'partial', partial_amount: 180, reason: 'חצי שיעור' },
@@ -183,8 +198,15 @@ const eq = (a, b, label) => ok(a === b, label, `קיבלנו ${JSON.stringify(a)
   eq(after.filter(s => s.status === 'no_show').length, 1, 'ואחד לא הגיע');
   ok(after.every(s => s.manager_confirmed === true), 'וכולם מאושרים בידי המנהלת');
 
-  const dueAgain = await call('GET', '/sessions/due');
+  const dueAgain = await callMgr('GET', '/sessions/due');
   eq((dueAgain.body.visits || []).length, 0, 'והביקור לא נשאל שוב');
+
+  // ------------------------------------------- who is asked, and who is not
+  console.log('\nמי בכלל נשאל');
+  const forAdmin = await call('GET', '/sessions/due');
+  eq(forAdmin.status, 200, 'מנהל מערכת מקבל תשובה');
+  eq((forAdmin.body.visits || []).length, 0,
+    'אבל אף ביקור — הוא לא בבניין ולא יכול לדעת');
 
   // ------------------------------------------------- the month
   console.log('\nהחודש');
