@@ -9,8 +9,7 @@
     "build": "cd client && npm install && npm run build",
     "migrate": "cd server && npx knex migrate:latest",
     "seed": "cd server && npx knex seed:run",
-    "import": "cd server && node scripts/import-from-gsheets.js",
-    "vercel-build": "cd client && npm install && npm run build"
+    "import": "cd server && node scripts/import-from-gsheets.js"
   },
   "engines": {
     "node": ">=18.0.0"
