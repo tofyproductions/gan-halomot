@@ -53,13 +53,16 @@ export default function DirectPayslipDialog({ open, onClose, defaultMonth }) {
     if (!open) return;
     setFile(null); setBatch(null); setSel({}); setTestTo(''); setOtherMonths([]);
     setMonth(defaultMonth || '');
-    // Genuinely needs every branch: an uploaded payslip is matched to whoever
-    // it belongs to, and that person can be anywhere in the customer. On a
-    // network that roster is refused (413) rather than sent, so say what
-    // happened — an empty picker with no explanation reads as "there are no
-    // employees", which is the wrong thing to believe while holding a payslip.
-    api.get('/payroll/employees', { params: { active: 'true', branch: 'all' } })
-      .then(res => setEmployees(res.data.employees || []))
+    // Genuinely needs every branch AND former employees: an uploaded payslip
+    // is matched to whoever it belongs to, and the last payslip of someone who
+    // left this month arrives after she is already archived. On a network that
+    // roster is refused (413) rather than sent, so say what happened — an
+    // empty picker with no explanation reads as "there are no employees",
+    // which is the wrong thing to believe while holding a payslip.
+    api.get('/payroll/employees', { params: { branch: 'all' } })
+      .then(res => setEmployees((res.data.employees || [])
+        // Actives first; a former employee is the exception being reached for.
+        .sort((a, b) => (a.is_active === false) - (b.is_active === false))))
       .catch((err) => {
         setEmployees([]);
         if (err?.response?.status === 413) {
@@ -168,7 +171,8 @@ export default function DirectPayslipDialog({ open, onClose, defaultMonth }) {
           <Alert severity="info">
             <AlertTitle sx={{ fontWeight: 700 }}>מתי להשתמש בזה</AlertTitle>
             קובץ סופי שכבר נבדק, או עמוד בודד של עובד/ת שנשכח/ה בקובץ הגדול. כל עמוד מותאם לפי <b>ת״ז</b>,
-            ואפשר לבחור בדיוק את מי לשלוח. השליחה מתייקת את התלוש ב״התלושים שלי״ ומסמנת את החודש כשולם —
+            ואפשר לבחור בדיוק את מי לשלוח. גם עובד/ת שכבר סיימ/ה לעבוד מזוהה — תלוש אחרון מגיע אחרי העזיבה —
+            ומסומנ/ת ״לא פעיל/ה״. השליחה מתייקת את התלוש ב״התלושים שלי״ ומסמנת את החודש כשולם —
             בדיוק כמו הפצה מביקורת. אין כאן השוואה מול טבלת שכר.
           </Alert>
 
@@ -277,13 +281,17 @@ export default function DirectPayslipDialog({ open, onClose, defaultMonth }) {
                                 <Chip size="small" variant="outlined" label={`לפי ${BASIS[it.match_basis] || it.match_basis}`}
                                   sx={{ height: 17, fontSize: '0.6rem' }} />
                               )}
+                              {it.employee_active === false && (
+                                <Chip size="small" color="warning" variant="outlined" label="לא פעיל/ה"
+                                  sx={{ height: 17, fontSize: '0.6rem', ml: 0.5 }} />
+                              )}
                             </>
                           ) : (
                             <Autocomplete
                               size="small"
                               options={employees}
                               onChange={(_, v) => assign(it.page, v)}
-                              getOptionLabel={o => `${o.full_name}${o.israeli_id ? ` (${o.israeli_id})` : ''}`}
+                              getOptionLabel={o => `${o.full_name}${o.israeli_id ? ` (${o.israeli_id})` : ''}${o.is_active === false ? ' — לא פעיל/ה' : ''}`}
                               sx={{ minWidth: 220 }}
                               renderInput={p => <TextField {...p} placeholder="שייך/י ידנית" size="small" />}
                             />

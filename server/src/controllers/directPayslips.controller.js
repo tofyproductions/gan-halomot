@@ -39,16 +39,29 @@ function normalizeName(value) {
  * one active employee carries it — two people sharing a name is precisely the
  * case where a guess mails one person's salary to another.
  */
+/**
+ * Former employees are in the pool too — the final payslip of someone who left
+ * this month arrives after she is already archived, and that page is exactly
+ * what this screen exists to send. When one ת״ז or name fits several records
+ * (a rehire left an archived twin), the active record wins; only a tie that
+ * survives that is ambiguous.
+ */
+function preferActive(list) {
+  if (list.length <= 1) return list;
+  const active = list.filter(e => e.is_active !== false);
+  return active.length > 0 ? active : list;
+}
+
 function matchPage(payslip, employees) {
   const id = normalizeId(payslip.employee_id);
   if (id) {
-    const byId = employees.filter(e => normalizeId(e.israeli_id) === id
-      || (e.clock_aliases || []).some(a => normalizeId(a) === id));
+    const byId = preferActive(employees.filter(e => normalizeId(e.israeli_id) === id
+      || (e.clock_aliases || []).some(a => normalizeId(a) === id)));
     if (byId.length === 1) return { emp: byId[0], basis: 'israeli_id' };
   }
   const name = normalizeName(payslip.employee_name);
   if (name) {
-    const byName = employees.filter(e => normalizeName(e.full_name) === name);
+    const byName = preferActive(employees.filter(e => normalizeName(e.full_name) === name));
     if (byName.length === 1) return { emp: byName[0], basis: 'name' };
   }
   return { emp: null, basis: '' };
@@ -68,6 +81,7 @@ function itemFor(payslip, employees) {
     ...base,
     employee_id: emp._id,
     employee_name: emp.full_name,
+    employee_active: emp.is_active !== false,
     email: email || '',
     match_basis: basis,
     status: email ? 'pending' : 'no_email',
@@ -110,8 +124,9 @@ async function upload(req, res) {
     // only obvious afterwards. Report it; don't decide for the user.
     const otherMonths = [...new Set(claimed.filter(m => m !== month))];
 
-    const employees = await Employee.find({ is_active: true })
-      .select('full_name israeli_id email clock_aliases user_id')
+    // Not just the active roster — see preferActive above.
+    const employees = await Employee.find({})
+      .select('full_name israeli_id email clock_aliases user_id is_active')
       .populate('user_id', 'email')
       .lean();
 
@@ -156,6 +171,7 @@ function publicBatch(b) {
       year_month: i.year_month,
       employee_id: i.employee_id ? String(i.employee_id) : null,
       employee_name: i.employee_name,
+      employee_active: i.employee_active !== false,
       email: i.email,
       match_basis: i.match_basis,
       status: i.status,
@@ -218,12 +234,13 @@ async function assignPage(req, res) {
     if (item.status === 'sent') return res.status(409).json({ error: 'העמוד כבר נשלח' });
 
     const emp = await Employee.findById(req.body?.employee_id)
-      .select('full_name israeli_id email user_id').populate('user_id', 'email').lean();
+      .select('full_name israeli_id email user_id is_active').populate('user_id', 'email').lean();
     if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
 
     const email = realEmployeeEmail(emp);
     item.employee_id = emp._id;
     item.employee_name = emp.full_name;
+    item.employee_active = emp.is_active !== false;
     item.email = email || '';
     item.match_basis = 'manual';
     item.status = email ? 'pending' : 'no_email';
@@ -318,4 +335,4 @@ async function remove(req, res) {
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
-module.exports = { upload, list, get, pagePreview, assignPage, send, remove };
+module.exports = { upload, list, get, pagePreview, assignPage, send, remove, matchPage };

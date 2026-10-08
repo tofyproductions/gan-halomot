@@ -26,6 +26,10 @@ const itemSchema = new mongoose.Schema({
 
   employee_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', default: null },
   employee_name: { type: String, default: '' },
+  // False when the match is someone who already left. Her last payslip arrives
+  // after she is archived, so the send is legitimate — but the sender should
+  // see who they are mailing.
+  employee_active: { type: Boolean, default: true },
   email: { type: String, default: '' },
   // How the page was tied to an employee. 'manual' means a human picked, which
   // is the only way an unmatched page ever becomes sendable.
