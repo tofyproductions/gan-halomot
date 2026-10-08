@@ -132,8 +132,8 @@ const NOW = new Date('2026-10-08T06:00:00Z');
   eq(bd.to, '2026-10-14', 'שבעה ימים כולל היום');
   eq(bd.birthdays.map(b => [b.child, b.date, b.age]), [[`איתי ${[...PII.surname][0]}.`, '2026-10-08', 4], [`נועה ${[...PII.surname][0]}.`, '2026-10-10', 3], [`גיל ${[...PII.surname][0]}.`, '2026-10-14', 3]],
     'הבא קודם; גיל מתאריך הלידה של הרישום כשלילד אין; בלי משפחת בדיקה ובלי מי שעזב');
-  eq(bd.birthdays[1].birth_date, '2023-10-10', 'תאריך לידה');
-  ok(bd.birthdays.every(r => sameKeys(r, ['child', 'class', 'branch', 'birth_date', 'date', 'age'])), 'birthdays: בדיוק השדות המותרים');
+  eq(bd.birthdays[1].birth_date, undefined, 'אין תאריך לידה מלא בתשובה');
+  ok(bd.birthdays.every(r => sameKeys(r, ['child', 'class', 'branch', 'date', 'age'])), 'birthdays: בדיוק השדות המותרים');
   eq((await svc.birthdays(3, new Date('2026-12-30T08:00:00Z'))).birthdays.length, 0, 'מעבר שנה — אין');
   await kid('שנה', older, { birth: new Date('2022-01-01T00:00:00Z') });
   eq((await svc.birthdays(3, new Date('2026-12-30T08:00:00Z'))).birthdays.map(b => b.date), ['2027-01-01'], 'מעבר שנה: 1.1 של השנה הבאה');

@@ -374,7 +374,6 @@ async function birthdays(days, now = new Date()) {
         child: shortName(k.child_name),
         class: classroom?.name || NO_CLASS,
         branch: maps.branchName.get(String(classroom?.branch_id)) || null,
-        birth_date: birth,
         date,
         age: year - by,
       });
