@@ -17,6 +17,7 @@ import { useConfirm } from '../shared/ConfirmProvider';
 import ProvidersDialog from './ProvidersDialog';
 import ClassInvoiceDialog from './ClassInvoiceDialog';
 import IcountFileDialog from '../expenses/IcountFileDialog';
+import { getClassroomColor } from '../../utils/classroomColors';
 
 const DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי'];
 const CATEGORIES = ['תינוקייה', 'צעירים', 'בוגרים', 'קבוצה'];
@@ -774,9 +775,18 @@ export default function ClassTrackingPage() {
                 </TableHead>
                 <TableBody>
                   {groups.map(({ label, list: progs }) => [
+                    /* Each group's heading wears the same color the group
+                       wears everywhere else — dashboard, collections. A
+                       combined group borrows its first group's color. */
                     <TableRow key={`head-${label}`}>
-                      <TableCell colSpan={maxCols + 3} sx={{ bgcolor: 'action.selected', py: 0.75 }}>
-                        <Typography sx={{ fontWeight: 800 }}>{label}</Typography>
+                      <TableCell colSpan={maxCols + 3} sx={{
+                        bgcolor: getClassroomColor(label).bg,
+                        borderBottom: `2px solid ${getClassroomColor(label).border}`,
+                        py: 0.75,
+                      }}>
+                        <Typography sx={{ fontWeight: 800, color: getClassroomColor(label).primary }}>
+                          {label}
+                        </Typography>
                       </TableCell>
                     </TableRow>,
                     ...progs.map(p => {
