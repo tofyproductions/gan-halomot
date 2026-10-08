@@ -30,6 +30,20 @@ function placementFor(emp, weekday, commitmentText, activeClassroomIds) {
   return { area: areaFromCommitmentText(commitmentText) || 'unassigned', classroom_id: null };
 }
 
+/**
+ * Is this date inside her maternity leave? Open-ended dates lean the kind
+ * way: a leave with no "from" started already, one with no "to" has not
+ * ended. She is NOT seeded on these days — but she stays on the board and
+ * can be placed by hand (a gradual return is placed one day at a time).
+ */
+function onMaternityLeave(emp, ymd) {
+  if (!emp.on_maternity_leave) return false;
+  const day = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
+  const from = day(emp.maternity_leave_from);
+  const to = day(emp.maternity_leave_to);
+  return (!from || from <= ymd) && (!to || ymd <= to);
+}
+
 function buildSeedEntries({ dates, employees, commitments, activeClassroomIds, closedDates }) {
   // Required here, not at the top: rules.js requires this file for
   // areaFromCommitmentText, and a top-level require would load half of it.
@@ -48,6 +62,7 @@ function buildSeedEntries({ dates, employees, commitments, activeClassroomIds, c
       if (d.is_off && !alternating) continue;
       const date = dates[d.day];
       if (!date || closedDates.has(date)) continue;
+      if (onMaternityLeave(emp, date)) continue; // on leave — not placed unless by hand
       let start = padHHMM(d.start_hhmm);
       let end = padHHMM(d.end_hhmm);
       if (alternating && !start && !end && usual) {
@@ -71,4 +86,4 @@ function buildSeedEntries({ dates, employees, commitments, activeClassroomIds, c
   return out;
 }
 
-module.exports = { areaFromCommitmentText, placementFor, buildSeedEntries };
+module.exports = { areaFromCommitmentText, placementFor, buildSeedEntries, onMaternityLeave };

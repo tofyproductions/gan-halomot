@@ -572,6 +572,20 @@ function normalizeForDiff(v) {
  * the card was corrected to משה דיין, and her hours stayed on קפלן's books.
  * Her new branch's open weeks also get her shifts, as a fresh week would.
  */
+/**
+ * Marking חופשת לידה (or moving its dates) is the "היא לא עובדת בימים האלה"
+ * act — so the open rota weeks answer it right away: her placements on the
+ * leave's days are cleared. She stays on the board's list for manual
+ * placement, and the weekly seed skips the same dates.
+ */
+const maternityKey = (emp) => JSON.stringify([!!emp.on_maternity_leave, emp.maternity_leave_from, emp.maternity_leave_to]);
+async function clearMaternityDays(emp, keyBefore) {
+  if (!emp.on_maternity_leave || maternityKey(emp) === keyBefore) return;
+  await require('../services/shifts/shiftWeek.service').removeMaternityPlacements(emp)
+    .then(n => { if (n) console.log(`[shifts] חופשת לידה: הוסרו ${n} שיבוצים של ${emp.full_name}`); })
+    .catch(e => console.error('[shifts] maternity clear failed:', e.message));
+}
+
 async function moveCommitmentWithEmployee(emp, branchIdBefore) {
   const after = String(emp.branch_id || '');
   if (!after || String(branchIdBefore || '') === after) return;
@@ -668,6 +682,8 @@ async function updateEmployee(req, res, next) {
     const branchesBefore = fingerprintSync.employeeBranchIds(emp).join(',');
     // Home branch before the edit — a change drags her commitment along.
     const homeBranchBefore = String(emp.branch_id || '');
+    // Maternity leave before the edit — marking it clears her leave days from the rota.
+    const maternityBefore = maternityKey(emp);
     // Job title before the edit — a real change is what licenses userSync to
     // push a new role onto her login (see the service's comment).
     const positionBefore = emp.position || '';
@@ -687,6 +703,7 @@ async function updateEmployee(req, res, next) {
 
     await moveCommitmentWithEmployee(emp, homeBranchBefore)
       .catch(e => console.error('[commitments] move with employee failed:', e.message));
+    await clearMaternityDays(emp, maternityBefore);
 
     // Keep the login in step: create it if the ת"ז only arrived now, and mirror
     // name / branch / title / active. Never blocks saving the employee card.
@@ -759,6 +776,7 @@ async function decideEmployeeChangeRequest(req, res, next) {
       if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
       const positionBefore = emp.position || '';
       const homeBranchBefore = String(emp.branch_id || '');
+      const maternityBefore = maternityKey(emp);
       for (const ch of cr.changes) {
         if (ch.field === 'amuta_distribution') {
           emp.amuta_distribution = await resolveAmutaDistribution(ch.after, emp.branch_id);
@@ -769,6 +787,7 @@ async function decideEmployeeChangeRequest(req, res, next) {
       await emp.save(); // post-save hook re-links orphan punches
       await moveCommitmentWithEmployee(emp, homeBranchBefore)
         .catch(e => console.error('[commitments] move with employee failed:', e.message));
+      await clearMaternityDays(emp, maternityBefore);
       // A manager's approved edit reaches the login the same way a direct one does.
       try {
         await userSync.syncEmployeeUser(emp, { positionChanged: (emp.position || '') !== positionBefore });

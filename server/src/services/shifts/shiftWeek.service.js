@@ -15,7 +15,7 @@ const { branchManagerFilter } = require('../branch-recipients.service');
 const { closureDateSet, todayIsrael } = require('../fixedSchedule');
 const rotaPay = require('./rotaPay.service');
 const { effectiveRatios, ratioWarnings, pmNeededCaps } = require('./ratio');
-const { buildSeedEntries, placementFor } = require('./seed');
+const { buildSeedEntries, placementFor, onMaternityLeave } = require('./seed');
 const constraints = require('./constraints.service');
 const cross = require('./crossBranch.service');
 const rateRequests = require('./rateRequests.service');
@@ -66,7 +66,7 @@ async function classroomsWithCounts(branchId, schoolYear) {
 }
 
 async function seedFor(branchId, dates, closedDates) {
-  const employees = await Employee.find({ branch_id: branchId, is_active: true }).select('full_name primary_classroom_id shift_area shift_day_classrooms').lean();
+  const employees = await Employee.find({ branch_id: branchId, is_active: true }).select('full_name primary_classroom_id shift_area shift_day_classrooms on_maternity_leave maternity_leave_from maternity_leave_to').lean();
   // Commitments by employee, not by the commitment's own branch_id copy — a
   // stale branch on the commitment row must not drop her from the seed.
   const [commitments, rooms] = await Promise.all([
@@ -117,7 +117,7 @@ async function getBoard({ user, branchId, weekStart }) {
   const preview = week ? null : await seedRespectingConstraints(branchId, dates, closed);
   const entries = week ? week.entries.map(e => e.toObject()) : preview;
 
-  const employees = await Employee.find({ branch_id: branchId, is_active: true }).select('full_name primary_classroom_id extra_classroom_ids shift_area shift_day_classrooms').sort({ full_name: 1 }).lean();
+  const employees = await Employee.find({ branch_id: branchId, is_active: true }).select('full_name primary_classroom_id extra_classroom_ids shift_area shift_day_classrooms on_maternity_leave maternity_leave_from maternity_leave_to').sort({ full_name: 1 }).lean();
   const [commitments, inactive, editRequests] = await Promise.all([
     // By employee, like seedFor — see the comment there.
     EmployeeCommitment.find({ employee_id: { $in: employees.map(e => e._id) } }).lean(),
@@ -160,6 +160,11 @@ async function getBoard({ user, branchId, weekStart }) {
       has_commitment: commitmentOf.has(String(e._id)),
       commitment_text: (commitmentOf.get(String(e._id)) || {}).classroom || '',
       commitment: commitmentHours(commitmentOf.get(String(e._id))),
+      // On leave she is not seeded, but she stays HERE: a gradual return is
+      // placed by hand, so the board must still offer her.
+      on_maternity_leave: !!e.on_maternity_leave,
+      maternity_leave_from: e.maternity_leave_from || null,
+      maternity_leave_to: e.maternity_leave_to || null,
     }))
       .concat(foreignCandidates.filter(c => c.has_rate).map(c => ({ _id: String(c._id), full_name: `${c.full_name} (${c.branch_name})`, primary_classroom_id: null, extra_classroom_ids: [], foreign: true, commitment: {} }))),
     ratios,
@@ -485,6 +490,35 @@ async function removeFromOpenWeeks(emp) {
 }
 
 /**
+ * חופשת לידה נרשמה (או התאריכים שלה זזו): the open weeks stop expecting her.
+ *
+ * Marking the leave on her card is the "לא תעבוד בימים האלה" act — so the
+ * rota answers it. Only HER entries, only on days inside the leave, only
+ * from today on (yesterday happened), and only in `entries`, the editing
+ * copy. She stays on the board's employee list and can be dragged back in
+ * by hand — the seed skips the same dates (see seed.onMaternityLeave), so
+ * she will not creep back on her own.
+ */
+async function removeMaternityPlacements(emp) {
+  if (!emp.on_maternity_leave || !emp.branch_id) return 0;
+  const today = todayIsrael();
+  const weeks = await ShiftWeek.find({
+    branch_id: emp.branch_id, week_start: { $gte: sundayOfYmd(today) }, 'entries.employee_id': emp._id,
+  });
+  let removed = 0;
+  for (const week of weeks) {
+    const keep = week.entries.filter(e => !(
+      String(e.employee_id) === String(emp._id) && e.date >= today && onMaternityLeave(emp, e.date)
+    ));
+    if (keep.length === week.entries.length) continue;
+    removed += week.entries.length - keep.length;
+    week.entries = keep;
+    await week.save();
+  }
+  return removed;
+}
+
+/**
  * Entries of open weeks (this week on, or one given week) moved to where the
  * employees' cards put them. Which entries may move:
  *   - "ללא כיתה" ones, always;
@@ -705,6 +739,6 @@ async function myShifts({ employee, weekStart }) {
 module.exports = {
   ShiftError, canView, canEdit, getBoard, createWeek, saveEntries, setClosedDay, publishWeek,
   setShiftPlacement, setPrimaryClassroom: (args) => setShiftPlacement({ ...args, area: 'class' }),
-  placeByCards, autoPlaceWeek, removeFromOpenWeeks, seedMissing, closeClassroom, reopenClassroom, setRatios,
+  placeByCards, autoPlaceWeek, removeFromOpenWeeks, removeMaternityPlacements, seedMissing, closeClassroom, reopenClassroom, setRatios,
   createEditRequest, decideEditRequest, myShifts,
 };

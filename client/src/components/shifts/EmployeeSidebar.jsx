@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Box, Paper, TextField, Typography, Button, Tooltip } from '@mui/material';
+import { Box, Paper, TextField, Typography, Button, Tooltip, Chip } from '@mui/material';
 import { startShiftDrag, endShiftDrag } from './ShiftGrid';
-import { employeeHue, scheduledMinutes, toMin, fmtMin } from './shiftRows';
+import { employeeHue, scheduledMinutes, toMin, fmtMin, fmtDate } from './shiftRows';
 
 /**
  * The branch's people (and foreign ones with a rate here), to drag onto the
@@ -56,6 +56,14 @@ export default function EmployeeSidebar({ employees = [], entries = [], dates = 
               }}
             >
               {emp.full_name}
+              {/* On leave she is not seeded into the week, but stays here —
+                  draggable — for the day she starts coming back. */}
+              {emp.on_maternity_leave && (
+                <Tooltip title={`בחופשת לידה${emp.maternity_leave_from ? ` מ-${fmtDate(String(emp.maternity_leave_from).slice(0, 10))}` : ''}${emp.maternity_leave_to ? ` עד ${fmtDate(String(emp.maternity_leave_to).slice(0, 10))}` : ''} — לא משובצת אוטומטית; אפשר לגרור אותה ללוח ידנית`}>
+                  <Chip size="small" color="secondary" variant="outlined" label="🤱 חופשת לידה"
+                    sx={{ height: 18, fontSize: '0.65rem', my: 0.25, display: 'inline-flex' }} />
+                </Tooltip>
+              )}
               <Box component="span" sx={{ display: 'block', fontSize: '0.7rem', color: 'text.secondary' }}>
                 {n} ימים · {fmtMin(mins)} שע׳
                 {extra > 0 && committed > 0 && (
