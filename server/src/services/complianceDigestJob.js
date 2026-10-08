@@ -1,9 +1,10 @@
 const {
-  BranchCertification, EmployeeCourse, Employee, Branch, Setting,
+  BranchCertification, EmployeeCourse, Employee, Branch, Setting, User,
 } = require('../models');
 const { dispatchEmail } = require('./email.service');
 const { CERT_TYPES, COURSE_TYPES, statusOf, daysLeft, WARN_DAYS } = require('./compliance');
 const certGaps = require('./certGaps.service');
+const { branchManagerFilter, mailableManagerEmails } = require('./branch-recipients.service');
 
 /**
  * The expiry digest — אישורי מעון and קורסים in one morning mail.
@@ -104,6 +105,8 @@ async function collect(now = new Date()) {
       employee: emp.full_name,
       phone: emp.phone || '',
       branch: branchNames.get(String(emp.branch_id)) || '?',
+      // Kept as an id too: the per-branch manager reminder groups by it.
+      branch_id: emp.branch_id ? String(emp.branch_id) : null,
       type: COURSE_TYPES[c.course_type] || c.course_type,
       expires_at: c.expires_at,
       status: statusOf(c.expires_at, now),
@@ -137,12 +140,76 @@ async function recipients() {
   return [...new Set(all)];
 }
 
+/**
+ * ריענוני קורסים — the reminder goes FIRST to the gan's own manager.
+ *
+ * The office report below lists every branch at once, which makes it
+ * somebody-else's-list for each of them. So each branch's manager (הרצליה,
+ * סניפי כפר סבא, תל אביב — whoever RUNS the branch per branch-recipients,
+ * including an admin_viewer covering it) gets her own mail with only her
+ * caregivers' refreshers, and the consolidated report still goes to the
+ * office (עינת via the hr routing / compliance_alert_emails, and the system
+ * admins as the never-silent fallback) in the same run.
+ *
+ * A manager without a real address falls back to the office with a notice
+ * saying who the mail was meant for — the same rule every other branch mail
+ * follows.
+ */
+async function sendBranchReminders(dueCourses, { dryRun = false } = {}) {
+  const byBranch = new Map();
+  for (const row of dueCourses) {
+    if (!row.branch_id) continue; // no branch — office report only
+    if (!byBranch.has(row.branch_id)) byBranch.set(row.branch_id, []);
+    byBranch.get(row.branch_id).push(row);
+  }
+
+  const results = [];
+  for (const [branchId, rows] of byBranch) {
+    const branchName = rows[0].branch;
+    const managers = await User.find(branchManagerFilter(branchId))
+      .select('full_name email role managed_branch_ids branch_id').lean();
+    const { to, notice, fell_back } = await mailableManagerEmails(managers, {
+      what: 'תזכורת ריענוני קורסים', branchName,
+    });
+    if (!to.length) { results.push({ branch: branchName, to: [], count: rows.length, skipped: 'no recipients' }); continue; }
+
+    const html = `<div dir="rtl" style="font-family:Arial,Helvetica,sans-serif;color:#111827;max-width:680px">
+  ${notice}
+  <h2 style="margin:0 0 4px">ריענוני קורסים — ${esc(branchName)}</h2>
+  <p style="margin:0 0 12px;color:#6b7280;font-size:14px">
+    ${new Date().toLocaleDateString('he-IL')} · ${rows.length} עובדות לטיפולך · התראה נשלחת ${WARN_DAYS} ימים מראש
+  </p>
+  <p style="margin:0 0 8px;color:#374151">
+    לעובדות הבאות פג או עומד לפוג תוקף הקורס. יש לתאם ריענון ולהעלות את התעודה
+    המחודשת במסך "קורסים והכשרות". דוח מרוכז נשלח במקביל למשרד.
+  </p>
+  ${rowsTable(['עובדת', 'טלפון', 'קורס', 'תוקף', 'מצב'], rows.map(c => [
+    c.employee, c.phone || '—', c.type, day(c.expires_at),
+    c.status === 'expired' ? `⛔ ${whenText(c.expires_at)}` : `⚠️ ${whenText(c.expires_at)}`,
+  ]))}
+</div>`;
+
+    if (!dryRun) {
+      await dispatchEmail({
+        to,
+        subject: `ריענוני קורסים — ${branchName}: ${rows.length} לטיפולך`,
+        html,
+      });
+    }
+    results.push({ branch: branchName, to, count: rows.length, fell_back });
+  }
+  return results;
+}
+
 /** Build and send. Returns what it did, so a manual trigger can report it. */
 async function send({ dryRun = false } = {}) {
   const now = new Date();
   const data = await collect(now);
   const { dueCerts, dueCourses, gaps = [] } = data;
   if (!dueCerts.length && !dueCourses.length && !gaps.length) return { sent: false, empty: true };
+
+  // The managers first — each gan hears about its own caregivers.
+  const branchMails = await sendBranchReminders(dueCourses, { dryRun });
 
   const parts = [];
 
@@ -164,8 +231,10 @@ async function send({ dryRun = false } = {}) {
   ]))}`);
   }
   if (dueCourses.length) {
+    const managersLine = branchMails.some(b => b.to.length && !b.fell_back)
+      ? ' לכל מנהל/ת מעון נשלחה במקביל תזכורת עם העובדות של הסניף שלו/ה.' : '';
     parts.push(`<h3 style="margin:20px 0 6px">קורסים של עובדות — ${dueCourses.length} לטיפול</h3>
-      <p style="margin:0 0 8px;color:#6b7280;font-size:13px">עובדות שפג או עומד לפוג להן תוקף — אפשר לרכז אותן לקורס אחד.</p>
+      <p style="margin:0 0 8px;color:#6b7280;font-size:13px">עובדות שפג או עומד לפוג להן תוקף — אפשר לרכז אותן לקורס אחד.${managersLine}</p>
       ${rowsTable(['עובדת', 'סניף', 'קורס', 'תוקף', 'מצב'], dueCourses.map(c => [
     c.employee, c.branch, c.type, day(c.expires_at),
     c.status === 'expired' ? `⛔ ${whenText(c.expires_at)}` : `⚠️ ${whenText(c.expires_at)}`,
@@ -186,11 +255,11 @@ async function send({ dryRun = false } = {}) {
 </div>`;
 
   const to = await recipients();
-  if (!to.length) return { sent: false, no_recipients: true, total };
+  if (!to.length) return { sent: false, no_recipients: true, total, branch_mails: branchMails };
   if (!dryRun) {
     await dispatchEmail({ to, subject: `אישורים וקורסים — ${total} לטיפולך`, html });
   }
-  return { sent: true, to, total, hash: hashOf(data) };
+  return { sent: true, to, total, hash: hashOf(data), branch_mails: branchMails };
 }
 
 /**
@@ -226,4 +295,4 @@ async function tick(trigger = 'schedule') {
   return result;
 }
 
-module.exports = { tick, send, collect, hashOf, SEND_HOUR, WARN_DAYS };
+module.exports = { tick, send, collect, hashOf, sendBranchReminders, SEND_HOUR, WARN_DAYS };
