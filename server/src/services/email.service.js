@@ -101,6 +101,31 @@ function withoutAstral(value) {
  * limits apply (100/day free, 1500/day Workspace). The script is expected
  * to accept a JSON POST: { secret, to, cc, subject, html, text }.
  */
+/**
+ * POST to a GAS /exec URL, following Google's 302 by hand.
+ *
+ * Apps Script answers a POST with a 302 to script.googleusercontent.com,
+ * where the actual response waits to be fetched with a plain GET. Letting
+ * undici follow automatically carries the original request's headers along,
+ * and as of October 2026 the echo host answers that with a 404 error page —
+ * which this server surfaced as "GAS 404" on every send while the script
+ * itself was fine. A bare GET of the Location, exactly what a browser does,
+ * is accepted.
+ */
+async function postFollowingGasRedirect(url, payload, signal) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: payload,
+    redirect: 'manual',
+    signal,
+  });
+  if (res.status < 300 || res.status >= 400) return res;
+  const loc = res.headers.get('location');
+  if (!loc) return res;
+  return fetch(loc, { redirect: 'follow', signal });
+}
+
 async function sendViaGAS({ to, cc, subject, html, text, attachments, fileAttachments }) {
   if (!env.GAS_EMAIL_URL) throw new Error('GAS_EMAIL_URL not configured');
   const body = {
@@ -124,13 +149,7 @@ async function sendViaGAS({ to, cc, subject, html, text, attachments, fileAttach
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 90000);
     try {
-      const res = await fetch(env.GAS_EMAIL_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: payload,
-        redirect: 'follow',
-        signal: ctrl.signal,
-      });
+      const res = await postFollowingGasRedirect(env.GAS_EMAIL_URL, payload, ctrl.signal);
       const responseText = await res.text();
       let parsed = null;
       try { parsed = JSON.parse(responseText); } catch { parsed = { raw: responseText }; }
@@ -544,5 +563,5 @@ async function sendGroupOrderEmail({ orders, supplier, creatorEmail, creatorName
 
 module.exports = {
   sendAgreementEmail, sendRegistrationLink, sendOrderEmail, sendGroupOrderEmail, buildOrderHTML, dispatchEmail,
-  withoutAstral,
+  withoutAstral, postFollowingGasRedirect,
 };

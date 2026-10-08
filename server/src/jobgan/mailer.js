@@ -57,13 +57,9 @@ async function sendViaGAS({ to, cc, subject, html, text }) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 30000);
     try {
-      const res = await fetch(process.env.GAS_EMAIL_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: payload,
-        redirect: 'follow',
-        signal: ctrl.signal,
-      });
+      // Google's 302 must be followed by hand — see postFollowingGasRedirect.
+      const { postFollowingGasRedirect } = require('../services/email.service');
+      const res = await postFollowingGasRedirect(process.env.GAS_EMAIL_URL, payload, ctrl.signal);
       const body = await res.text();
       if (!res.ok) throw new Error(`GAS ${res.status}: ${body.slice(0, 120)}`);
       return { provider: 'gas' };
