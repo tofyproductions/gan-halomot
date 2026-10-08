@@ -51,6 +51,42 @@ router.get('/children', asyncWrap(async (req, res) => {
   res.json(await svc.children());
 }));
 
+// The morning report's reads (המוח). `date` is optional (today, Israel) but when
+// given must be a real YYYY-MM-DD; `days` 1..14 — anything else is refused, not
+// guessed at, like `month` above.
+const dateOf = (req, res) => {
+  if (req.query.date === undefined) return svc.todayKey();
+  if (typeof req.query.date === 'string' && svc.parseDate(req.query.date)) return req.query.date;
+  res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+  return null;
+};
+const daysOf = (req, res, dflt) => {
+  if (req.query.days === undefined) return dflt;
+  if (typeof req.query.days === 'string' && /^([1-9]|1[0-4])$/.test(req.query.days)) return Number(req.query.days);
+  res.status(400).json({ error: 'days must be 1..14' });
+  return null;
+};
+router.get('/attendance', asyncWrap(async (req, res) => {
+  const date = dateOf(req, res); if (!date) return;
+  res.json(await svc.attendance(date));
+}));
+router.get('/orders', asyncWrap(async (req, res) => {
+  if (Object.keys(req.query).length) return res.status(400).json({ error: 'no parameters' });
+  res.json(await svc.pendingOrders());
+}));
+router.get('/birthdays', asyncWrap(async (req, res) => {
+  const days = daysOf(req, res, 7); if (!days) return;
+  res.json(await svc.birthdays(days));
+}));
+router.get('/shifts', asyncWrap(async (req, res) => {
+  const date = dateOf(req, res); if (!date) return;
+  res.json(await svc.shifts(date));
+}));
+router.get('/signups', asyncWrap(async (req, res) => {
+  const days = daysOf(req, res, 1); if (!days) return;
+  res.json(await svc.signups(days));
+}));
+
 // Anything else under /brain: no write method exists here, and says so (405)
 // rather than falling through to routes that would answer with a login prompt.
 router.use((req, res) => res.status(req.method === 'GET' ? 404 : 405).json({ error: req.method === 'GET' ? 'not found' : 'read only' }));

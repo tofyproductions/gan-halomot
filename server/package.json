@@ -19,6 +19,7 @@
     "test:rota-pay": "node scripts/rota-pay.test.js",
     "test:attendance-report": "node scripts/attendance-report.test.js",
     "test:brain-read": "node scripts/brain-read.test.js",
+    "test:brain-morning": "node scripts/brain-read-morning.test.js",
     "test:finance-ingest": "node scripts/finance-ingest.test.js",
     "test:card-settlement": "node scripts/card-settlement.test.js",
     "test:terms": "node scripts/employment-terms.test.js",

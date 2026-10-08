@@ -28,6 +28,21 @@ actions:
   - id: brain-sync
     tier: green
     how: "district_api brain-sync"
+  - id: brain-attendance
+    tier: green
+    how: "district_api brain-attendance {date?} (date=YYYY-MM-DD, default today) — expected per class: active children minus reported absences"
+  - id: brain-orders
+    tier: green
+    how: "district_api brain-orders — orders awaiting the office's approval"
+  - id: brain-birthdays
+    tier: green
+    how: "district_api brain-birthdays {days?} (days=1..14, default 7) — upcoming birthdays, short names"
+  - id: brain-shifts
+    tier: green
+    how: "district_api brain-shifts {date?} (date=YYYY-MM-DD, default today) — the published rota and classes below ratio"
+  - id: brain-signups
+    tier: green
+    how: "district_api brain-signups {days?} (days=1..14, default 1) — parents who activated the portal, first names"
 sync_check:
   action: brain-sync
   field: lastSyncAt
