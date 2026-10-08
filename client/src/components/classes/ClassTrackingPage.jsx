@@ -13,8 +13,11 @@ import PeopleIcon from '@mui/icons-material/People';
 import { toast } from 'react-toastify';
 import api, { apiError } from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
+import { useAuth } from '../../hooks/useAuth';
 import { useConfirm } from '../shared/ConfirmProvider';
 import ProvidersDialog from './ProvidersDialog';
+import ClassInvoiceDialog from './ClassInvoiceDialog';
+import IcountFileDialog from '../expenses/IcountFileDialog';
 
 const DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי'];
 const CATEGORIES = ['תינוקייה', 'צעירים', 'בוגרים', 'קבוצה'];
@@ -62,17 +65,24 @@ const boldChip = (color) => ({ bgcolor: color, fontWeight: 700, border: '1px sol
  * rows stay underneath for the month somebody questions in February — which is
  * exactly why the old spreadsheet kept its blocks above the summary.
  */
-function PaymentSummary({ data }) {
+function PaymentSummary({ data, payments, accounting, branch, month, onPaymentsChanged }) {
   // The fetch moved up to the page: the provider rows below the summary show
   // the same monthly totals in their headers, and two fetches of one figure
   // is two figures.
   const [open, setOpen] = useState(false);
+  const [invoiceFor, setInvoiceFor] = useState(null); // { provider_id, provider_name, amount }
+  const [icountDoc, setIcountDoc] = useState(null);   // the linked ExpenseDocument, for the filing dialog
+  const [togglingKey, setTogglingKey] = useState('');
 
+  // The money box is accounting's room: only system_admin / accountant see it
+  // at all (the server refuses /payments to anyone else anyway).
+  if (!accounting) return null;
   if (!data || !(data.providers || []).length) return null;
 
   /**
    * The accountant's table, open by default: one line per provider with what
-   * is counted, whether VAT is added, and the figure that leaves the bank.
+   * is counted, whether VAT is added, the figure that leaves the bank — and
+   * now whether it actually left: שולם, the invoice, and iCount.
    * The per-group rows underneath stay behind "פירוט" — they are for the
    * month somebody questions, not for every glance.
    */
@@ -81,17 +91,47 @@ function PaymentSummary({ data }) {
   const pendingOf = (p) => p.programs.reduce((t, g) => t + (g.scheduled || 0), 0);
   const totalPending = data.providers.reduce((t, p) => t + pendingOf(p), 0);
 
+  // The same key the server stores — a provider's id, or 'name:<שם>' for the
+  // name-only instructor — so a summary row finds exactly its payment row.
+  const keyOf = (p) => (p.provider_id ? String(p.provider_id) : `name:${p.provider_name}`);
+  const paymentOf = (p) => (payments || []).find(r => r.provider_key === keyOf(p)) || null;
+  const unpaidCount = data.providers.filter(p => p.total > 0 && !paymentOf(p)?.paid).length;
+
+  const togglePaid = async (p) => {
+    const key = keyOf(p);
+    const pay = paymentOf(p);
+    setTogglingKey(key);
+    try {
+      await api.post('/classes/payments/mark', {
+        branch_id: branch, month,
+        provider_id: p.provider_id || null,
+        provider_name: p.provider_name,
+        paid: !pay?.paid,
+      });
+      onPaymentsChanged?.();
+    } catch (err) {
+      toast.error(apiError(err, 'עדכון התשלום נכשל'));
+    } finally { setTogglingKey(''); }
+  };
+
   return (
-    <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={1}>
-        <Typography sx={{ fontWeight: 700 }}>סיכום להנהלת חשבונות — לתשלום בחודש זה</Typography>
+    <Paper sx={{
+      p: 2, mb: 2,
+      border: '2px solid', borderColor: 'warning.main',
+      bgcolor: '#fff8e1', // the accountant's box wears its own color — nobody scrolls past it
+    }}>
+      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
+        <Typography sx={{ fontWeight: 800 }}>💰 הנהלת חשבונות — תשלומי חוגים</Typography>
+        {unpaidCount > 0
+          ? <Chip size="small" color="error" label={`${unpaidCount} טרם שולמו`} />
+          : <Chip size="small" color="success" label="הכול שולם" />}
         <Box sx={{ flex: 1 }} />
-        <Typography sx={{ fontWeight: 700 }}>{ils(data.grand_total)}</Typography>
+        <Typography sx={{ fontWeight: 800 }}>{ils(data.grand_total)}</Typography>
         <Button size="small" onClick={() => setOpen(o => !o)}>{open ? 'סגור פירוט' : 'פירוט לפי קבוצה'}</Button>
       </Stack>
 
       <Box sx={{ overflowX: 'auto', mt: 1.5 }}>
-        <Table size="small" sx={{ minWidth: 640 }}>
+        <Table size="small" sx={{ minWidth: 900, '& td, & th': { bgcolor: 'transparent' } }}>
           <TableHead><TableRow>
             <TableCell>ספק / חוג</TableCell>
             <TableCell>מעמד</TableCell>
@@ -100,39 +140,84 @@ function PaymentSummary({ data }) {
             <TableCell align="left">לפני מע״מ</TableCell>
             <TableCell align="left">מע״מ</TableCell>
             <TableCell align="left">לתשלום</TableCell>
+            <TableCell align="center">שולם?</TableCell>
+            <TableCell align="center">חשבונית</TableCell>
+            <TableCell align="center">אייקאונט</TableCell>
           </TableRow></TableHead>
           <TableBody>
-            {data.providers.map(p => (
-              <TableRow key={p.provider_id || p.provider_name}>
-                <TableCell sx={{ fontWeight: 600 }}>
-                  {p.provider_name}
-                  {p.retainer && (
-                    <Typography variant="caption" sx={{ display: 'block', color: 'info.main' }}>
-                      חודשי קבוע · {p.retainer.held_this_month} מתוך {p.retainer.meetings_per_month} מפגשים
-                    </Typography>
-                  )}
-                </TableCell>
-                <TableCell>
-                  <Chip size="small" variant="outlined"
-                    color={p.vat_mode === 'registered' ? 'warning' : 'default'}
-                    label={p.vat_mode === 'registered' ? 'עוסק מורשה + מע״מ' : 'עוסק פטור'} />
-                </TableCell>
-                <TableCell align="center">
-                  {meetingsOf(p)}{partialsOf(p) ? ` (+${partialsOf(p)} חלקית)` : ''}
-                </TableCell>
-                <TableCell align="center" sx={{ color: pendingOf(p) ? 'warning.main' : 'text.secondary' }}>
-                  {pendingOf(p) || '—'}
-                </TableCell>
-                <TableCell align="left">{ils(p.subtotal)}</TableCell>
-                <TableCell align="left">{p.vat ? ils(p.vat) : '—'}</TableCell>
-                <TableCell align="left" sx={{ fontWeight: 700 }}>{ils(p.total)}</TableCell>
-              </TableRow>
-            ))}
+            {data.providers.map(p => {
+              const pay = paymentOf(p);
+              const doc = pay?.document || null;
+              const inIcount = !!(doc && (doc.icount_id || doc.icount_docnum));
+              return (
+                <TableRow key={p.provider_id || p.provider_name}>
+                  <TableCell sx={{ fontWeight: 600 }}>
+                    {p.provider_name}
+                    {p.retainer && (
+                      <Typography variant="caption" sx={{ display: 'block', color: 'info.main' }}>
+                        חודשי קבוע · {p.retainer.held_this_month} מתוך {p.retainer.meetings_per_month} מפגשים
+                      </Typography>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Chip size="small" variant="outlined"
+                      color={p.vat_mode === 'registered' ? 'warning' : 'default'}
+                      label={p.vat_mode === 'registered' ? 'עוסק מורשה + מע״מ' : 'עוסק פטור'} />
+                  </TableCell>
+                  <TableCell align="center">
+                    {meetingsOf(p)}{partialsOf(p) ? ` (+${partialsOf(p)} חלקית)` : ''}
+                  </TableCell>
+                  <TableCell align="center" sx={{ color: pendingOf(p) ? 'warning.main' : 'text.secondary' }}>
+                    {pendingOf(p) || '—'}
+                  </TableCell>
+                  <TableCell align="left">{ils(p.subtotal)}</TableCell>
+                  <TableCell align="left">{p.vat ? ils(p.vat) : '—'}</TableCell>
+                  <TableCell align="left" sx={{ fontWeight: 700 }}>{ils(p.total)}</TableCell>
+                  <TableCell align="center">
+                    <Tooltip title={pay?.paid
+                      ? `סומן שולם${pay.paid_at ? ` · ${new Date(pay.paid_at).toLocaleDateString('he-IL')}` : ''}`
+                      : accounting ? 'לחיצה מסמנת ששולם' : 'טרם שולם'}>
+                      <Chip size="small"
+                        color={pay?.paid ? 'success' : 'error'}
+                        variant={pay?.paid ? 'filled' : 'outlined'}
+                        sx={{ fontWeight: 700, ...(accounting ? { cursor: 'pointer' } : {}) }}
+                        label={pay?.paid ? 'שולם ✓' : 'לא שולם'}
+                        disabled={togglingKey === keyOf(p)}
+                        onClick={accounting ? () => togglePaid(p) : undefined} />
+                    </Tooltip>
+                  </TableCell>
+                  <TableCell align="center">
+                    {doc ? (
+                      <Tooltip title={`${doc.doc_number ? `מס׳ ${doc.doc_number} · ` : ''}${ils(doc.amount_total)} — המסמך במסך הוצאות`}>
+                        <Chip size="small" color="success" variant="outlined" label={`✓ ${doc.doc_number || 'חשבונית'}`} />
+                      </Tooltip>
+                    ) : accounting ? (
+                      <Button size="small" variant="outlined"
+                        onClick={() => setInvoiceFor({ provider_id: p.provider_id || null, provider_name: p.provider_name, amount: p.total })}>
+                        צרף חשבונית
+                      </Button>
+                    ) : '—'}
+                  </TableCell>
+                  <TableCell align="center">
+                    {inIcount ? (
+                      <Chip size="small" color="success"
+                        label={doc.icount_docnum ? `באייקאונט · ${doc.icount_docnum}` : 'באייקאונט ✓'} />
+                    ) : doc && accounting ? (
+                      <Button size="small" variant="contained" color="warning"
+                        onClick={() => setIcountDoc(doc)}>
+                        ⬆ העלאה
+                      </Button>
+                    ) : '—'}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
             <TableRow>
               <TableCell colSpan={4} sx={{ fontWeight: 700 }}>סה״כ</TableCell>
               <TableCell align="left" sx={{ fontWeight: 700 }}>{ils(data.grand_subtotal)}</TableCell>
               <TableCell align="left" sx={{ fontWeight: 700 }}>{data.grand_vat ? ils(data.grand_vat) : '—'}</TableCell>
               <TableCell align="left" sx={{ fontWeight: 700 }}>{ils(data.grand_total)}</TableCell>
+              <TableCell colSpan={3} />
             </TableRow>
           </TableBody>
         </Table>
@@ -142,6 +227,27 @@ function PaymentSummary({ data }) {
           {totalPending} מפגשים עדיין מסומנים "מתוכנן" ואינם נספרים לתשלום עד שמסמנים אם המדריכה הגיעה.
         </Typography>
       )}
+      {accounting && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+          חשבונית שמצורפת כאן נשמרת גם במסך הוצאות; חודש שלא סומן "שולם" מסומן שם "עוד לא שולמה", ולכן אפשר להעלות אותו לאייקאונט מיד.
+        </Typography>
+      )}
+
+      <ClassInvoiceDialog
+        open={!!invoiceFor}
+        onClose={() => setInvoiceFor(null)}
+        onSaved={onPaymentsChanged}
+        provider={invoiceFor}
+        branch={branch}
+        month={month}
+        suggestedAmount={invoiceFor?.amount || 0}
+      />
+      <IcountFileDialog
+        doc={icountDoc}
+        open={!!icountDoc}
+        onClose={() => setIcountDoc(null)}
+        onDone={() => onPaymentsChanged?.()}
+      />
 
       {open && (
         <Box sx={{ mt: 1.5 }}>
@@ -299,6 +405,10 @@ function ProgramSessions({ program, month, vatMode, onChanged }) {
 
 export default function ClassTrackingPage() {
   const { selectedBranch, selectedBranchName, isAllBranches } = useBranch();
+  const { user } = useAuth();
+  // Who may touch the money: the paid toggle, the invoice, iCount. A branch
+  // manager reads the same box but the buttons are not there.
+  const accounting = ['system_admin', 'accountant'].includes(user?.role);
   const confirm = useConfirm();
   const [month, setMonth] = useState(thisMonth());
   const [programs, setPrograms] = useState([]);
@@ -332,6 +442,17 @@ export default function ClassTrackingPage() {
       .then(r => setSummary(r.data)).catch(() => setSummary(null));
   }, [selectedBranch, isAllBranches, month]);
   useEffect(() => { loadSummary(); }, [loadSummary, refreshKey]);
+
+  // The accounting state beside the owed figures: paid or not, which invoice,
+  // and whether it already reached iCount.
+  const [payments, setPayments] = useState([]);
+  const loadPayments = useCallback(() => {
+    // Accounting's data: the server answers 403 to anyone else, so don't ask.
+    if (!accounting || isAllBranches || !selectedBranch) { setPayments([]); return; }
+    api.get('/classes/payments', { params: { branch: selectedBranch, month } })
+      .then(r => setPayments(r.data.payments || [])).catch(() => setPayments([]));
+  }, [accounting, selectedBranch, isAllBranches, month]);
+  useEffect(() => { loadPayments(); }, [loadPayments, refreshKey]);
 
   /**
    * One row per provider, not per program.
@@ -432,7 +553,8 @@ export default function ClassTrackingPage() {
         </Button>
       </Stack>
 
-      <PaymentSummary data={summary} />
+      <PaymentSummary data={summary} payments={payments} accounting={accounting}
+        branch={selectedBranch} month={month} onPaymentsChanged={loadPayments} />
 
       {loading ? (
         <Box sx={{ textAlign: 'center', py: 4 }}><CircularProgress /></Box>

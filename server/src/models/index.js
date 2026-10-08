@@ -91,6 +91,7 @@ const ReconcileDecision = require('./ReconcileDecision');
 const ClassProvider = require('./ClassProvider');
 const ClassProgram = require('./ClassProgram');
 const ClassSession = require('./ClassSession');
+const ClassPayment = require('./ClassPayment');
 const MaintenanceItem = require('./MaintenanceItem');
 const EmployeeChangeRequest = require('./EmployeeChangeRequest');
 const GanEvent = require('./GanEvent');
@@ -229,6 +230,7 @@ const real = {
   ClassProvider,
   ClassProgram,
   ClassSession,
+  ClassPayment,
   MaintenanceItem,
   EmployeeChangeRequest,
   GanEvent,

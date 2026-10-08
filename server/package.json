@@ -171,6 +171,8 @@
     "test:parent-login-child-id": "node scripts/parent-login-child-id.test.js",
     "test:class-tracking": "node scripts/class-tracking.test.js",
     "test:class-retainer": "node scripts/class-retainer.test.js",
+    "test:class-payments": "node scripts/class-payments.test.js",
+    "test:course-refresher-reminders": "node scripts/course-refresher-reminders.test.js",
     "test:order-approval": "node scripts/order-approval-flow.test.js",
     "test:order-no-prices": "node scripts/order-email-no-prices.test.js",
     "test:parent-signups": "node scripts/parent-signups.test.js",

@@ -4,13 +4,27 @@
     {
       "name": "gan-client",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:client"],
+      "runtimeArgs": [
+        "run",
+        "dev:client"
+      ],
       "port": 5173
     },
     {
       "name": "gan-server",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:server"],
+      "runtimeArgs": [
+        "run",
+        "dev:server"
+      ],
+      "port": 3001
+    },
+    {
+      "name": "gan-classes-demo",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "server/scripts/classes-demo-server.js"
+      ],
       "port": 3001
     }
   ]

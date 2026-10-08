@@ -2,6 +2,18 @@ const { ClassProvider, ClassProgram, ClassSession, Classroom, Branch } = require
 const { getBranchFilter } = require('../utils/branch-filter');
 const classSessions = require('../services/classSessions.service');
 const retainer = require('../services/classRetainer.service');
+const classPayments = require('../services/classPayments.service');
+
+const userId = (req) => (req.user && (req.user.id || req.user._id)) || null;
+
+// A body's branch must sit inside the caller's scope exactly like a ?branch
+// would (the middleware only clamps the query string, not POST bodies).
+function assertBranchInScope(req, branchId) {
+  const scope = req.branchScope;
+  if (Array.isArray(scope) && !scope.map(String).includes(String(branchId))) {
+    throw Object.assign(new Error('הסניף מחוץ להרשאות שלך'), { status: 403 });
+  }
+}
 
 /** Accept a billing block from the screen, keeping only what the model knows. */
 function billingOf(raw) {
@@ -794,10 +806,57 @@ async function paymentSummary(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ========================= Payments (הנהלת חשבונות) =========================
+
+/** The month's paid/invoice rows, clamped to the caller's branch scope like every read here. */
+async function listPayments(req, res, next) {
+  try {
+    const filter = getBranchFilter(req, 'branch_id');
+    const payments = await classPayments.listForMonth(filter, req.query.month);
+    res.json({ month: req.query.month, payments });
+  } catch (err) { next(err); }
+}
+
+/** שולם / לא שולם — the accountant's word, upserted per provider-month. */
+async function markPayment(req, res, next) {
+  try {
+    const b = req.body || {};
+    assertBranchInScope(req, b.branch_id);
+    const payment = await classPayments.setPaid({
+      branch_id: b.branch_id,
+      month: b.month,
+      provider_id: b.provider_id || null,
+      provider_name: b.provider_name || '',
+      paid: b.paid,
+      by: userId(req),
+    });
+    res.json({ payment });
+  } catch (err) { next(err); }
+}
+
+/** This month's invoice file — created as an ExpenseDocument through the expenses intake. */
+async function attachInvoice(req, res, next) {
+  try {
+    const b = req.body || {};
+    assertBranchInScope(req, b.branch_id);
+    const out = await classPayments.attachInvoice({
+      branch_id: b.branch_id,
+      month: b.month,
+      provider_id: b.provider_id || null,
+      provider_name: b.provider_name || '',
+      fields: b.fields && typeof b.fields === 'object' ? b.fields : {},
+      file: b.file && typeof b.file === 'object' ? b.file : null,
+      by: userId(req),
+    });
+    res.status(201).json(out);
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   listProviders, createProvider, updateProvider, deleteProvider,
   getProviderSchedule, setProviderSchedule, providerSettlement,
   listPrograms, createProgram, updateProgram, deleteProgram,
   listSessions, createSession, generateSessions, fillMonth, updateSession, deleteSession,
   answerSession, answerVisit, dueSessions, paymentSummary,
+  listPayments, markPayment, attachInvoice,
 };

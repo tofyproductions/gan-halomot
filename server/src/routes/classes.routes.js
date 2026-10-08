@@ -61,4 +61,15 @@ router.delete('/sessions/:id', MANAGER, c.deleteSession);
 // Payment summary (occurred × rate)
 router.get('/payment-summary', MANAGER, c.paymentSummary);
 
+/**
+ * The money itself — שולם/לא שולם and the invoice — is accounting's word,
+ * not the branch's: a manager reads it, only system_admin/accountant write
+ * it. The invoice becomes an ExpenseDocument, so from there the expenses
+ * tab's own rules (pairing, iCount's no-undo guards) take over.
+ */
+const ACCOUNTING = requireRole('system_admin', 'accountant');
+router.get('/payments', ACCOUNTING, c.listPayments);
+router.post('/payments/mark', ACCOUNTING, c.markPayment);
+router.post('/payments/invoice', ACCOUNTING, c.attachInvoice);
+
 module.exports = router;
