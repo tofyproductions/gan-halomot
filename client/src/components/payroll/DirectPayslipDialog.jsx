@@ -98,7 +98,7 @@ export default function DirectPayslipDialog({ open, onClose, defaultMonth }) {
     () => (batch?.items || []).filter(i => sel[i.page]).map(i => i.page),
     [batch, sel],
   );
-  const sendable = (batch?.items || []).filter(i => i.status === 'pending' || i.status === 'sent');
+  const sendable = (batch?.items || []).filter(i => i.status === 'pending' || i.status === 'sent' || i.status === 'error');
 
   const assign = (page, emp) => {
     if (!emp) return;
@@ -256,7 +256,7 @@ export default function DirectPayslipDialog({ open, onClose, defaultMonth }) {
                 <TableBody>
                   {batch.items.map((it) => {
                     const st = STATUS[it.status] || STATUS.pending;
-                    const selectable = it.status === 'pending' || it.status === 'sent';
+                    const selectable = it.status === 'pending' || it.status === 'sent' || it.status === 'error';
                     return (
                       <TableRow key={it.page} hover>
                         <TableCell padding="checkbox">

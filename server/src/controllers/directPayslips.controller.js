@@ -274,8 +274,11 @@ async function send(req, res) {
     const toOverride = String(req.body?.to || '').trim();
     const userId = req.user?.id || null;
 
+    // 'error' is retryable on purpose: a send that died on the mail provider
+    // left a matched page behind, and re-uploading the file to try again is
+    // the punishment for OUR failure, not the user's.
     const targets = b.items.filter(i => (!only || only.has(i.page))
-      && i.employee_id && (i.status === 'pending' || i.status === 'sent'));
+      && i.employee_id && (i.status === 'pending' || i.status === 'sent' || i.status === 'error'));
     if (targets.length === 0) {
       return res.status(400).json({ error: 'אין עמודים מוכנים לשליחה (עמוד ללא שיוך או ללא מייל)' });
     }
