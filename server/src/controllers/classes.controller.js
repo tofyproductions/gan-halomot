@@ -363,6 +363,23 @@ async function fillMonth(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/**
+ * GET /classes/closed-days?branch=&month=
+ * The dates the branch is shut this month, with the holiday's name — so the
+ * board can say "סוכות" where a week has no meeting, instead of a silent gap
+ * that looks like somebody forgot to fill the month.
+ */
+async function closedDays(req, res, next) {
+  try {
+    const { branch, month } = req.query;
+    if (!branch || branch === 'all' || !/^\d{4}-\d{2}$/.test(month || '')) {
+      return res.json({ closed: [] });
+    }
+    const map = await classSessions.closedDaysOf(branch, month);
+    res.json({ closed: [...map.entries()].sort().map(([date, name]) => ({ date, name })) });
+  } catch (err) { next(err); }
+}
+
 async function updateSession(req, res, next) {
   try {
     const fields = ['date', 'time', 'rate', 'classroom_id'];
@@ -856,7 +873,7 @@ module.exports = {
   listProviders, createProvider, updateProvider, deleteProvider,
   getProviderSchedule, setProviderSchedule, providerSettlement,
   listPrograms, createProgram, updateProgram, deleteProgram,
-  listSessions, createSession, generateSessions, fillMonth, updateSession, deleteSession,
+  listSessions, createSession, generateSessions, fillMonth, updateSession, deleteSession, closedDays,
   answerSession, answerVisit, dueSessions, paymentSummary,
   listPayments, markPayment, attachInvoice,
 };

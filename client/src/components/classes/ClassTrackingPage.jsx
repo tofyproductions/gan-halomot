@@ -467,6 +467,19 @@ export default function ClassTrackingPage() {
   }, [selectedBranch, isAllBranches, month]);
   useEffect(() => { loadSessions(); }, [loadSessions, refreshKey]);
 
+  /**
+   * The month's closed days — "סוכות", "יום כיפור" — so a week with no
+   * meeting says why, instead of looking like a hole somebody forgot to fill.
+   */
+  const [closedDays, setClosedDays] = useState([]);
+  const loadClosed = useCallback(() => {
+    if (isAllBranches || !selectedBranch) { setClosedDays([]); return; }
+    api.get('/classes/closed-days', { params: { branch: selectedBranch, month } })
+      .then(r => setClosedDays(r.data.closed || [])).catch(() => setClosedDays([]));
+  }, [selectedBranch, isAllBranches, month]);
+  useEffect(() => { loadClosed(); }, [loadClosed]);
+  const closedByDate = new Map(closedDays.map(c => [c.date, c.name]));
+
   const today = thisMonth() === month
     ? new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' })
     : (month < thisMonth() ? '9999-99-99' : '0000-00-00');
@@ -485,7 +498,39 @@ export default function ClassTrackingPage() {
   // A meeting whose day has passed and nobody said if the instructor came.
   const pending = sessions.filter(s => s.status === 'scheduled' && s.date <= today);
 
-  const maxCols = Math.max(1, ...programs.map(p => (sessionsOf.get(String(p._id)) || []).length));
+  // All the dates this weekday falls on this month — the board's real columns.
+  const occurrencesOf = (day) => {
+    const [y, m] = month.split('-').map(Number);
+    const out = [];
+    const days = new Date(y, m, 0).getDate();
+    for (let d = 1; d <= days; d++) {
+      if (new Date(y, m - 1, d).getDay() === day) out.push(`${month}-${String(d).padStart(2, '0')}`);
+    }
+    return out;
+  };
+
+  /**
+   * A program's row, cell by cell, anchored to its fixed day's real weeks —
+   * so שבוע 3 is the third week even when סוכות ate the second. A session
+   * lands on its own week, a closed day says the holiday's name, and a date
+   * with no session yet stays an honest dash. Meetings moved off the fixed
+   * day are appended at the end, in date order.
+   */
+  const rowCells = (p) => {
+    const list = [...(sessionsOf.get(String(p._id)) || [])];
+    if (p.default_day == null) return list.map(s => ({ session: s }));
+    const cells = [];
+    for (const date of occurrencesOf(p.default_day)) {
+      const i = list.findIndex(s => s.date === date);
+      if (i >= 0) cells.push({ session: list.splice(i, 1)[0] });
+      else if (closedByDate.has(date)) cells.push({ closed: closedByDate.get(date), date });
+      else cells.push({ missing: date });
+    }
+    for (const s of list) cells.push({ session: s });
+    return cells;
+  };
+  const cellsByProgram = new Map(programs.map(p => [String(p._id), rowCells(p)]));
+  const maxCols = Math.max(1, ...[...cellsByProgram.values()].map(l => l.length));
 
   // The program's month figure out of the same summary the accountant reads.
   const amountOf = (pid) => {
@@ -599,6 +644,24 @@ export default function ClassTrackingPage() {
     }
   };
 
+  // A cell that is not a session: a named holiday, or a hole in the month.
+  const renderCell = (c) => {
+    if (c.session) return cellFor(c.session);
+    if (c.closed) return (
+      <Tooltip title={`הגן סגור · ${c.closed} · ${dayMonth(c.date)}`}>
+        <Typography variant="caption" noWrap sx={{
+          color: 'info.main', fontWeight: 600, maxWidth: 76,
+          display: 'inline-block', verticalAlign: 'middle',
+        }}>{c.closed}</Typography>
+      </Tooltip>
+    );
+    return (
+      <Tooltip title={`אין מפגש ב-${dayMonth(c.missing)} — "מלא את החודש" ישלים`}>
+        <Box component="span" sx={{ color: 'text.disabled' }}>—</Box>
+      </Tooltip>
+    );
+  };
+
   const catOf = (p) => p.classroom_categories?.length
     ? p.classroom_categories.join(' + ') : (p.classroom_category || '');
 
@@ -689,7 +752,7 @@ export default function ClassTrackingPage() {
                 <TableBody>
                   {sorted.map(p => {
                     const pid = String(p._id);
-                    const list = sessionsOf.get(pid) || [];
+                    const list = cellsByProgram.get(pid) || [];
                     const provider = p.provider_id && typeof p.provider_id === 'object' ? p.provider_id : null;
                     const vatMode = provider?.vat_mode || 'exempt';
                     const isOpen = !!openRows[pid];
@@ -718,7 +781,7 @@ export default function ClassTrackingPage() {
                         ) : (
                           Array.from({ length: maxCols }, (_, i) => (
                             <TableCell key={i} align="center" sx={{ p: 0.5 }}>
-                              {list[i] ? cellFor(list[i]) : ''}
+                              {list[i] ? renderCell(list[i]) : ''}
                             </TableCell>
                           ))
                         )}
@@ -771,7 +834,8 @@ export default function ClassTrackingPage() {
               <Box component="span" sx={{ color: 'warning.main', fontWeight: 700 }}>◐</Box> חלקית ·{' '}
               <Box component="span" sx={{ color: 'warning.main', fontWeight: 700 }}>←</Box> נדחה ·{' '}
               <Box component="span" sx={{ color: 'warning.main', fontWeight: 800 }}>?</Box> ממתין לסימון ·{' '}
-              תאריך אפור — מפגש עתידי. לחיצה על סימן פותחת סימון; לחיצה על שורה פותחת את כל המפגשים.
+              תאריך אפור — מפגש עתידי · שם בכחול — הגן סגור (חופשה) · — אין מפגש.
+              לחיצה על סימן פותחת סימון; לחיצה על שורה פותחת את כל המפגשים.
             </Typography>
           )}
         </>

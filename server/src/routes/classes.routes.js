@@ -45,6 +45,7 @@ router.delete('/programs/:id', MANAGER, c.deleteProgram);
 // Sessions — the occurrence popup poll + answer are open to any authenticated
 // user (the controller checks manager-role OR class-lead ownership per session).
 router.get('/sessions/due', c.dueSessions);
+router.get('/closed-days', c.closedDays);
 router.get('/sessions', c.listSessions);
 router.post('/sessions', MANAGER, c.createSession);
 router.post('/sessions/generate', MANAGER, c.generateSessions);
