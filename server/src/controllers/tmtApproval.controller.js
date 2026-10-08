@@ -1230,6 +1230,11 @@ function decisionOut(doc) {
       parent1: d.parent_overrides.parent1 || null, parent2: d.parent_overrides.parent2 || null,
       by_name: d.parent_overrides.by_name || '', at: d.parent_overrides.at || null,
     } : null,
+    intake_date: d.intake_date?.value ? {
+      value: d.intake_date.value,
+      by_name: d.intake_date.by_name || '',
+      at: d.intake_date.at || null,
+    } : null,
     resolutions: (d.resolutions || []).map(r => ({
       code: r.code, choice: r.choice, value: r.value, note: r.note, by_name: r.by_name, at: r.at,
     })),
@@ -1267,14 +1272,62 @@ async function putDecision(req, res, next) {
         ? { parent1, parent2, ...who(req), at: new Date() }
         : { parent1: null, parent2: null, by: null, by_name: '', at: null };
     }
+    let intakeDate = null;
+    if (has('intake_date')) {
+      const raw = req.body.intake_date;
+      if (raw === null || raw === '') {
+        set.intake_date = { value: null, by: null, by_name: '', at: null, alerted_for: null };
+      } else {
+        intakeDate = new Date(String(raw));
+        if (Number.isNaN(intakeDate.getTime())) return res.status(400).json({ error: 'תאריך קליטה לא תקין' });
+        set.intake_date = { value: intakeDate, ...who(req), at: new Date() };
+      }
+    }
     if (!Object.keys(set).length) return res.status(400).json({ error: 'אין מה לשמור' });
+
+    // The alert below must know whether THIS value was already announced —
+    // read it before the save overwrites it.
+    const prev = intakeDate
+      ? await ReconcileDecision.findOne({ branch_id: branchId, academic_year: academicYear, id_number: idNumber })
+        .select('intake_date.alerted_for').lean()
+      : null;
 
     const doc = await ReconcileDecision.findOneAndUpdate(
       { branch_id: branchId, academic_year: academicYear, id_number: idNumber },
       { $set: set, $setOnInsert: { branch_id: branchId, academic_year: academicYear, id_number: idNumber } },
       { upsert: true, new: true, setDefaultsOnInsert: true },
     );
-    res.json({ decision: decisionOut(doc) });
+
+    /**
+     * קליטה אחרי ה-15 → עינת מקבלת סמס ומייל, פעם אחת לכל תאריך.
+     *
+     * The client sends a bare YYYY-MM-DD, so getUTCDate reads the calendar day
+     * as typed, with no timezone sliding it across midnight. `alerted_for`
+     * keeps the value the alert went out for: saving the same date again is
+     * silent, moving the date alerts again — the payment question reopened.
+     */
+    let alert = null;
+    if (intakeDate && intakeDate.getUTCDate() > 15) {
+      const already = prev?.intake_date?.alerted_for
+        && new Date(prev.intake_date.alerted_for).getTime() === intakeDate.getTime();
+      if (!already) {
+        const branch = await Branch.findById(branchId).select('name').lean();
+        const { sendLateIntakeAlert } = require('../services/lateIntakeAlert');
+        alert = await sendLateIntakeAlert({
+          childName: String(req.body?.child_name || '').slice(0, 120),
+          idNumber,
+          branchName: branch?.name || '',
+          intakeDate,
+        });
+        if (alert.sms?.ok || alert.email?.ok) {
+          await ReconcileDecision.updateOne(
+            { _id: doc._id }, { $set: { 'intake_date.alerted_for': intakeDate } },
+          );
+        }
+      }
+    }
+
+    res.json({ decision: decisionOut(doc), late_intake_alert: alert });
   } catch (error) {
     next(error);
   }

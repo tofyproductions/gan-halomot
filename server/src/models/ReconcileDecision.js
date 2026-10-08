@@ -119,6 +119,22 @@ const reconcileDecisionSchema = new mongoose.Schema({
     at: { type: Date, default: null },
   },
 
+  /**
+   * תאריך קליטה — the day the child actually started, as the office records
+   * it. The ministry file carries its own absorbed_at, but the office's date
+   * is the one billing answers to: a child absorbed after the 15th pays a
+   * partial first month, and saving such a date alerts עינת to adjust it
+   * (see services/lateIntakeAlert.js). `alerted_for` remembers which value
+   * the alert went out for, so re-saving the same date does not nag her twice.
+   */
+  intake_date: {
+    value: { type: Date, default: null },
+    by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    by_name: { type: String, default: '' },
+    at: { type: Date, default: null },
+    alerted_for: { type: Date, default: null },
+  },
+
   /** Findings a person closed, one per code (a second answer replaces the first). */
   resolutions: { type: [resolutionSchema], default: [] },
 

@@ -194,4 +194,7 @@ async function tick(trigger = 'schedule') {
 
 module.exports = {
   tick, send, branchesNeedingUpload, messageText, RECIPIENTS_KEY, RECIPIENT_NAME, THRESHOLD_DAYS, DAY_OF_MONTH,
+  // עינת's channels, resolved the same way every alert to her resolves them —
+  // phone off her User record by name, email off the Setting she actually reads.
+  recipientEmails, recipientPhone,
 };

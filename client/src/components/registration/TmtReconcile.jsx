@@ -478,6 +478,37 @@ export default function TmtReconcile({
     'החריגה נפתחה מחדש',
   );
 
+  /**
+   * תאריך קליטה — saved per child like any decision, but the toast depends on
+   * what the server did with it: a date after the 15th fires an SMS+email to
+   * עינת (the month's payment needs a manual adjustment), and whether that
+   * alert actually left the building is exactly what the person typing the
+   * date needs to know. decisionCall hides the response, so this doesn't use it.
+   */
+  const saveIntakeDate = async (row, value) => {
+    setDeciding(true);
+    try {
+      const res = await api.put(`/tmt/decisions/${row.id_number}`, {
+        ...scope, intake_date: value || null, child_name: row.child_name,
+      });
+      const alert = res.data?.late_intake_alert;
+      if (alert) {
+        if (alert.sms?.ok || alert.email?.ok) {
+          toast.success('קליטה אחרי ה-15 — נשלחה התראה לעינת לסידור התשלום');
+        } else {
+          toast.warn('התאריך נשמר, אך ההתראה לעינת נכשלה — יש לעדכן אותה ידנית');
+        }
+      } else {
+        toast.success(value ? 'תאריך הקליטה נשמר' : 'תאריך הקליטה נמחק');
+      }
+      fetchData();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בשמירת תאריך הקליטה');
+    } finally {
+      setDeciding(false);
+    }
+  };
+
   const handleUpload = async () => {
     if (!uploadDlg.file) return toast.error('יש לבחור קובץ');
     if (!branchId) return toast.error('יש לבחור סניף');
@@ -1048,7 +1079,7 @@ export default function TmtReconcile({
               a scrolling box there is nothing for the header to stick to. */}
           <Card>
             <TableContainer sx={{ maxHeight: 'calc(100vh - 260px)' }}>
-              <Table size="small" stickyHeader sx={{ minWidth: 1320 }}>
+              <Table size="small" stickyHeader sx={{ minWidth: 1460 }}>
               <TableHead>
                 <TableRow sx={{ '& th': { ...NOWRAP, bgcolor: 'background.paper' } }}>
                   <TableCell>שם הילד/ה</TableCell>
@@ -1073,6 +1104,10 @@ export default function TmtReconcile({
                       column of colours can be read down; a chip that moves
                       cannot be read at all. */}
                   <TableCell>תשלום</TableCell>
+                  {/* The office's own date, not the ministry's absorbed_at —
+                      billing answers to this one. After the 15th it alerts
+                      עינת (see saveIntakeDate). */}
+                  <TableCell>תאריך קליטה</TableCell>
                   <TableCell>כיתה / דרגה</TableCell>
                   {/* The child's account in ClickTac, for every row — a family
                       that owes is seen before it is promoted, and a family
@@ -1275,6 +1310,42 @@ export default function TmtReconcile({
                         </Stack>
                       ) : <Typography variant="caption" color="text.disabled">—</Typography>}
                     </TableCell>
+                    {/* ---- תאריך קליטה ---- */}
+                    <TableCell>
+                      {(() => {
+                        const manual = r.decision?.intake_date?.value || null;
+                        const inputValue = manual ? new Date(manual).toISOString().slice(0, 10) : '';
+                        // getUTCDate: the value is a bare calendar day; local
+                        // timezone math would slide it across midnight.
+                        const late = manual && new Date(manual).getUTCDate() > 15;
+                        return (
+                          <>
+                            <TextField
+                              type="date" size="small" variant="standard"
+                              sx={{ width: 135 }}
+                              value={inputValue}
+                              onChange={e => saveIntakeDate(r, e.target.value)}
+                              disabled={!canPlace || deciding}
+                            />
+                            {late && (
+                              <Tooltip title="קליטה אחרי ה-15 לחודש — התשלום של החודש הראשון חלקי. עינת קיבלה התראה.">
+                                <Typography variant="caption" color="warning.main" display="block" sx={{ fontWeight: 700 }}>
+                                  אחרי ה-15
+                                </Typography>
+                              </Tooltip>
+                            )}
+                            {/* The ministry's own date, as a hint when the
+                                office has not typed one — a suggestion to
+                                copy, never the value billing runs on. */}
+                            {!manual && r.tmt?.absorbed_at && (
+                              <Typography variant="caption" color="text.disabled" display="block">
+                                תמ"ת: {fmtDate(r.tmt.absorbed_at)}
+                              </Typography>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </TableCell>
                     {/* From the contracts export, and nowhere else in either
                         system: the class ClickTac put the child in and the
                         subsidy tier the whole fee hangs on. On ONE line —
@@ -1316,7 +1387,7 @@ export default function TmtReconcile({
                   </TableRow>
                 ))}
                 {!visible.length && (
-                  <TableRow><TableCell colSpan={13} align="center" sx={{ py: 3 }}>
+                  <TableRow><TableCell colSpan={14} align="center" sx={{ py: 3 }}>
                     <Typography color="text.secondary">
                       {showArchived ? 'הארכיון ריק — אף ילד/ה לא הוסר/ה מכל הרשימות' : 'אין רשומות להצגה'}
                     </Typography>

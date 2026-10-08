@@ -858,6 +858,11 @@ function reconcile({
        */
       decision: decision ? {
         note: decision.note || '',
+        intake_date: decision.intake_date?.value ? {
+          value: decision.intake_date.value,
+          by_name: decision.intake_date.by_name || '',
+          at: decision.intake_date.at || null,
+        } : null,
         verdict_override: decision.verdict_override?.kind ? {
           kind: decision.verdict_override.kind,
           reason: decision.verdict_override.reason || '',
