@@ -14,13 +14,23 @@ const chipColors = (employeeId) => {
 
 const todayYmd = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 
-// בוקר/צהריים — the day splits at 13:00. A shift belongs to a window when it overlaps it.
-const NOON = 13 * 60;
+/**
+ * בוקר/צהריים — two different questions, two different cuts.
+ *
+ * Morning is who OPENS the day: anyone starting before 13:00. Afternoon is
+ * who STAYS for the צהרון: anyone still there after 14:00. They are not one
+ * boundary, because the gan's morning shift runs THROUGH lunch — a worker
+ * leaving at 14:00 is a morning worker (the office's rule, 08.10.2026), and
+ * counting her as afternoon cover was overstating the צהרון staff by exactly
+ * the people who go home when it begins.
+ */
+const AM_STARTS_BEFORE = 13 * 60;
+const PM_STAYS_PAST = 14 * 60;
 const inWindow = (e, win) => {
   if (win === 'all') return true;
   const a = toMin(e.start_hhmm); const b = toMin(e.end_hhmm);
   if (a == null || b == null) return true; // no hours — never hide
-  return win === 'am' ? a < NOON : b > NOON;
+  return win === 'am' ? a < AM_STARTS_BEFORE : b > PM_STAYS_PAST;
 };
 
 const DND_TYPE = 'application/x-shift';

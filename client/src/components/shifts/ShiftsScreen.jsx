@@ -89,7 +89,8 @@ export default function ShiftsScreen() {
     return () => { on = false; };
   }, [board, week]);
 
-  // בוקר / צהריים — dims shifts outside the window; 13:00 is the cut.
+  // בוקר / צהריים — dims shifts outside the window; the cuts live in ShiftGrid
+  // (morning starts before 13:00, afternoon means staying past 14:00).
   const [shiftView, setShiftView] = useState('all');
 
   const [draft, setDraft] = useState(null);          // working entries while editing
@@ -338,8 +339,8 @@ export default function ShiftsScreen() {
             <ToggleButtonGroup size="small" exclusive value={shiftView} sx={{ mb: 0.5 }}
               onChange={(_, v) => setShiftView(v || 'all')}>
               <ToggleButton value="all">הכל</ToggleButton>
-              <ToggleButton value="am">בוקר (עד 13:00)</ToggleButton>
-              <ToggleButton value="pm">צהריים (מ־13:00)</ToggleButton>
+              <ToggleButton value="am">בוקר (עד 14:00)</ToggleButton>
+              <ToggleButton value="pm">צהריים (נשארות אחרי 14:00)</ToggleButton>
             </ToggleButtonGroup>
             <ShiftGrid
               dates={board.dates} rows={gridRows} closedDates={closed} warnings={board.warnings}
