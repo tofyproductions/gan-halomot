@@ -3968,6 +3968,14 @@ function SavedPayslipsDialog({ open, row, onClose }) {
         {loading ? <Box sx={{ textAlign: 'center', py: 3 }}><CircularProgress size={24} /></Box>
           : list.length === 0 ? <Alert severity="info">אין תלושים שמורים לעובד/ת זה. תלוש נשמר אוטומטית כששולח/ים אותו לעובד/ת.</Alert>
           : (
+            <>
+            {list.filter(p => p.newer_round_approved_at).map(p => (
+              <Alert key={`stale-${p.year_month}`} severity="warning" sx={{ mb: 1.5 }}>
+                התלוש השמור של {p.year_month} הוא מסבב קודם. סבב חדש יותר אושר ב־
+                {new Date(p.newer_round_approved_at).toLocaleString('he-IL', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                {' '}ועדיין לא הופץ — התלוש יתעדכן כאן רק אחרי שמפיצים את הסבב החדש (למנהלות או לעובדים).
+              </Alert>
+            ))}
             <Table size="small">
               <TableHead>
                 <TableRow>
@@ -3982,7 +3990,10 @@ function SavedPayslipsDialog({ open, row, onClose }) {
                 {list.map(p => (
                   <TableRow key={p.year_month} hover>
                     <TableCell padding="checkbox"><Checkbox size="small" checked={!!sel[p.year_month]} onChange={() => setSel(s => ({ ...s, [p.year_month]: !s[p.year_month] }))} /></TableCell>
-                    <TableCell sx={{ fontWeight: 600 }}>{p.year_month}</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>
+                      {p.year_month}
+                      {p.newer_round_approved_at && <Chip size="small" color="warning" label="לא מעודכן" sx={{ mr: 0.5, height: 18, fontSize: 10 }} />}
+                    </TableCell>
                     <TableCell>{p.branch || '—'}</TableCell>
                     <TableCell><Typography variant="caption">{p.sent_at ? new Date(p.sent_at).toLocaleDateString('he-IL') : '—'}</Typography></TableCell>
                     <TableCell align="center">
@@ -3993,6 +4004,7 @@ function SavedPayslipsDialog({ open, row, onClose }) {
                 ))}
               </TableBody>
             </Table>
+            </>
           )}
       </DialogContent>
       <DialogActions>

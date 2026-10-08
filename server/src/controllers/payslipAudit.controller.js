@@ -3439,10 +3439,39 @@ async function listSavedPayslips(req, res) {
   try {
     if (!await assertPayslipAccess(req, res, req.params.id)) return;
     const list = await SavedPayslip.find({ employee_id: req.params.id })
-      .select('year_month branch sent_to sent_at page').sort({ year_month: -1 }).lean();
-    res.json({ payslips: list.map(p => ({
-      year_month: p.year_month, branch: p.branch, sent_to: p.sent_to, sent_at: p.sent_at,
-    })) });
+      .select('year_month branch sent_to sent_at manager_sent_at page').sort({ year_month: -1 }).lean();
+
+    /**
+     * A saved payslip is written when a round is DISTRIBUTED, not when it is
+     * approved. Undo an approval, approve a corrected round, and the archive
+     * still holds the first round's page until the new one is sent — which
+     * looked exactly like "the correction didn't take". So each month says
+     * when a round was approved after the copy on file was made.
+     */
+    const months = [...new Set(list.map(p => p.year_month))];
+    const latestApproval = new Map();
+    if (months.length) {
+      const rounds = await PayslipAuditRecord.find({ year_month: { $in: months }, approved: true })
+        .select('year_month approved_at').lean();
+      for (const r of rounds) {
+        const t = r.approved_at ? new Date(r.approved_at).getTime() : 0;
+        if (t > (latestApproval.get(r.year_month) || 0)) latestApproval.set(r.year_month, t);
+      }
+    }
+    res.json({ payslips: list.map(p => {
+      const filed = Math.max(
+        p.sent_at ? new Date(p.sent_at).getTime() : 0,
+        p.manager_sent_at ? new Date(p.manager_sent_at).getTime() : 0,
+      );
+      const approvedAt = latestApproval.get(p.year_month) || 0;
+      return {
+        // The last time this copy was filed, manager send included — a resend
+        // of a corrected round otherwise kept showing the first send's date.
+        year_month: p.year_month, branch: p.branch, sent_to: p.sent_to,
+        sent_at: filed ? new Date(filed) : p.sent_at,
+        newer_round_approved_at: filed && approvedAt > filed ? new Date(approvedAt) : null,
+      };
+    }) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
