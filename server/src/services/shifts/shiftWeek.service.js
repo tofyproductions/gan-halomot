@@ -14,7 +14,7 @@ const notificationService = require('../notification.service');
 const { branchManagerFilter } = require('../branch-recipients.service');
 const { closureDateSet, todayIsrael } = require('../fixedSchedule');
 const rotaPay = require('./rotaPay.service');
-const { effectiveRatios, ratioWarnings } = require('./ratio');
+const { effectiveRatios, ratioWarnings, pmNeededCaps } = require('./ratio');
 const { buildSeedEntries, placementFor } = require('./seed');
 const constraints = require('./constraints.service');
 const cross = require('./crossBranch.service');
@@ -163,6 +163,9 @@ async function getBoard({ user, branchId, weekStart }) {
     }))
       .concat(foreignCandidates.filter(c => c.has_rate).map(c => ({ _id: String(c._id), full_name: `${c.full_name} (${c.branch_name})`, primary_classroom_id: null, extra_classroom_ids: [], foreign: true, commitment: {} }))),
     ratios,
+    // Where the office said a smaller afternoon crew is the arrangement —
+    // the צהריים pill caps its needed figure by these (see ratio.js).
+    pm_caps: pmNeededCaps(branch.name),
     // What the branch itself set, blank where it follows the city default —
     // the settings form edits these, not the effective values above.
     ratio_overrides: Object.fromEntries(['infants', 'young', 'older'].map((k) => {

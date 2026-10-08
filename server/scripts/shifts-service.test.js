@@ -74,6 +74,11 @@ async function throwsStatus(fn, status, label, message) {
   eq(board.pending_primary.map(p => p.full_name), ['רות'], 'רות בלי כיתה ראשית — נשאלת');
   eq(board.pending_primary[0].suggestion, String(young._id), 'הצעה: הכיתה היחידה בקטגוריה');
   eq(board.ratios, { infants: 5, young: 7, older: 9 }, 'יחסי כפר סבא');
+  eq(board.pm_caps, {}, 'קפלן — בלי תקרת צהריים');
+  // הכלל של משה דיין (08.10.2026): בבוגרים, 3 נשות צוות בצהריים זה תקין.
+  const { pmNeededCaps } = require('../src/services/shifts/ratio');
+  eq(pmNeededCaps('כפר סבא - משה דיין'), { older: 3 }, 'משה דיין — בוגרים בצהריים מסתפקים ב-3');
+  eq(pmNeededCaps('הרצליה הרצוג'), {}, 'סניף אחר — בלי תקרה');
   eq(board.classrooms.map(c => c._id).includes(String(oldRoom._id)), false, 'כיתה משנה קודמת לא מופיעה בלוח');
   eq(board.classrooms.length, 2, 'רק כיתות השנה של השבוע');
   eq(board.ratio_overrides, { infants: '', young: '', older: '' }, 'בלי יחס סניף — הכל ריק (ברירת מחדל עירונית)');

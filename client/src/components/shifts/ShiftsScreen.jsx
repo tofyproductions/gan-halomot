@@ -344,7 +344,7 @@ export default function ShiftsScreen() {
             </ToggleButtonGroup>
             <ShiftGrid
               dates={board.dates} rows={gridRows} closedDates={closed} warnings={board.warnings}
-              switched={switched} editable={editable} alerts={alerts} actual={actual} shiftFilter={shiftView} ratios={board.ratios}
+              switched={switched} editable={editable} alerts={alerts} actual={actual} shiftFilter={shiftView} ratios={board.ratios} pmCaps={board.pm_caps}
               onCellClick={(row, date) => setDlg({ open: true, entry: null, defaults: { date, area: row.area, classroom_id: row.classroom_id } })}
               onEntryClick={(entry) => setDlg({ open: true, entry, defaults: null })}
               onDropToCell={onDropToCell}

@@ -76,7 +76,7 @@ function StaffPill({ icon, label, staff, needed }) {
   );
 }
 
-export default function ShiftGrid({ dates, rows, closedDates, warnings = [], switched, editable, onCellClick, onEntryClick, onDropToCell, highlightEmployeeId, alerts, actual = {}, shiftFilter = 'all', ratios = null }) {
+export default function ShiftGrid({ dates, rows, closedDates, warnings = [], switched, editable, onCellClick, onEntryClick, onDropToCell, highlightEmployeeId, alerts, actual = {}, shiftFilter = 'all', ratios = null, pmCaps = null }) {
   const warnOf = (row, date) => warnings.find(w => w.date === date && String(w.classroom_id) === String(row.classroom_id));
   const [over, setOver] = useState(null); // `${row.key}|${date}` under the dragged item
   const canDrop = !!(editable && onDropToCell);
@@ -301,6 +301,10 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                   const uniq = (win) => new Set(list.filter(e => inWindow(e, win)).map(e => String(e.employee_id))).size;
                   const catKey = CATEGORY_KEY[row.category];
                   const needed = ratios && catKey && row.enrolled > 0 ? Math.ceil(row.enrolled / ratios[catKey]) : null;
+                  // The afternoon asks for less where the office said so —
+                  // בוגרים במשה דיין hold at 3 (pm_caps, from the server).
+                  const pmCap = pmCaps && catKey ? Number(pmCaps[catKey]) : null;
+                  const pmNeeded = needed != null && pmCap > 0 ? Math.min(needed, pmCap) : needed;
                   return (
                     <TableCell key={d} align="center" sx={{
                       py: 0.25, px: 0.5, bgcolor: closed ? 'action.disabledBackground' : (tint ? tint.strong : 'background.sunken'),
@@ -314,7 +318,7 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                               <StaffPill icon="☀️" label="בוקר" staff={uniq('am')} needed={needed} />
                               {/* שישי נגמר בצהריים — אין משמרת צהריים ואין חוסר להציג. */}
                               {new Date(`${d}T12:00:00Z`).getUTCDay() !== 5 && (
-                                <StaffPill icon="🌙" label="צהריים" staff={uniq('pm')} needed={needed} />
+                                <StaffPill icon="🌙" label="צהריים" staff={uniq('pm')} needed={pmNeeded} />
                               )}
                             </>
                           ) : warn && (

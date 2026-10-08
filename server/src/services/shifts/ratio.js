@@ -25,6 +25,24 @@ function effectiveRatios(branch) {
   return out;
 }
 
+/**
+ * Afternoon staffing caps — where the office said a smaller צהריים crew is
+ * simply the arrangement, not a gap.
+ *
+ * The ratio above sizes the MORNING, when every enrolled child is there. By
+ * the afternoon the בוגרים of משה דיין have thinned enough that the office's
+ * rule (08.10.2026) is: three staff is fine, stop painting it as חסרות. The
+ * cap only ever LOWERS the needed figure — a class whose ratio asks for two
+ * still asks for two.
+ *
+ * Keyed by branch-name prefix like defaultRatios above, so the rule survives
+ * a reseed and never silently attaches to the wrong branch id.
+ */
+function pmNeededCaps(branchName = '') {
+  if (String(branchName).trim().startsWith('כפר סבא - משה דיין')) return { older: 3 };
+  return {};
+}
+
 function ratioWarnings({ entries, classrooms, dates, closedDates, ratios }) {
   const out = [];
   for (const date of dates) {
@@ -42,4 +60,4 @@ function ratioWarnings({ entries, classrooms, dates, closedDates, ratios }) {
   return out;
 }
 
-module.exports = { CATEGORY_KEY, defaultRatios, effectiveRatios, ratioWarnings };
+module.exports = { CATEGORY_KEY, defaultRatios, effectiveRatios, ratioWarnings, pmNeededCaps };
