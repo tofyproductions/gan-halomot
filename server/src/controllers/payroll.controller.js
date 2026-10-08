@@ -562,6 +562,27 @@ function normalizeForDiff(v) {
   return v;
 }
 
+/**
+ * A moved employee takes her commitment with her.
+ *
+ * The commitment (התחייבות שעות) carries its own branch_id for the rota's
+ * scope, and saving it copies the branch from the employee — but changing
+ * the EMPLOYEE's branch never touched the commitment, so it stayed behind.
+ * Found with גיל (08.10.2026): the contract was issued to קפלן by mistake,
+ * the card was corrected to משה דיין, and her hours stayed on קפלן's books.
+ * Her new branch's open weeks also get her shifts, as a fresh week would.
+ */
+async function moveCommitmentWithEmployee(emp, branchIdBefore) {
+  const after = String(emp.branch_id || '');
+  if (!after || String(branchIdBefore || '') === after) return;
+  const moved = await EmployeeCommitment.updateOne(
+    { employee_id: emp._id }, { $set: { branch_id: emp.branch_id } });
+  if (!moved.matchedCount) return; // no commitment — nothing to carry
+  await require('../services/shifts/shiftWeek.service')
+    .seedMissing({ branchId: after, employeeIds: [String(emp._id)] })
+    .catch(e => console.error('[commitments] rota seed after branch move failed:', e.message));
+}
+
 async function updateEmployee(req, res, next) {
   try {
     const emp = await Employee.findById(req.params.id);
@@ -645,6 +666,8 @@ async function updateEmployee(req, res, next) {
     // (a new row in "תעריפים פר-סניף") means her finger has to reach that
     // branch's clock too, or she simply can't punch there.
     const branchesBefore = fingerprintSync.employeeBranchIds(emp).join(',');
+    // Home branch before the edit — a change drags her commitment along.
+    const homeBranchBefore = String(emp.branch_id || '');
     // Job title before the edit — a real change is what licenses userSync to
     // push a new role onto her login (see the service's comment).
     const positionBefore = emp.position || '';
@@ -661,6 +684,9 @@ async function updateEmployee(req, res, next) {
       emp.amuta_distribution = await resolveAmutaDistribution(req.body.amuta_distribution, emp.branch_id);
     }
     await emp.save(); // triggers post-save hook for orphan punch re-linking
+
+    await moveCommitmentWithEmployee(emp, homeBranchBefore)
+      .catch(e => console.error('[commitments] move with employee failed:', e.message));
 
     // Keep the login in step: create it if the ת"ז only arrived now, and mirror
     // name / branch / title / active. Never blocks saving the employee card.
@@ -732,6 +758,7 @@ async function decideEmployeeChangeRequest(req, res, next) {
       const emp = await Employee.findById(cr.employee_id);
       if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
       const positionBefore = emp.position || '';
+      const homeBranchBefore = String(emp.branch_id || '');
       for (const ch of cr.changes) {
         if (ch.field === 'amuta_distribution') {
           emp.amuta_distribution = await resolveAmutaDistribution(ch.after, emp.branch_id);
@@ -740,6 +767,8 @@ async function decideEmployeeChangeRequest(req, res, next) {
         }
       }
       await emp.save(); // post-save hook re-links orphan punches
+      await moveCommitmentWithEmployee(emp, homeBranchBefore)
+        .catch(e => console.error('[commitments] move with employee failed:', e.message));
       // A manager's approved edit reaches the login the same way a direct one does.
       try {
         await userSync.syncEmployeeUser(emp, { positionChanged: (emp.position || '') !== positionBefore });

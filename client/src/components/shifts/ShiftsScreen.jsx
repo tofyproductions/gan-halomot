@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
-import { Box, Stack, Button, IconButton, Typography, Alert, CircularProgress, Chip, ToggleButton, ToggleButtonGroup } from '@mui/material';
+import { Box, Stack, Button, IconButton, Typography, Alert, CircularProgress, Chip, Paper, ToggleButton, ToggleButtonGroup } from '@mui/material';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import { toast } from 'react-toastify';
@@ -92,6 +92,41 @@ export default function ShiftsScreen() {
   // בוקר / צהריים — dims shifts outside the window; the cuts live in ShiftGrid
   // (morning starts before 13:00, afternoon means staying past 14:00).
   const [shiftView, setShiftView] = useState('all');
+
+  // The floating copy of the view pill: shown once its in-flow anchor scrolls
+  // off screen, so the switch is reachable from the bottom of a long board.
+  const viewPillAnchor = useRef(null);
+  const [pillFloating, setPillFloating] = useState(false);
+  useEffect(() => {
+    const el = viewPillAnchor.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return undefined;
+    const obs = new IntersectionObserver(([entry]) => setPillFloating(!entry.isIntersecting));
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [board]);
+
+  const viewPill = (
+    <Paper elevation={6} sx={{
+      display: 'inline-flex', borderRadius: 999, px: 0.5, py: 0.4,
+      border: '1px solid', borderColor: 'divider', bgcolor: 'background.paper',
+    }}>
+      <ToggleButtonGroup size="small" exclusive value={shiftView}
+        onChange={(_, v) => setShiftView(v || 'all')}
+        sx={{
+          '& .MuiToggleButton-root': {
+            border: 0, borderRadius: 999, px: 1.5, fontWeight: 700, whiteSpace: 'nowrap',
+          },
+          '& .MuiToggleButton-root.Mui-selected': {
+            bgcolor: 'primary.main', color: 'primary.contrastText',
+            '&:hover': { bgcolor: 'primary.dark' },
+          },
+        }}>
+        <ToggleButton value="all">הכל</ToggleButton>
+        <ToggleButton value="am">☀️ בוקר (עד 14:00)</ToggleButton>
+        <ToggleButton value="pm">🌙 צהריים (אחרי 14:00)</ToggleButton>
+      </ToggleButtonGroup>
+    </Paper>
+  );
 
   const [draft, setDraft] = useState(null);          // working entries while editing
   const [dlg, setDlg] = useState({ open: false, entry: null, defaults: null });
@@ -336,12 +371,16 @@ export default function ShiftsScreen() {
             </Box>
           )}
           <Box sx={{ flex: 1, minWidth: 0 }}>
-            <ToggleButtonGroup size="small" exclusive value={shiftView} sx={{ mb: 0.5 }}
-              onChange={(_, v) => setShiftView(v || 'all')}>
-              <ToggleButton value="all">הכל</ToggleButton>
-              <ToggleButton value="am">בוקר (עד 14:00)</ToggleButton>
-              <ToggleButton value="pm">צהריים (נשארות אחרי 14:00)</ToggleButton>
-            </ToggleButtonGroup>
+            {/* הבורר צף: מי שעובדת על משמרת בתחתית הדף מחליפה בוקר/צהריים
+                בלי לגלול חזרה למעלה. position:sticky נשבר כאן (ל-Layout יש
+                overflow:hidden), אז כשהעוגן יוצא מהמסך מופיע עותק קבוע
+                במרכז למעלה. */}
+            <Box ref={viewPillAnchor} sx={{ mb: 0.75, display: 'flex' }}>{viewPill}</Box>
+            {pillFloating && (
+              <Box sx={{ position: 'fixed', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 1200 }}>
+                {viewPill}
+              </Box>
+            )}
             <ShiftGrid
               dates={board.dates} rows={gridRows} closedDates={closed} warnings={board.warnings}
               switched={switched} editable={editable} alerts={alerts} actual={actual} shiftFilter={shiftView} ratios={board.ratios} pmCaps={board.pm_caps}
