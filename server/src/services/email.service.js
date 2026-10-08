@@ -123,7 +123,45 @@ async function postFollowingGasRedirect(url, payload, signal) {
   if (res.status < 300 || res.status >= 400) return res;
   const loc = res.headers.get('location');
   if (!loc) return res;
-  return fetch(loc, { redirect: 'follow', signal });
+
+  /**
+   * The 302 means doPost ALREADY RAN — the mail, if the script sent one, is
+   * gone. What waits at the Location is only the receipt, and Google's echo
+   * host serves that receipt unreliably to undici: the same URL that answers
+   * curl with the script's JSON intermittently hands node's fetch a Drive
+   * "הדף לא נמצא" page (measured 1-in-6 even with retries). Plain node https
+   * with curl's own headers read it 10-for-10, so the receipt is fetched with
+   * that; a retry here re-reads a page, never re-sends an email.
+   */
+  let last = null;
+  for (let i = 0; i < 3; i++) {
+    if (i) await new Promise(r => setTimeout(r, 700 * i));
+    last = await echoReceiptGet(loc);
+    if (last.ok && last.bodyText.trimStart().startsWith('{')) break;
+  }
+  // The same Response shape the callers already read: ok / status / text().
+  return { ok: last.ok, status: last.status, text: async () => last.bodyText };
+}
+
+/** GET via node's https core — see the receipt note above. Follows up to 4 hops. */
+function echoReceiptGet(url, depth = 0) {
+  const https = require('https');
+  return new Promise((resolve, reject) => {
+    if (depth > 4) return reject(new Error('too many redirects on GAS echo'));
+    https.get(url, { headers: { 'User-Agent': 'curl/8.7.1', Accept: '*/*' } }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        return resolve(echoReceiptGet(res.headers.location, depth + 1));
+      }
+      let data = '';
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => resolve({
+        ok: res.statusCode >= 200 && res.statusCode < 300,
+        status: res.statusCode,
+        bodyText: data,
+      }));
+    }).on('error', reject);
+  });
 }
 
 async function sendViaGAS({ to, cc, subject, html, text, attachments, fileAttachments }) {
