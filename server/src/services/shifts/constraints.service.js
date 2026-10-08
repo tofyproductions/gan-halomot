@@ -245,6 +245,83 @@ async function acceptInto(c, user, auto) {
   });
 }
 
+/**
+ * An approved constraint is APPLIED to the week, not just recorded.
+ *
+ * Approving used to change the constraint's status and nothing else: the
+ * employee stayed placed on the very day she was freed from, the board kept
+ * shouting "⚠ אילוץ", and the manager did the moving by hand — or forgot to,
+ * and found out at publish time. Now the approval does the work it promised
+ * (the office's ask, 08.10.2026):
+ *
+ *   day_off / sick_expected  her entries on that day are removed;
+ *   partial                  an entry inside the window is removed, one
+ *                            overlapping an edge is trimmed to it;
+ *   move_day                 her entries move to the target day (unless she
+ *                            is already placed there — then the old ones go);
+ *   swap                     her day passes to the colleague (and back the
+ *                            other way when the swap is mutual).
+ *
+ * Only `entries` — the manager's editing copy — is touched. `published`, the
+ * copy the staff read, changes only at the next "סגירת סידור", exactly like
+ * any other edit.
+ */
+async function applyAcceptedToWeek(c) {
+  const week = await ShiftWeek.findOne({ branch_id: c.branch_id, week_start: c.week_start });
+  if (!week) return { applied: false };
+  const me = String(c.employee_id);
+  const isMine = (e, date) => String(e.employee_id) === me && e.date === date;
+  let removed = 0; let moved = 0; let reassigned = 0; let trimmed = 0;
+  const removeWhere = (pred) => {
+    const before = week.entries.length;
+    week.entries = week.entries.filter(e => !pred(e));
+    removed += before - week.entries.length;
+  };
+
+  if (c.type === 'day_off' || c.type === 'sick_expected') {
+    removeWhere(e => isMine(e, c.date));
+  } else if (c.type === 'partial') {
+    const s = c.from_hhmm; const t = c.to_hhmm;
+    const keep = [];
+    for (const e of week.entries) {
+      const overlaps = isMine(e, c.date) && e.start_hhmm && e.end_hhmm && e.start_hhmm < t && s < e.end_hhmm;
+      if (!overlaps) { keep.push(e); continue; }
+      if (e.start_hhmm >= s && e.end_hhmm <= t) { removed += 1; continue; } // swallowed whole
+      if (e.start_hhmm < s) e.end_hhmm = s; else e.start_hhmm = t;         // leaves early / arrives late
+      trimmed += 1; keep.push(e);
+    }
+    week.entries = keep;
+  } else if (c.type === 'move_day' && c.target_date) {
+    if (week.entries.some(e => isMine(e, c.target_date))) {
+      removeWhere(e => isMine(e, c.date)); // already placed there — the old day just goes
+    } else {
+      for (const e of week.entries) if (isMine(e, c.date)) { e.date = c.target_date; moved += 1; }
+    }
+  } else if (c.type === 'swap' && c.colleague_id) {
+    const col = String(c.colleague_id);
+    const colDoc = await Employee.findById(col).select('full_name').lean();
+    const giveTo = (e, id, name) => { e.employee_id = id; e.employee_name = name; reassigned += 1; };
+    if (week.entries.some(e => String(e.employee_id) === col && e.date === c.date)) {
+      removeWhere(e => isMine(e, c.date)); // she is already there that day — mine just goes
+    } else {
+      for (const e of week.entries) if (isMine(e, c.date)) giveTo(e, c.colleague_id, colDoc?.full_name || '');
+    }
+    if (c.swap_mode === 'mutual' && c.target_date) {
+      if (week.entries.some(e => isMine(e, c.target_date))) {
+        removeWhere(e => String(e.employee_id) === col && e.date === c.target_date);
+      } else {
+        for (const e of week.entries) {
+          if (String(e.employee_id) === col && e.date === c.target_date) giveTo(e, c.employee_id, c.employee_name);
+        }
+      }
+    }
+  }
+
+  const changed = removed + moved + reassigned + trimmed;
+  if (changed) await week.save();
+  return { applied: changed > 0, removed, moved, reassigned, trimmed };
+}
+
 /** A swap's other side hears the manager's decision too. */
 async function notifySwapColleague(c, accepted) {
   if (c.type !== 'swap' || !c.colleague_id) return;
@@ -275,8 +352,10 @@ async function decide({ user, id, accept, reason, confirmFar, now = new Date() }
   if (c.status !== 'open') throw new ShiftError(409, 'בהחלפה פתוחה לכל הסניף יש לבחור מתנדבת');
   if (isFarFuture(c.date, now) && !confirmFar) throw new ShiftError(409, 'אילוץ לשבוע רחוק — יש לאשר שהפעולה סופית', { needs_confirm: true });
   await acceptInto(c, user, false);
+  const applied = await applyAcceptedToWeek(c)
+    .catch(err => { console.error('[constraints] apply to week failed:', err.message); return { applied: false }; });
   await notifySwapColleague(c, true);
-  return withoutFileBytes(c);
+  return { ...withoutFileBytes(c), applied };
 }
 
 async function approveBroadcast({ user, id }) {
@@ -301,11 +380,13 @@ async function pickVolunteer({ user, id, employeeId }) {
   if (!await Employee.exists({ _id: employeeId, branch_id: c.branch_id, is_active: true })) throw new ShiftError(400, 'העובדת לא פעילה בסניף');
   c.colleague_id = employeeId;
   await acceptInto(c, user, false);
+  const applied = await applyAcceptedToWeek(c)
+    .catch(err => { console.error('[constraints] apply to week failed:', err.message); return { applied: false }; });
   await notifyEmployee(employeeId, {
     type: 'swap_picked', ref_collection: 'ShiftConstraint', ref_id: c._id,
     title: 'נבחרת להחלפה', body: `ב-${label(c.date)} במקום ${c.employee_name}`, url: '/my-shifts',
   });
-  return withoutFileBytes(c);
+  return { ...withoutFileBytes(c), applied };
 }
 
 /** The week's live constraints for the board, volunteers spelled out for the manager. */

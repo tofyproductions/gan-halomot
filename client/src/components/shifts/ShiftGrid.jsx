@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Box, Paper, Table, TableHead, TableBody, TableRow, TableCell, Typography, Tooltip, Chip } from '@mui/material';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { HEB_DAYS, fmtDate, employeeHue, toMin } from './shiftRows';
+import { describe, conflictsEntry } from './constraintLabels';
 
 /** Her chip's colors — one stable pastel per employee, readable in both themes. */
 const chipColors = (employeeId) => {
@@ -227,7 +228,16 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                       const mine = highlightEmployeeId && String(e.employee_id) === String(highlightEmployeeId);
                       const draggable = droppable && !!(e._id || e.tmp);
                       const colors = chipColors(e.employee_id);
-                      const entryAlerts = row.area !== 'away' && alerts ? alerts.get(`${e.employee_id}|${e.date}`) : null;
+                      // Only constraints THIS entry actually stands in the way of —
+                      // an applied/irrelevant one (approved 14:00–16:00 window vs a
+                      // morning shift) must not keep the red outline on.
+                      const entryAlerts = (() => {
+                        if (row.area === 'away' || !alerts) return null;
+                        const list = (alerts.get(`${e.employee_id}|${e.date}`) || [])
+                          .filter(c => conflictsEntry(c, e))
+                          .map(c => c.status === 'accepted' ? `${describe(c)} — אושר, יש לעדכן את השיבוץ` : describe(c));
+                        return list.length ? list : null;
+                      })();
                       const completes = completions.get(`${row.key}|${d}|${e.employee_id}`);
                       return (
                         <Box

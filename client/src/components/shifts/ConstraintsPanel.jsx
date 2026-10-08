@@ -3,10 +3,21 @@ import { Alert, Stack, Button, TextField, Typography, Chip, Link, Accordion, Acc
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
-import { STATUS_LABEL, describe, openConstraintFile } from './constraintLabels';
+import { STATUS_LABEL, describe, isDone, openConstraintFile } from './constraintLabels';
+
+/** "הוסרו 2 שיבוצים, שיבוץ אחד קוצר" — what the approval just did to the board. */
+function appliedText(a) {
+  if (!a || !a.applied) return '';
+  const bits = [];
+  if (a.removed) bits.push(`הוסרו ${a.removed} שיבוצים`);
+  if (a.moved) bits.push(`הועברו ${a.moved} ליום החדש`);
+  if (a.reassigned) bits.push(`הועברו ${a.reassigned} לעובדת המחליפה`);
+  if (a.trimmed) bits.push(`קוצרו ${a.trimmed} לשעות המותרות`);
+  return bits.join(', ');
+}
 
 /** The week's constraints that need the manager, with the actions each one allows. */
-export default function ConstraintsPanel({ constraints, canEdit, onChanged }) {
+export default function ConstraintsPanel({ constraints, canEdit, onChanged, entries }) {
   const [reason, setReason] = useState({});
   const [busy, setBusy] = useState({});
   const list = constraints || [];
@@ -17,13 +28,18 @@ export default function ConstraintsPanel({ constraints, canEdit, onChanged }) {
   const post = async (c, url, body, ok) => {
     setBusy(b => ({ ...b, [c._id]: true }));
     try {
-      try { await api.post(url, body); } catch (err) {
+      let data;
+      try { ({ data } = await api.post(url, body)); } catch (err) {
         // A far-off week: the server asks for an explicit "this is final" first.
         if (err.response?.status !== 409 || !err.response?.data?.needs_confirm) throw err;
         if (!window.confirm('הפעולה סופית — העובדת תקבל הודעה ולא יהיה אפשר לשבץ אותה ביום הזה. לאשר?')) return;
-        await api.post(url, { ...body, confirm_far: true });
+        ({ data } = await api.post(url, { ...body, confirm_far: true }));
       }
-      toast.success(ok); onChanged();
+      // Say what the approval DID, not just that it happened — the board
+      // behind this toast has already changed.
+      const did = appliedText(data?.applied || data?.constraint?.applied);
+      toast.success(did ? `${ok} — ${did}. העובדת קיבלה הודעה.` : ok);
+      onChanged();
     } catch (err) { toast.error(err.response?.data?.error || 'הפעולה נכשלה'); }
     finally { setBusy(b => ({ ...b, [c._id]: false })); }
   };
@@ -53,14 +69,36 @@ export default function ConstraintsPanel({ constraints, canEdit, onChanged }) {
           )}
         </Alert>
       ))}
-      {accepted.length > 0 && (
-        <Accordion disableGutters>
-          <AccordionSummary expandIcon={<ExpandMoreIcon />}><Typography>אילוצים שהתקבלו השבוע ({accepted.length})</Typography></AccordionSummary>
-          <AccordionDetails>
-            {accepted.map(c => <Typography key={c._id} variant="body2">{c.employee_name} — {describe(c)}{c.decided_auto ? ' (אוטומטית)' : ''}</Typography>)}
-          </AccordionDetails>
-        </Accordion>
-      )}
+      {accepted.length > 0 && (() => {
+        // Approved is not the same as DONE: each one is checked against the
+        // board as it stands, so a leftover placement cannot hide in here.
+        const rows = accepted.map(c => ({ c, done: isDone(c, entries) }));
+        const undone = rows.filter(r => r.done === false).length;
+        return (
+          <Accordion disableGutters defaultExpanded={undone > 0}>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Typography>אילוצים שאושרו השבוע ({accepted.length})</Typography>
+                {undone > 0
+                  ? <Chip size="small" color="error" label={`${undone} עוד לא בוצעו בסידור`} />
+                  : <Chip size="small" color="success" label="כולם בוצעו בסידור ✓" />}
+              </Stack>
+            </AccordionSummary>
+            <AccordionDetails>
+              {rows.map(({ c, done }) => (
+                <Stack key={c._id} direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                  {done === false
+                    ? <Chip size="small" color="error" label="לא בוצע — עדיין משובצת" />
+                    : done === true
+                      ? <Chip size="small" color="success" label="בוצע ✓" />
+                      : <Chip size="small" variant="outlined" label="לידיעה" />}
+                  <Typography variant="body2">{c.employee_name} — {describe(c)}{c.decided_auto ? ' (אוטומטית)' : ''}</Typography>
+                </Stack>
+              ))}
+            </AccordionDetails>
+          </Accordion>
+        );
+      })()}
     </Stack>
   );
 }

@@ -175,6 +175,39 @@ async function throws(fn, status, message, label) {
   eq(board.map(b => b.type).sort(), ['swap'], 'בלוח: רק אילוצים פעילים או מאושרים של השבוע');
   eq(board[0].volunteers.map(v => [v.full_name, v.free_that_day]), [['רות', false], ['נועה', true]], 'המנהלת רואה מתנדבות ומי פנויה');
 
+  console.log('\nאישור מיישם את האילוץ בסידור');
+  const W = '2026-10-18';
+  const mkEntry = (emp, date, start = '07:00', end = '16:30') => ({
+    employee_id: emp._id, employee_name: emp.full_name, date, area: 'floater', start_hhmm: start, end_hhmm: end,
+  });
+  const wk = await M.ShiftWeek.create({
+    branch_id: branch._id, week_start: W,
+    entries: [mkEntry(dana, '2026-10-19'), mkEntry(dana, '2026-10-20'), mkEntry(dana, '2026-10-21')],
+  });
+  const entriesNow = async () => (await M.ShiftWeek.findById(wk._id).lean()).entries
+    .map(e => [String(e.employee_id) === String(dana._id) ? 'דנה' : 'רות', e.date, `${e.start_hhmm}-${e.end_hhmm}`]).sort();
+
+  const dayOff = await svc.createConstraint({ employee: dana, body: { type: 'day_off', date: '2026-10-20', details: 'חתונה' }, files: [], now: NOW });
+  const dayOffAcc = await svc.decide({ user: manager, id: String(dayOff._id), accept: true, confirmFar: true, now: NOW });
+  eq([dayOffAcc.applied.applied, dayOffAcc.applied.removed], [true, 1], 'יום חופש אושר — השיבוץ של אותו יום הוסר');
+  eq((await entriesNow()).some(e => e[1] === '2026-10-20'), false, 'ובסידור אין יותר שיבוץ ב-20.10');
+
+  const move = await svc.createConstraint({ employee: dana, body: { type: 'move_day', date: '2026-10-21', target_date: '2026-10-22' }, files: [], now: NOW });
+  const moveAcc = await svc.decide({ user: manager, id: String(move._id), accept: true, confirmFar: true, now: NOW });
+  eq(moveAcc.applied.moved, 1, 'העברת יום אושרה — השיבוץ עבר ליום החדש');
+  eq((await entriesNow()).filter(e => e[1] === '2026-10-22').length, 1, 'השיבוץ יושב על 22.10');
+
+  const partial = await svc.createConstraint({ employee: dana, body: { type: 'partial', date: '2026-10-22', from_hhmm: '14:00', to_hhmm: '16:00', details: 'רופא' }, files: [], now: NOW });
+  const partialAcc = await svc.decide({ user: manager, id: String(partial._id), accept: true, confirmFar: true, now: NOW });
+  eq(partialAcc.applied.trimmed, 1, 'היעדרות זמנית בסוף היום — השיבוץ קוצר');
+  eq((await entriesNow()).find(e => e[1] === '2026-10-22')[2], '07:00-14:00', 'השעות נחתכו לשעת תחילת ההיעדרות');
+
+  const swapApply = await svc.createConstraint({ employee: dana, body: { type: 'swap', swap_mode: 'handover', date: '2026-10-19', colleague_id: String(ruth._id) }, files: [], now: NOW });
+  await svc.respondColleague({ employee: ruth, id: String(swapApply._id), accept: true, now: NOW });
+  const swapAcc = await svc.decide({ user: manager, id: String(swapApply._id), accept: true, confirmFar: true, now: NOW });
+  eq(swapAcc.applied.reassigned, 1, 'מסירת משמרת אושרה — השיבוץ עבר למחליפה');
+  eq((await entriesNow()).find(e => e[1] === '2026-10-19')[0], 'רות', 'ובסידור 19.10 רשום על רות');
+
   await new Promise(r => setTimeout(r, 300));
   await mongoose.disconnect();
   await mongod.stop();

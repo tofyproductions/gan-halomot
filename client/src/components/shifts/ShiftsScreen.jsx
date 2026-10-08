@@ -22,7 +22,6 @@ import FutureConstraintsDialog from './FutureConstraintsDialog';
 import CrossBranchPanel from './CrossBranchPanel';
 import RateRequestDialog from './RateRequestDialog';
 import AttendanceReportDialog from './AttendanceReportDialog';
-import { describe } from './constraintLabels';
 import { exportPdf, exportPng } from './shiftExport';
 import { buildRows, buildAwayRow, switchedSet, fmtDate, rowKeyOf } from './shiftRows';
 
@@ -154,11 +153,14 @@ export default function ShiftsScreen() {
   const gridRows = useMemo(() => [...rows, ...(board?.away?.length ? [buildAwayRow(board.away)] : [])], [rows, board]);
   const switched = useMemo(() => switchedSet(shown), [shown]);
   const alerts = useMemo(() => {
+    // Constraint OBJECTS, not text: the grid decides per entry whether one
+    // actually stands in its way (a morning shift does not conflict with an
+    // approved 14:00–16:00 window), so an applied constraint stops nagging.
     const m = new Map();
     for (const c of board?.constraints || []) {
       if (!['open', 'accepted', 'pending_broadcast', 'broadcast'].includes(c.status)) continue;
       const key = `${c.employee_id}|${c.date}`;
-      m.set(key, [...(m.get(key) || []), describe(c)]);
+      m.set(key, [...(m.get(key) || []), c]);
     }
     return m;
   }, [board]);
@@ -344,7 +346,7 @@ export default function ShiftsScreen() {
       )}
       {board?.can_edit && <EditRequestsPanel requests={board.edit_requests} onDecided={load} />}
       {board && <CrossBranchPanel board={board} onChanged={load} />}
-      {board && <ConstraintsPanel constraints={board.constraints} canEdit={!!board.can_edit} onChanged={load} />}
+      {board && <ConstraintsPanel constraints={board.constraints} canEdit={!!board.can_edit} onChanged={load} entries={shown} />}
       {board && <OvertimeStrip employees={board.employees} entries={shown} dates={board.dates} />}
       {board && <FillSuggestions board={board} entries={shown} closed={closed} onAdd={addSuggested} />}
       {board?.can_edit && (() => {
