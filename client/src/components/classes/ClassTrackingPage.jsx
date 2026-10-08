@@ -665,10 +665,33 @@ export default function ClassTrackingPage() {
   const catOf = (p) => p.classroom_categories?.length
     ? p.classroom_categories.join(' + ') : (p.classroom_category || '');
 
-  // The board reads top-to-bottom like the week: Sunday's classes first.
-  const sorted = [...programs].sort((a, b) =>
+  /**
+   * The board is read group-first — "מה יש לבוגרים החודש" — so the rows sit
+   * under a heading per קבוצה. A class that takes two groups together
+   * ("תינוקייה + צעירים") is one meeting, not two: it gets a heading of its
+   * own rather than a duplicate row under each group. Inside a group, the
+   * week's order: Sunday's classes first.
+   */
+  const byDay = (a, b) =>
     ((a.default_day ?? 9) - (b.default_day ?? 9)) ||
-    String(a.default_time || '').localeCompare(String(b.default_time || '')));
+    String(a.default_time || '').localeCompare(String(b.default_time || ''));
+  const groups = (() => {
+    const m = new Map();
+    for (const p of programs) {
+      const label = catOf(p) || 'ללא קבוצה';
+      if (!m.has(label)) m.set(label, []);
+      m.get(label).push(p);
+    }
+    // Section order follows the gan's own order of groups; a combined
+    // section sits right after the first group it contains.
+    const rank = (label) => {
+      const i = CATEGORIES.indexOf(label.split(' + ')[0]);
+      return (i < 0 ? 99 : i) + (label.includes(' + ') ? 0.5 : 0);
+    };
+    return [...m.entries()]
+      .sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0]))
+      .map(([label, list]) => ({ label, list: [...list].sort(byDay) }));
+  })();
 
   if (isAllBranches) {
     return <Alert severity="info" sx={{ m: 2 }}>בחר/י סניף ספציפי (למעלה) כדי לנהל מעקב חוגים.</Alert>;
@@ -750,7 +773,13 @@ export default function ClassTrackingPage() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {sorted.map(p => {
+                  {groups.map(({ label, list: progs }) => [
+                    <TableRow key={`head-${label}`}>
+                      <TableCell colSpan={maxCols + 3} sx={{ bgcolor: 'action.selected', py: 0.75 }}>
+                        <Typography sx={{ fontWeight: 800 }}>{label}</Typography>
+                      </TableCell>
+                    </TableRow>,
+                    ...progs.map(p => {
                     const pid = String(p._id);
                     const list = cellsByProgram.get(pid) || [];
                     const provider = p.provider_id && typeof p.provider_id === 'object' ? p.provider_id : null;
@@ -760,7 +789,6 @@ export default function ClassTrackingPage() {
                       provider && provider.name !== p.name ? provider.name : null,
                       p.instructor_name || null,
                       p.default_day != null ? `יום ${DAY_NAMES[p.default_day]}${p.default_time ? ` ${p.default_time}` : ''}` : (p.default_time || null),
-                      catOf(p) || null,
                     ].filter(Boolean).join(' · ');
                     return [
                       <TableRow key={pid} hover sx={{ cursor: 'pointer', '& td': { borderBottom: isOpen ? 'none' : undefined } }}
@@ -821,7 +849,8 @@ export default function ClassTrackingPage() {
                         </TableCell>
                       </TableRow>,
                     ];
-                  })}
+                  }),
+                  ])}
                 </TableBody>
               </Table>
             </Paper>
