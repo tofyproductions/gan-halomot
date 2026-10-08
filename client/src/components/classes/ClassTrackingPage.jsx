@@ -1,9 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Paper, Typography, Stack, Button, TextField, MenuItem, IconButton,
-  Chip, Table, TableHead, TableBody, TableRow, TableCell, Accordion,
-  AccordionSummary, AccordionDetails, Dialog, DialogTitle, DialogContent,
-  DialogActions, Tooltip, Divider, Alert, CircularProgress,
+  Chip, Table, TableHead, TableBody, TableRow, TableCell, Tabs, Tab, Badge,
+  Menu, Collapse, Tooltip, Divider, Alert, CircularProgress,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import AddIcon from '@mui/icons-material/Add';
@@ -319,14 +318,16 @@ function PaymentSummary({ data, payments, accounting, branch, month, onPaymentsC
  * opens it.
  */
 // ---------- One program's monthly sessions ----------
-function ProgramSessions({ program, month, vatMode, onChanged }) {
+function ProgramSessions({ program, month, vatMode, onChanged, version }) {
   const confirm = useConfirm();
   const [sessions, setSessions] = useState([]);
   const [newDate, setNewDate] = useState('');
   const load = useCallback(() => {
     api.get('/classes/sessions', { params: { program_id: program._id, month } })
       .then(r => setSessions(r.data.sessions || [])).catch(() => setSessions([]));
-  }, [program._id, month]);
+    // version: the page's refresh counter — a mark made on the board above
+    // must show in this open detail table too.
+  }, [program._id, month, version]);
   useEffect(() => { load(); }, [load]);
 
   const [addingDate, setAddingDate] = useState(false);
@@ -406,24 +407,25 @@ function ProgramSessions({ program, month, vatMode, onChanged }) {
 export default function ClassTrackingPage() {
   const { selectedBranch, selectedBranchName, isAllBranches } = useBranch();
   const { user } = useAuth();
-  // Who may touch the money: the paid toggle, the invoice, iCount. A branch
-  // manager reads the same box but the buttons are not there.
+  // Who may touch the money: the paid toggle, the invoice, iCount — and the
+  // whole תשלומים tab, which is simply not rendered for anyone else.
   const accounting = ['system_admin', 'accountant'].includes(user?.role);
   const confirm = useConfirm();
   const [month, setMonth] = useState(thisMonth());
+  const [tab, setTab] = useState('track');
   const [programs, setPrograms] = useState([]);
   const [loading, setLoading] = useState(false);
   const [providersOpen, setProvidersOpen] = useState(false);
   // Which provider the one screen opens on. '' = the list, 'new' = the add form.
   const [providerFocus, setProviderFocus] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
+  // One switch for the whole page: programs, sessions, summary and payments
+  // all answer to it, so a mark made anywhere shows everywhere at once.
+  const refreshAll = useCallback(() => setRefreshKey(k => k + 1), []);
 
   const load = useCallback(() => {
     if (isAllBranches || !selectedBranch) { setPrograms([]); return; }
     setLoading(true);
-    // Providers are no longer fetched here: the one screen that edits them
-    // loads its own list. Two components holding the same list is two lists
-    // that drift.
     api.get('/classes/programs', { params: { branch: selectedBranch, active: 'true' } })
       .then(pr => setPrograms(pr.data.programs || []))
       .catch(() => {}).finally(() => setLoading(false));
@@ -432,8 +434,8 @@ export default function ClassTrackingPage() {
 
   /**
    * The month's payment summary, fetched once for the whole page: the
-   * accountant's table at the top and the total on each provider's row are
-   * the same figures, so they must come from the same answer.
+   * accountant's table and the per-row figure on the board are the same
+   * numbers, so they must come from the same answer.
    */
   const [summary, setSummary] = useState(null);
   const loadSummary = useCallback(() => {
@@ -443,8 +445,6 @@ export default function ClassTrackingPage() {
   }, [selectedBranch, isAllBranches, month]);
   useEffect(() => { loadSummary(); }, [loadSummary, refreshKey]);
 
-  // The accounting state beside the owed figures: paid or not, which invoice,
-  // and whether it already reached iCount.
   const [payments, setPayments] = useState([]);
   const loadPayments = useCallback(() => {
     // Accounting's data: the server answers 403 to anyone else, so don't ask.
@@ -455,44 +455,81 @@ export default function ClassTrackingPage() {
   useEffect(() => { loadPayments(); }, [loadPayments, refreshKey]);
 
   /**
-   * One row per provider, not per program.
-   *
-   * ליטף with two Wednesday groups and תנועלולה with צעירים ובוגרים used to
-   * be four rows that looked like four different arrangements. The invoice is
-   * per provider — the summary above already says so — so the list now says
-   * the same: one row with the month's total, and each group laid out inside.
+   * Every session of the month in one fetch — the board needs them all at
+   * once to lay a program's dates side by side. The per-program fetch still
+   * lives in ProgramSessions for the opened row's detail table.
    */
-  const providerGroups = (() => {
+  const [sessions, setSessions] = useState([]);
+  const loadSessions = useCallback(() => {
+    if (isAllBranches || !selectedBranch) { setSessions([]); return; }
+    api.get('/classes/sessions', { params: { branch: selectedBranch, month } })
+      .then(r => setSessions(r.data.sessions || [])).catch(() => setSessions([]));
+  }, [selectedBranch, isAllBranches, month]);
+  useEffect(() => { loadSessions(); }, [loadSessions, refreshKey]);
+
+  const today = thisMonth() === month
+    ? new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' })
+    : (month < thisMonth() ? '9999-99-99' : '0000-00-00');
+
+  // program_id -> its month of sessions, already date-sorted by the server.
+  const sessionsOf = (() => {
     const m = new Map();
-    for (const p of programs) {
-      const key = String(p.provider_id?._id || p.provider_id || `name:${p.instructor_name || p.name}`);
-      if (!m.has(key)) {
-        m.set(key, {
-          key,
-          provider: p.provider_id && typeof p.provider_id === 'object' ? p.provider_id : null,
-          programs: [],
-        });
-      }
-      m.get(key).programs.push(p);
+    for (const s of sessions) {
+      const pid = String(s.program_id?._id || s.program_id);
+      if (!m.has(pid)) m.set(pid, []);
+      m.get(pid).push(s);
     }
-    return [...m.values()];
+    return m;
   })();
 
-  // The provider's monthly line from the summary — total incl. VAT, retainer info.
-  const summaryOf = (g) => (summary?.providers || []).find(sp =>
-    g.provider
-      ? (sp.provider_id && String(sp.provider_id) === String(g.provider._id))
-      : (!sp.provider_id && sp.provider_name === (g.programs[0]?.instructor_name || 'ללא ספק'))
-  ) || null;
+  // A meeting whose day has passed and nobody said if the instructor came.
+  const pending = sessions.filter(s => s.status === 'scheduled' && s.date <= today);
+
+  const maxCols = Math.max(1, ...programs.map(p => (sessionsOf.get(String(p._id)) || []).length));
+
+  // The program's month figure out of the same summary the accountant reads.
+  const amountOf = (pid) => {
+    for (const pr of summary?.providers || []) {
+      for (const g of pr.programs || []) {
+        if (String(g.program_id) === String(pid)) return g.amount || 0;
+      }
+    }
+    return 0;
+  };
+
+  // The red count on the תשלומים tab — same rule as inside the box.
+  const unpaidCount = (accounting && summary)
+    ? summary.providers.filter(p => {
+        if (!(p.total > 0)) return false;
+        const key = p.provider_id ? String(p.provider_id) : `name:${p.provider_name}`;
+        return !(payments || []).find(r => r.provider_key === key)?.paid;
+      }).length
+    : 0;
 
   /**
-   * Write this month's meetings from each class's fixed day.
-   *
-   * A nightly job does the same thing, so this button is for impatience and
-   * for the month somebody sets up on the 3rd — not the only way it happens.
-   * Pressing it twice is harmless: a date that already has a session is left
-   * exactly as it is, answered or not.
+   * One mark menu for the whole board: a dot on the grid and a chip on the
+   * waiting strip both open it, anchored where the click was.
    */
+  const [menu, setMenu] = useState(null); // { anchorEl, session }
+  const closeMenu = () => setMenu(null);
+  const mark = (s, arrived) => {
+    closeMenu();
+    api.post(`/classes/sessions/${s._id}/answer`, { arrived, reason: '' })
+      .then(() => refreshAll())
+      .catch(err => toast.error(apiError(err, 'הסימון נכשל')));
+  };
+  const delSession = async (s) => {
+    closeMenu();
+    if (!(await confirm({ title: 'מחיקת מפגש', message: `למחוק את המפגש ${s.date}?` }))) return;
+    api.delete(`/classes/sessions/${s._id}`)
+      .then(() => refreshAll())
+      .catch(err => toast.error(apiError(err, 'המחיקה נכשלה')));
+  };
+
+  // Which program rows are opened to their full detail table.
+  const [openRows, setOpenRows] = useState({});
+  const toggleRow = (pid) => setOpenRows(o => ({ ...o, [pid]: !o[pid] }));
+
   const [filling, setFilling] = useState(false);
   const fillMonth = async () => {
     /**
@@ -513,12 +550,11 @@ export default function ClassTrackingPage() {
         toast.success(created
           ? `נוצרו ${created} מפגשים`
           : `הכול כבר קיים${skipped ? ` (${skipped} מפגשים)` : ''}`);
-        // "ראש השנה — 13.9" rather than a gap that looks like a mistake.
         if (closed.length) {
           const names = [...new Set(closed.map(c => c.name))].join(', ');
           toast.info(`דולגו ${closed.length} ימים שהגן סגור: ${names}`);
         }
-        setRefreshKey(k => k + 1);
+        refreshAll();
       })
       .catch(err => toast.error(apiError(err, 'המילוי נכשל')))
       .finally(() => setFilling(false));
@@ -526,8 +562,50 @@ export default function ClassTrackingPage() {
 
   const delProgram = async (p) => {
     if (!(await confirm({ title: 'הסרת חוג', message: `להסיר את "${p.name}"?` }))) return;
-    api.delete(`/classes/programs/${p._id}`).then(() => load()).catch(err => toast.error(apiError(err, 'המחיקה נכשלה')));
+    api.delete(`/classes/programs/${p._id}`).then(() => refreshAll()).catch(err => toast.error(apiError(err, 'המחיקה נכשלה')));
   };
+
+  const dayMonth = (d) => `${Number(d.slice(8, 10))}.${Number(d.slice(5, 7))}`;
+
+  /**
+   * One board cell. The glyphs carry the month at a glance: ✓ came, ✗ did
+   * not, ◐ partial, ← postponed, ? waiting for someone to say. A future date
+   * stays a quiet gray date — nothing to do there yet.
+   */
+  const cellFor = (s) => {
+    const dm = dayMonth(s.date);
+    const open = (e) => { e.stopPropagation(); setMenu({ anchorEl: e.currentTarget, session: s }); };
+    const glyph = (char, color, title, bold = false) => (
+      <Tooltip title={title}>
+        <Box component="span" onClick={open} sx={{
+          cursor: 'pointer', fontWeight: bold ? 800 : 700, fontSize: 16,
+          color, px: 0.75, py: 0.25, borderRadius: 1, '&:hover': { bgcolor: 'action.hover' },
+        }}>{char}</Box>
+      </Tooltip>
+    );
+    switch (s.status) {
+      case 'occurred':
+        return glyph('✓', 'success.main', `התקיים · ${dm}${s.answered_by_lead && !s.manager_confirmed ? ' · ממתין לאישור מנהל' : ''}`);
+      case 'no_show':
+        return glyph('✗', 'error.main', `לא הגיע · ${dm}`);
+      case 'partial':
+        return glyph('◐', 'warning.main', `חלקית · ${dm}`);
+      case 'postponed':
+        return glyph('←', 'warning.main', `נדחה · ${dm}${s.postponed_to_date ? ` → ${dayMonth(s.postponed_to_date)}` : ''}`);
+      default:
+        return s.date <= today
+          ? glyph('?', 'warning.main', `ממתין לסימון · ${dm} — לחיצה לסימון`, true)
+          : glyph(dm, 'text.disabled', `מתוכנן · ${dm}`);
+    }
+  };
+
+  const catOf = (p) => p.classroom_categories?.length
+    ? p.classroom_categories.join(' + ') : (p.classroom_category || '');
+
+  // The board reads top-to-bottom like the week: Sunday's classes first.
+  const sorted = [...programs].sort((a, b) =>
+    ((a.default_day ?? 9) - (b.default_day ?? 9)) ||
+    String(a.default_time || '').localeCompare(String(b.default_time || '')));
 
   if (isAllBranches) {
     return <Alert severity="info" sx={{ m: 2 }}>בחר/י סניף ספציפי (למעלה) כדי לנהל מעקב חוגים.</Alert>;
@@ -535,7 +613,7 @@ export default function ClassTrackingPage() {
 
   return (
     <Box dir="rtl">
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} sx={{ mb: 2 }}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} sx={{ mb: 1.5 }}>
         <Typography variant="h5" sx={{ fontWeight: 700 }}>מעקב חוגים — {selectedBranchName}</Typography>
         <Box sx={{ flex: 1 }} />
         <TextField size="small" type="month" label="חודש" value={month} onChange={e => setMonth(e.target.value)} InputLabelProps={{ shrink: true }} />
@@ -553,105 +631,180 @@ export default function ClassTrackingPage() {
         </Button>
       </Stack>
 
-      <PaymentSummary data={summary} payments={payments} accounting={accounting}
-        branch={selectedBranch} month={month} onPaymentsChanged={loadPayments} />
-
-      {loading ? (
-        <Box sx={{ textAlign: 'center', py: 4 }}><CircularProgress /></Box>
-      ) : programs.length === 0 ? (
-        <Alert severity="info">
-          אין חוגים בסניף זה עדיין. לחצ/י "חוג חדש" — מגדירים את הספק ואת כל הלוח
-          השבועי שלו/ה במסך אחד, כולל תעריף שונה לכל סניף.
-        </Alert>
-      ) : (
-        providerGroups.map(g => {
-          const vatMode = g.provider?.vat_mode || 'exempt';
-          const ps = summaryOf(g);
-          const single = g.programs.length === 1;
-          const first = g.programs[0];
-          const catOf = (p) => p.classroom_categories?.length
-            ? p.classroom_categories.join(' + ') : (p.classroom_category || '');
-          return (
-            <Accordion key={g.key} defaultExpanded={providerGroups.length <= 3} sx={{ mb: 1 }}>
-              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ width: '100%' }}>
-                  {single && <ColorDot color={progColor(first)} />}
-                  <Typography sx={{ fontWeight: 700 }}>{g.provider?.name || first.name}</Typography>
-                  {g.provider && (
-                    <Chip size="small" variant="outlined"
-                      color={vatMode === 'registered' ? 'warning' : 'default'}
-                      label={vatMode === 'registered' ? 'עוסק מורשה + מע״מ' : 'עוסק פטור'} />
-                  )}
-                  {single ? (
-                    <>
-                      {first.instructor_name && <Chip size="small" label={first.instructor_name} />}
-                      {/* "תינוקייה + צעירים" when they sit together — one meeting. */}
-                      {catOf(first) && <Chip size="small" sx={boldChip(progColor(first))} label={catOf(first)} />}
-                      {first.default_day != null && <Chip size="small" sx={boldChip(progColor(first))}
-                        label={`יום ${DAY_NAMES[first.default_day]}`} />}
-                      {first.default_time && <Chip size="small" sx={boldChip(progColor(first))} label={first.default_time} />}
-                      <Chip size="small" variant="outlined" label={rateLabel(first.default_rate, vatMode)} />
-                    </>
-                  ) : (
-                    <>
-                      <Chip size="small" variant="outlined" label={`${g.programs.length} קבוצות`} />
-                      {/* One dot per group — the same colors waiting inside. */}
-                      {g.programs.map(p => <ColorDot key={p._id} color={progColor(p)} />)}
-                    </>
-                  )}
-                  <Box sx={{ flex: 1 }} />
-                  {/* The month's figure, same one as the accountant's table above. */}
-                  <Chip size="small" color={ps?.total ? 'success' : 'default'}
-                    variant={ps?.total ? 'filled' : 'outlined'} sx={{ fontWeight: 700 }}
-                    label={`לתשלום החודש: ${ils(ps?.total || 0)}`} />
-                  <Tooltip title="עריכה במסך הספק — שם, סניפים, ימים ותעריפים, הכול יחד">
-                    <IconButton size="small" onClick={(e) => {
-                      e.stopPropagation();
-                      setProviderFocus(String(g.provider?._id || ''));
-                      setProvidersOpen(true);
-                    }}><EditIcon fontSize="small" /></IconButton>
-                  </Tooltip>
-                  {single && (
-                    <IconButton size="small" color="error"
-                      onClick={(e) => { e.stopPropagation(); delProgram(first); }}>
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  )}
-                </Stack>
-              </AccordionSummary>
-              <AccordionDetails>
-                {g.programs.map((p, i) => (
-                  <Box key={p._id}
-                    sx={single ? {} : { borderInlineStart: `4px solid ${progColor(p)}`, paddingInlineStart: 1.5, mt: i > 0 ? 2 : 0 }}>
-                    {!single && (
-                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 1 }}>
-                        <ColorDot color={progColor(p)} />
-                        <Typography sx={{ fontWeight: 600 }}>{p.name}</Typography>
-                        {p.instructor_name && <Chip size="small" label={p.instructor_name} />}
-                        {catOf(p) && <Chip size="small" sx={boldChip(progColor(p))} label={catOf(p)} />}
-                        {p.default_day != null && <Chip size="small" sx={boldChip(progColor(p))}
-                          label={`יום ${DAY_NAMES[p.default_day]}`} />}
-                        {p.default_time && <Chip size="small" sx={boldChip(progColor(p))} label={p.default_time} />}
-                        <Chip size="small" variant="outlined" label={rateLabel(p.default_rate, vatMode)} />
-                        <Box sx={{ flex: 1 }} />
-                        <IconButton size="small" color="error" onClick={() => delProgram(p)}>
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </Stack>
-                    )}
-                    <ProgramSessions program={p} month={month} vatMode={vatMode} onChanged={loadSummary} />
-                  </Box>
-                ))}
-              </AccordionDetails>
-            </Accordion>
-          );
-        })
+      {/* Two rooms, one door each: the daily marking board, and accounting's
+          money table. They used to share one scroll and bury each other. */}
+      {accounting && (
+        <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>
+          <Tab value="track" label="מעקב חודשי" />
+          <Tab value="pay" label={
+            <Badge color="error" badgeContent={unpaidCount} sx={{ '& .MuiBadge-badge': { insetInlineEnd: -14, top: 2 } }}>
+              תשלומים
+            </Badge>
+          } />
+        </Tabs>
       )}
+
+      {tab === 'pay' && accounting ? (
+        <PaymentSummary data={summary} payments={payments} accounting={accounting}
+          branch={selectedBranch} month={month} onPaymentsChanged={loadPayments} />
+      ) : (
+        <>
+          {/* What needs a human first — gone the moment it is empty. */}
+          {pending.length > 0 && (
+            <Paper sx={{ p: 1.5, mb: 2, bgcolor: '#fff8e1', border: '1px solid', borderColor: 'warning.main' }}>
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Typography sx={{ fontWeight: 700, color: 'warning.dark' }}>
+                  {pending.length === 1 ? 'מפגש אחד ממתין לסימון' : `${pending.length} מפגשים ממתינים לסימון`}
+                </Typography>
+                {pending.map(s => (
+                  <Chip key={s._id} size="small" variant="outlined" color="warning"
+                    sx={{ fontWeight: 600, bgcolor: 'background.paper' }}
+                    label={`${s.program_id?.name || 'חוג'} · ${dayMonth(s.date)}`}
+                    onClick={(e) => setMenu({ anchorEl: e.currentTarget, session: s })} />
+                ))}
+              </Stack>
+            </Paper>
+          )}
+
+          {loading ? (
+            <Box sx={{ textAlign: 'center', py: 4 }}><CircularProgress /></Box>
+          ) : programs.length === 0 ? (
+            <Alert severity="info">
+              אין חוגים בסניף זה עדיין. לחצ/י "חוג חדש" — מגדירים את הספק ואת כל הלוח
+              השבועי שלו/ה במסך אחד, כולל תעריף שונה לכל סניף.
+            </Alert>
+          ) : (
+            <Paper sx={{ overflowX: 'auto' }}>
+              <Table size="small" sx={{ minWidth: 520 + maxCols * 64 }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ minWidth: 220 }}>חוג</TableCell>
+                    {Array.from({ length: maxCols }, (_, i) => (
+                      <TableCell key={i} align="center" sx={{ color: 'text.secondary' }}>שבוע {i + 1}</TableCell>
+                    ))}
+                    <TableCell align="left" sx={{ minWidth: 90 }}>לתשלום</TableCell>
+                    <TableCell align="center" sx={{ width: 44 }} />
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {sorted.map(p => {
+                    const pid = String(p._id);
+                    const list = sessionsOf.get(pid) || [];
+                    const provider = p.provider_id && typeof p.provider_id === 'object' ? p.provider_id : null;
+                    const vatMode = provider?.vat_mode || 'exempt';
+                    const isOpen = !!openRows[pid];
+                    const sub = [
+                      provider && provider.name !== p.name ? provider.name : null,
+                      p.instructor_name || null,
+                      p.default_day != null ? `יום ${DAY_NAMES[p.default_day]}${p.default_time ? ` ${p.default_time}` : ''}` : (p.default_time || null),
+                      catOf(p) || null,
+                    ].filter(Boolean).join(' · ');
+                    return [
+                      <TableRow key={pid} hover sx={{ cursor: 'pointer', '& td': { borderBottom: isOpen ? 'none' : undefined } }}
+                        onClick={() => toggleRow(pid)}>
+                        <TableCell>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <ColorDot color={progColor(p)} />
+                            <Box>
+                              <Typography sx={{ fontWeight: 700, lineHeight: 1.2 }}>{p.name}</Typography>
+                              {sub && <Typography variant="caption" color="text.secondary">{sub}</Typography>}
+                            </Box>
+                          </Stack>
+                        </TableCell>
+                        {list.length === 0 ? (
+                          <TableCell colSpan={maxCols} align="center">
+                            <Typography variant="caption" color="text.secondary">אין מפגשים החודש — "מלא את החודש" או פתח/י את השורה</Typography>
+                          </TableCell>
+                        ) : (
+                          Array.from({ length: maxCols }, (_, i) => (
+                            <TableCell key={i} align="center" sx={{ p: 0.5 }}>
+                              {list[i] ? cellFor(list[i]) : ''}
+                            </TableCell>
+                          ))
+                        )}
+                        <TableCell align="left" sx={{ fontWeight: 700 }}>{ils(amountOf(pid))}</TableCell>
+                        <TableCell align="center" sx={{ p: 0 }}>
+                          <ExpandMoreIcon fontSize="small" sx={{
+                            color: 'text.secondary', verticalAlign: 'middle',
+                            transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s',
+                          }} />
+                        </TableCell>
+                      </TableRow>,
+                      <TableRow key={`${pid}-detail`}>
+                        <TableCell colSpan={maxCols + 3} sx={{ p: 0, border: 0 }}>
+                          <Collapse in={isOpen} timeout="auto" unmountOnExit>
+                            <Box sx={{ px: 2, py: 1.5, bgcolor: 'action.hover', borderBottom: '1px solid', borderColor: 'divider' }}>
+                              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+                                {provider && (
+                                  <Chip size="small" variant="outlined"
+                                    color={vatMode === 'registered' ? 'warning' : 'default'}
+                                    label={vatMode === 'registered' ? 'עוסק מורשה + מע״מ' : 'עוסק פטור'} />
+                                )}
+                                <Chip size="small" variant="outlined" label={rateLabel(p.default_rate, vatMode)} />
+                                <Box sx={{ flex: 1 }} />
+                                <Tooltip title="עריכה במסך הספק — שם, סניפים, ימים ותעריפים, הכול יחד">
+                                  <Button size="small" startIcon={<EditIcon />} onClick={() => {
+                                    setProviderFocus(String(provider?._id || ''));
+                                    setProvidersOpen(true);
+                                  }}>עריכה</Button>
+                                </Tooltip>
+                                <Button size="small" color="error" startIcon={<DeleteIcon />}
+                                  onClick={() => delProgram(p)}>הסרת חוג</Button>
+                              </Stack>
+                              <ProgramSessions program={p} month={month} vatMode={vatMode}
+                                version={refreshKey} onChanged={refreshAll} />
+                            </Box>
+                          </Collapse>
+                        </TableCell>
+                      </TableRow>,
+                    ];
+                  })}
+                </TableBody>
+              </Table>
+            </Paper>
+          )}
+
+          {programs.length > 0 && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+              <Box component="span" sx={{ color: 'success.main', fontWeight: 700 }}>✓</Box> התקיים ·{' '}
+              <Box component="span" sx={{ color: 'error.main', fontWeight: 700 }}>✗</Box> לא הגיע ·{' '}
+              <Box component="span" sx={{ color: 'warning.main', fontWeight: 700 }}>◐</Box> חלקית ·{' '}
+              <Box component="span" sx={{ color: 'warning.main', fontWeight: 700 }}>←</Box> נדחה ·{' '}
+              <Box component="span" sx={{ color: 'warning.main', fontWeight: 800 }}>?</Box> ממתין לסימון ·{' '}
+              תאריך אפור — מפגש עתידי. לחיצה על סימן פותחת סימון; לחיצה על שורה פותחת את כל המפגשים.
+            </Typography>
+          )}
+        </>
+      )}
+
+      <Menu anchorEl={menu?.anchorEl} open={!!menu} onClose={closeMenu}>
+        {menu && (
+          <Typography variant="caption" sx={{ px: 2, py: 0.5, display: 'block', color: 'text.secondary' }}>
+            {menu.session.program_id?.name || 'חוג'} · {dayMonth(menu.session.date)}
+          </Typography>
+        )}
+        {menu && menu.session.status !== 'occurred' && (
+          <MenuItem onClick={() => mark(menu.session, true)}>
+            <Box component="span" sx={{ color: 'success.main', fontWeight: 700, ml: 1 }}>✓</Box> הגיע/ה
+          </MenuItem>
+        )}
+        {menu && menu.session.status !== 'no_show' && menu.session.status !== 'postponed' && (
+          <MenuItem onClick={() => mark(menu.session, false)}>
+            <Box component="span" sx={{ color: 'error.main', fontWeight: 700, ml: 1 }}>✗</Box> לא הגיע/ה
+          </MenuItem>
+        )}
+        <Divider />
+        {menu && (
+          <MenuItem sx={{ color: 'error.main' }} onClick={() => delSession(menu.session)}>
+            <DeleteIcon fontSize="small" sx={{ ml: 1 }} /> מחק מפגש
+          </MenuItem>
+        )}
+      </Menu>
 
       <ProvidersDialog
         open={providersOpen}
         focus={providerFocus}
-        onClose={() => { setProvidersOpen(false); setProviderFocus(''); setRefreshKey(k => k + 1); }}
+        onClose={() => { setProvidersOpen(false); setProviderFocus(''); refreshAll(); }}
       />
     </Box>
   );
