@@ -442,7 +442,9 @@ async function resolveForPublish({ user, week, entries }) {
   // changes nothing.
   const accepted = await acceptedFor({ employeeIds: [...new Set(entries.map(e => String(e.employee_id)))], dates: weekDays(week.week_start) });
   for (const e of entries) {
-    if (accepted.some(c => blocksEntry(c, e))) {
+    // A sick day she CHOSE to work through is the one exception: the manager
+    // confirmed it on the entry itself (sick_ok), so the promise is not broken.
+    if (accepted.some(c => blocksEntry(c, e) && !(c.type === 'sick_expected' && e.sick_ok))) {
       throw new ShiftError(409, `${e.employee_name || 'עובדת'} משובצת ב-${e.date} למרות אילוץ מאושר — יש להסיר את השיבוץ לפני הסגירה`);
     }
   }

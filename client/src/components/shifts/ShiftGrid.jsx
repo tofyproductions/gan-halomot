@@ -77,7 +77,7 @@ function StaffPill({ icon, label, staff, needed }) {
   );
 }
 
-export default function ShiftGrid({ dates, rows, closedDates, warnings = [], switched, editable, onCellClick, onEntryClick, onDropToCell, highlightEmployeeId, alerts, actual = {}, shiftFilter = 'all', ratios = null, pmCaps = null }) {
+export default function ShiftGrid({ dates, rows, closedDates, warnings = [], switched, editable, onCellClick, onEntryClick, onDropToCell, highlightEmployeeId, alerts, actual = {}, shiftFilter = 'all', ratios = null, pmCaps = null, sickDays = null, onSickOk = null }) {
   const warnOf = (row, date) => warnings.find(w => w.date === date && String(w.classroom_id) === String(row.classroom_id));
   const [over, setOver] = useState(null); // `${row.key}|${date}` under the dragged item
   const canDrop = !!(editable && onDropToCell);
@@ -234,10 +234,12 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                       const entryAlerts = (() => {
                         if (row.area === 'away' || !alerts) return null;
                         const list = (alerts.get(`${e.employee_id}|${e.date}`) || [])
-                          .filter(c => conflictsEntry(c, e))
+                          // A sick day the manager OK'd working through stops shouting.
+                          .filter(c => conflictsEntry(c, e) && !(e.sick_ok && c.type === 'sick_expected'))
                           .map(c => c.status === 'accepted' ? `${describe(c)} — אושר, יש לעדכן את השיבוץ` : describe(c));
                         return list.length ? list : null;
                       })();
+                      const sick = row.area !== 'away' && sickDays ? sickDays.get(`${e.employee_id}|${e.date}`) : null;
                       const completes = completions.get(`${row.key}|${d}|${e.employee_id}`);
                       return (
                         <Box
@@ -284,6 +286,19 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                           {editable && e.new_class && <Chip size="small" label="כיתה חדשה לה" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />}
                           {editable && e.alternating && <Chip size="small" label="יום מתחלף" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />}
                           {e.cross_status === 'pending' && <Chip size="small" color="info" label="ממתין לאישור סניף הבית" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />}
+                          {sick && (e.sick_ok ? (
+                            <Tooltip title={`${sick === 'approved' ? 'מחלה מאושרת' : 'בקשת מחלה בטיפול'} — אושר שהיא בחרה לעבוד. לחיצה מבטלת את האישור.`}>
+                              <Chip size="small" color="success" variant="outlined" label="🤒 עובדת למרות מחלה ✓"
+                                onClick={editable && onSickOk ? (ev) => { ev.stopPropagation(); onSickOk(e); } : undefined}
+                                sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />
+                            </Tooltip>
+                          ) : (
+                            <Tooltip title={`${sick === 'approved' ? 'מחלה מאושרת' : 'בקשת מחלה בטיפול'} ליום הזה — היא לא אמורה לעבוד. אם בחרה לעבוד בכל זאת: לחיצה מאשרת את השיבוץ.`}>
+                              <Chip size="small" color="warning" label="🤒 מחלה"
+                                onClick={editable && onSickOk ? (ev) => { ev.stopPropagation(); onSickOk(e); } : undefined}
+                                sx={{ height: 16, fontSize: '0.6rem', mt: 0.25, fontWeight: 700 }} />
+                            </Tooltip>
+                          ))}
                           {entryAlerts && (
                             <Tooltip title={entryAlerts.join(' · ')}>
                               <Chip size="small" color="error" label="⚠ אילוץ" sx={{ height: 16, fontSize: '0.6rem', mt: 0.25 }} />

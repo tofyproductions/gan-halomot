@@ -166,6 +166,21 @@ export default function ShiftsScreen() {
   }, [board]);
   const closed = useMemo(() => new Set(board?.closed_dates || []), [board]);
 
+  // Sick days per employee+date, ranges unrolled. 'approved' outranks a
+  // pending status for the label when two requests overlap.
+  const sickDays = useMemo(() => {
+    const m = new Map();
+    for (const s of board?.sick_days || []) {
+      for (const d of board.dates || []) {
+        if (s.from_date <= d && d <= s.to_date) {
+          const key = `${s.employee_id}|${d}`;
+          if (!m.has(key) || s.status === 'approved') m.set(key, s.status);
+        }
+      }
+    }
+    return m;
+  }, [board]);
+
   const exportArgs = board && { branchName: board.branch_name, dates: board.dates, rows, switched, closedDates: closed };
 
   const openWeek = async () => {
@@ -200,6 +215,16 @@ export default function ShiftsScreen() {
       : [...shown, { ...form, tmp: newTmp() }];
     closeDlg();
     persist(next);
+  };
+
+  // 🤒 → she filed a sick day here, and still chose to work: the manager
+  // confirms it on the entry itself. A second click takes it back.
+  const toggleSickOk = (entry) => {
+    const q = entry.sick_ok
+      ? `לבטל את האישור? השיבוץ של ${entry.employee_name} ב-${entry.date} יסומן שוב כמתנגש עם יום המחלה.`
+      : `${entry.employee_name} הגישה מחלה ליום הזה. היא בחרה לעבוד בכל זאת — לאשר את השיבוץ?`;
+    if (!window.confirm(q)) return;
+    persist(shown.map(e => (sameEntry(e, entry) ? { ...e, sick_ok: !entry.sick_ok } : e)));
   };
   const deleteEntry = (entry) => {
     closeDlg();
@@ -386,6 +411,7 @@ export default function ShiftsScreen() {
             <ShiftGrid
               dates={board.dates} rows={gridRows} closedDates={closed} warnings={board.warnings}
               switched={switched} editable={editable} alerts={alerts} actual={actual} shiftFilter={shiftView} ratios={board.ratios} pmCaps={board.pm_caps}
+              sickDays={sickDays} onSickOk={editable ? toggleSickOk : undefined}
               onCellClick={(row, date) => setDlg({ open: true, entry: null, defaults: { date, area: row.area, classroom_id: row.classroom_id } })}
               onEntryClick={(entry) => setDlg({ open: true, entry, defaults: null })}
               onDropToCell={onDropToCell}

@@ -25,6 +25,9 @@ const entrySchema = new mongoose.Schema({
   // An employee of another branch (phase 3). Server-derived on every save.
   cross_branch: { type: Boolean, default: false },
   cross_status: { type: String, enum: ['pending', 'approved', null], default: null },
+  // She has a sick day here and CHOSE to work — the manager confirmed it on
+  // the board. Quiets the sick-day warning and lets the publish through.
+  sick_ok: { type: Boolean, default: false },
 });
 
 const shiftWeekSchema = new mongoose.Schema({

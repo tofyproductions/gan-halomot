@@ -8,7 +8,7 @@
 const mongoose = require('mongoose');
 const {
   ShiftWeek, ShiftEditRequest, Branch, Classroom, Child, Employee,
-  EmployeeCommitment, Holiday, SpecialDay, User,
+  EmployeeCommitment, EmployeeRequest, Holiday, SpecialDay, User,
 } = require('../../models');
 const notificationService = require('../notification.service');
 const { branchManagerFilter } = require('../branch-recipients.service');
@@ -134,6 +134,20 @@ async function getBoard({ user, branchId, weekStart }) {
 
   const weekConstraints = await constraints.forBoard({ branchId, dates, entries });
 
+  /**
+   * Sick days overlapping the week — whoever filed them and wherever they
+   * stand (pending or approved): a manager building Sunday's rota needs to
+   * know TODAY that a sick note covers it, not after accounting signs. A
+   * rejected request is nobody's sick day. `to_date` null means one day.
+   */
+  const sickRequests = await EmployeeRequest.find({
+    employee_id: { $in: employees.map(e => e._id) },
+    type: 'sick',
+    status: { $in: ['pending', 'pending_manager', 'pending_accountant', 'approved'] },
+    from_date: { $lte: dates[dates.length - 1] },
+    $or: [{ to_date: null }, { to_date: '' }, { to_date: { $gte: dates[0] } }],
+  }).select('employee_id from_date to_date status').lean();
+
   const branchEmployeeIds = employees.map(e => String(e._id));
   const [foreignCandidates, away, crossPending, arrangements, allRateRequests] = await Promise.all([
     cross.foreignCandidates({ hostBranchId: branchId }),
@@ -171,6 +185,12 @@ async function getBoard({ user, branchId, weekStart }) {
     // Where the office said a smaller afternoon crew is the arrangement —
     // the צהריים pill caps its needed figure by these (see ratio.js).
     pm_caps: pmNeededCaps(branch.name),
+    sick_days: sickRequests.map(r => ({
+      employee_id: String(r.employee_id),
+      from_date: r.from_date,
+      to_date: r.to_date || r.from_date,
+      status: r.status,
+    })),
     // What the branch itself set, blank where it follows the city default —
     // the settings form edits these, not the effective values above.
     ratio_overrides: Object.fromEntries(['infants', 'young', 'older'].map((k) => {
@@ -231,6 +251,7 @@ function normalizeEntries(raw, dates, closed) {
       end_hhmm: padHHMM(e.end_hhmm),
       alternating: !!e.alternating,
       new_class: !!e.new_class,
+      sick_ok: !!e.sick_ok,
     };
   });
 }

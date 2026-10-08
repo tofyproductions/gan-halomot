@@ -347,6 +347,13 @@ async function throwsStatus(fn, status, label, message) {
   const guestView = await svc.myShifts({ employee: await M.Employee.findById(guest._id).lean(), weekStart: WF });
   eq([guestView.published, (guestView.away || []).map(e => [e.date, e.start_hhmm, e.branch_name])], [false, [['2026-11-16', '13:00', 'כפר סבא - קפלן']]], 'F5: העובדת רואה את המשמרת שלה בסניף המארח');
 
+  // S1: sick days overlapping the week ride on the board; rejected ones do not.
+  await M.EmployeeRequest.create({ employee_id: dana._id, branch_id: branch._id, type: 'sick', from_date: '2026-10-12', to_date: '2026-10-13', status: 'approved' });
+  await M.EmployeeRequest.create({ employee_id: dana._id, branch_id: branch._id, type: 'sick', from_date: '2026-10-14', to_date: null, status: 'rejected' });
+  const sickBoard = await svc.getBoard({ user: manager, branchId: String(branch._id), weekStart: WEEK });
+  eq(sickBoard.sick_days.map(s => [s.from_date, s.to_date, s.status]), [['2026-10-12', '2026-10-13', 'approved']],
+    'S1: הלוח יודע על ימי המחלה של השבוע — ובקשה שנדחתה לא נספרת');
+
   await new Promise(r => setTimeout(r, 500)); // let in-flight notification pushes settle
   await mongoose.disconnect();
   await mongod.stop();

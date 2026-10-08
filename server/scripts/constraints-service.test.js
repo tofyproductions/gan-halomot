@@ -208,6 +208,16 @@ async function throws(fn, status, message, label) {
   eq(swapAcc.applied.reassigned, 1, 'מסירת משמרת אושרה — השיבוץ עבר למחליפה');
   eq((await entriesNow()).find(e => e[1] === '2026-10-19')[0], 'רות', 'ובסידור 19.10 רשום על רות');
 
+  console.log('\nמחלה — חוסמת פרסום, אלא אם אושר שהיא בחרה לעבוד');
+  const sickC = await svc.createConstraint({ employee: ruth, body: { type: 'sick_expected', date: '2026-10-23', details: 'ניתוח קטן' }, files: [], now: NOW });
+  await svc.decide({ user: manager, id: String(sickC._id), accept: true, confirmFar: true, now: NOW });
+  const weekStub = { branch_id: branch._id, week_start: '2026-10-18' };
+  const ruthEntry = { employee_id: String(ruth._id), employee_name: 'רות', date: '2026-10-23', start_hhmm: '07:00', end_hhmm: '13:00' };
+  await throws(() => svc.resolveForPublish({ user: manager, week: weekStub, entries: [ruthEntry] }),
+    409, 'רות משובצת ב-2026-10-23 למרות אילוץ מאושר — יש להסיר את השיבוץ לפני הסגירה', 'משובצת ביום מחלה — הפרסום נחסם');
+  eq(await svc.resolveForPublish({ user: manager, week: weekStub, entries: [{ ...ruthEntry, sick_ok: true }] }), 0,
+    'אישרו שהיא בחרה לעבוד (sick_ok) — הפרסום עובר');
+
   await new Promise(r => setTimeout(r, 300));
   await mongoose.disconnect();
   await mongod.stop();
