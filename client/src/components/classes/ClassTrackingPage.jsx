@@ -621,26 +621,35 @@ export default function ClassTrackingPage() {
   const cellFor = (s) => {
     const dm = dayMonth(s.date);
     const open = (e) => { e.stopPropagation(); setMenu({ anchorEl: e.currentTarget, session: s }); };
-    const glyph = (char, color, title, bold = false) => (
+    // The date stays printed under the mark — "✓ on the 14th", not a ✓ that
+    // makes somebody hover to learn which Wednesday it was.
+    const glyph = (char, color, title, { bold = false, date = null } = {}) => (
       <Tooltip title={title}>
-        <Box component="span" onClick={open} sx={{
-          cursor: 'pointer', fontWeight: bold ? 800 : 700, fontSize: 16,
-          color, px: 0.75, py: 0.25, borderRadius: 1, '&:hover': { bgcolor: 'action.hover' },
-        }}>{char}</Box>
+        <Box onClick={open} sx={{
+          cursor: 'pointer', display: 'inline-flex', flexDirection: 'column',
+          alignItems: 'center', px: 0.75, py: 0.25, borderRadius: 1,
+          '&:hover': { bgcolor: 'action.hover' },
+        }}>
+          <Box component="span" sx={{ fontWeight: bold ? 800 : 700, fontSize: 16, color, lineHeight: 1.15 }}>{char}</Box>
+          {date && (
+            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: 11, lineHeight: 1.2 }}>{date}</Typography>
+          )}
+        </Box>
       </Tooltip>
     );
     switch (s.status) {
       case 'occurred':
-        return glyph('✓', 'success.main', `התקיים · ${dm}${s.answered_by_lead && !s.manager_confirmed ? ' · ממתין לאישור מנהל' : ''}`);
+        return glyph('✓', 'success.main', `התקיים · ${dm}${s.answered_by_lead && !s.manager_confirmed ? ' · ממתין לאישור מנהל' : ''}`, { date: dm });
       case 'no_show':
-        return glyph('✗', 'error.main', `לא הגיע · ${dm}`);
+        return glyph('✗', 'error.main', `לא הגיע · ${dm}`, { date: dm });
       case 'partial':
-        return glyph('◐', 'warning.main', `חלקית · ${dm}`);
+        return glyph('◐', 'warning.main', `חלקית · ${dm}`, { date: dm });
       case 'postponed':
-        return glyph('←', 'warning.main', `נדחה · ${dm}${s.postponed_to_date ? ` → ${dayMonth(s.postponed_to_date)}` : ''}`);
+        return glyph('←', 'warning.main', `נדחה · ${dm}${s.postponed_to_date ? ` → ${dayMonth(s.postponed_to_date)}` : ''}`,
+          { date: s.postponed_to_date ? `${dm} → ${dayMonth(s.postponed_to_date)}` : dm });
       default:
         return s.date <= today
-          ? glyph('?', 'warning.main', `ממתין לסימון · ${dm} — לחיצה לסימון`, true)
+          ? glyph('?', 'warning.main', `ממתין לסימון · ${dm} — לחיצה לסימון`, { bold: true, date: dm })
           : glyph(dm, 'text.disabled', `מתוכנן · ${dm}`);
     }
   };
