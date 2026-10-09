@@ -1,5 +1,5 @@
 const https = require('https');
-const { Registration, Child, Collection, Classroom, Branch, Document } = require('../models');
+const { Registration, Child, Collection, Classroom, Branch, Document, Archive } = require('../models');
 
 const SPREADSHEET_ID = '1H-pCIZQEIm6aXYfgZt_ZU6LXn6rUIfh7t1j6N0adpy0';
 
@@ -192,6 +192,27 @@ async function syncFromSheets(req, res, next) {
       const classroom = await findClassroom(cls, kaplan._id, acadYear, unmatchedRooms);
 
       const existing = await Registration.findOne({ unique_id: uniqueId });
+      /**
+       * The APP outranks the sheet. The sheet is an intake source, not the
+       * living record: a registration CANCELLED here (parent left, billed
+       * through a chosen month) must not have its status quietly reset to
+       * 'completed' by the next sync — that is exactly what buried ארי
+       * דוד's cancellation. And one deleted or archived here must stay
+       * gone: every removal path keeps an Archive snapshot, so a sheet row
+       * whose unique_id rests unrestored in the archive is a row the
+       * office already acted on, not a missing import.
+       */
+      if (existing && existing.status === 'cancelled') {
+        results.skipped_cancelled = (results.skipped_cancelled || 0) + 1;
+        continue;
+      }
+      if (!existing) {
+        const buried = await Archive.exists({ 'original_data.unique_id': uniqueId, restored_at: null });
+        if (buried) {
+          results.skipped_archived = (results.skipped_archived || 0) + 1;
+          continue;
+        }
+      }
       if (existing) {
         // Update status
         const newStatus = (row[9] === 'כן' && row[10] === 'כן') ? 'completed' : (row[9] === 'כן' ? 'contract_signed' : 'link_generated');
