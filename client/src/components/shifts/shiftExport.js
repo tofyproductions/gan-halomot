@@ -23,6 +23,20 @@ const empColors = (id) => {
   return { bg: `hsl(${h},72%,93%)`, border: `hsl(${h},48%,60%)`, text: `hsl(${h},75%,24%)` };
 };
 
+/**
+ * The week, said like a person says it — "12–17 באוקטובר 2026" — for the
+ * badge nobody should have to squint at. A week straddling two months names
+ * both.
+ */
+const hebRange = (dates) => {
+  const a = new Date(`${dates[0]}T12:00`);
+  const b = new Date(`${dates[dates.length - 1]}T12:00`);
+  const month = (d) => d.toLocaleDateString('he-IL', { month: 'long' });
+  return a.getMonth() === b.getMonth()
+    ? `${a.getDate()}–${b.getDate()} ב${month(b)} ${b.getFullYear()}`
+    : `${a.getDate()} ב${month(a)} – ${b.getDate()} ב${month(b)} ${b.getFullYear()}`;
+};
+
 export function pagesOf(rows, perPage = ROWS_PER_PAGE) {
   const out = [];
   for (let i = 0; i < rows.length; i += perPage) out.push(rows.slice(i, i + perPage));
@@ -53,8 +67,11 @@ function tableHtml({ branchName, dates, pageRows, switched, closedDates, pageNo,
     }).join('');
 
   return `<section class="page">
-    <header class="hd"><div><h1>סידור עבודה — ${esc(branchName)}</h1>
-    <div class="sub">שבוע ${fmtDate(dates[0])}–${fmtDate(dates[dates.length - 1])}${pageCount > 1 ? ` · עמוד ${pageNo}/${pageCount}` : ''}</div></div></header>
+    <header class="hd">
+      <div><h1>סידור עבודה — ${esc(branchName)}</h1>
+      <div class="sub">ימים ראשון–שישי · ${fmtDate(dates[0])}–${fmtDate(dates[dates.length - 1])}${pageCount > 1 ? ` · עמוד ${pageNo}/${pageCount}` : ''}</div></div>
+      <div class="wk"><div class="wk-l">שבוע</div><div class="wk-d">${hebRange(dates)}</div></div>
+    </header>
     <table><thead><tr><th class="row">כיתה</th>${head}</tr></thead><tbody>${body}</tbody></table>
     <div class="legend">${key}${key ? '<span class="sep"></span>' : ''}<span class="swkey"><span class="swm">⇄</span> מעבר כיתה באמצע היום</span></div></section>`;
 }
@@ -65,9 +82,13 @@ const STYLE = `
   .shift-export { font-family: "Assistant", Arial, sans-serif; direction: rtl; color: #0f172a; background: #fff; }
   .shift-export .page { width: 277mm; padding: 3mm; page-break-after: always; background: #fff; }
   .shift-export .page:last-of-type { page-break-after: auto; }
-  .shift-export .hd { border-bottom: 1mm solid #1e293b; padding-bottom: 2mm; margin-bottom: 3mm; }
+  .shift-export .hd { border-bottom: 1mm solid #1e293b; padding-bottom: 2mm; margin-bottom: 3mm;
+    display: flex; justify-content: space-between; align-items: center; gap: 4mm; }
   .shift-export h1 { font-size: 15pt; margin: 0; letter-spacing: 0.2px; }
   .shift-export .sub { font-size: 9.5pt; color: #64748b; margin-top: 0.5mm; }
+  .shift-export .wk { background: #1e293b; color: #fff; border-radius: 2mm; padding: 1.5mm 5mm; text-align: center; flex-shrink: 0; }
+  .shift-export .wk-l { font-size: 8pt; color: #cbd5e1; letter-spacing: 1px; }
+  .shift-export .wk-d { font-size: 13.5pt; font-weight: 800; white-space: nowrap; }
   .shift-export table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 8.5pt; }
   .shift-export tr { break-inside: avoid; page-break-inside: avoid; }
   .shift-export thead th { background: #1e293b; color: #fff; border: 1px solid #1e293b; padding: 1.8mm 1mm; font-size: 9pt; }
