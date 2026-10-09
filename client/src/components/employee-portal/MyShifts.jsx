@@ -85,14 +85,27 @@ function sunday(offsetWeeks) {
 
 /** The published rota of her branch — this week and next — with her own hours marked. */
 export default function MyShifts() {
-  const initial = new URLSearchParams(window.location.search).get('week') || sunday(0);
-  const [week, setWeek] = useState(initial);
+  const explicitWeek = new URLSearchParams(window.location.search).get('week');
+  const [week, setWeek] = useState(explicitWeek || sunday(0));
+  // One silent jump forward: she opens on "השבוע", but when that one was
+  // never published and next week's rota IS out — the rota she came for is
+  // next week's. Landing her on "עוד לא פורסם" hid the published rota
+  // behind a tap many never made (and her view was never recorded).
+  const [autoJumped, setAutoJumped] = useState(false);
   const [tab, setTab] = useState(new URLSearchParams(window.location.search).get('tab') === 'constraints' ? 'constraints' : 'rota');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     setLoading(true);
-    api.get('/shifts/my', { params: { week } }).then(r => setData(r.data)).catch(() => setData({ error: true })).finally(() => setLoading(false));
+    api.get('/shifts/my', { params: { week } }).then(r => {
+      setData(r.data);
+      if (!explicitWeek && !autoJumped && week === sunday(0)
+          && r.data?.published === false && !(r.data?.away || []).length) {
+        setAutoJumped(true);
+        setWeek(sunday(1));
+      }
+    }).catch(() => setData({ error: true })).finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [week]);
 
   const classrooms = useMemo(() => {
