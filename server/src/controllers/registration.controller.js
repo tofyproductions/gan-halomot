@@ -926,13 +926,26 @@ async function cancel(req, res, next) {
     }
     await registration.save();
 
-    res.json({ ok: true, exit_month: hasExitMonth ? exitMonth : null, billing_settled: noDebt });
+    /**
+     * Nothing owed = nothing keeping it here. A cancellation that closes
+     * the money (no_debt) walks straight to the archive; one that still
+     * bills through exit_month stays visible in the tracker and in גבייה,
+     * and makes the same walk when the office closes the debt below.
+     */
+    let archived = false;
+    if (noDebt) {
+      await require('../services/registrationArchive.service')
+        .archiveRegistration({ registrationId: id, userId: req.user?.id || null });
+      archived = true;
+    }
+
+    res.json({ ok: true, exit_month: hasExitMonth ? exitMonth : null, billing_settled: noDebt, archived });
   } catch (error) {
     next(error);
   }
 }
 
-/** POST /api/registrations/:id/settle-billing — the debt is paid; drop from גבייה. */
+/** POST /api/registrations/:id/settle-billing — the debt is paid; drop from גבייה, into the archive. */
 async function settleBilling(req, res, next) {
   try {
     const registration = await Registration.findById(req.params.id);
@@ -944,7 +957,10 @@ async function settleBilling(req, res, next) {
     registration.billing_settled_at = new Date();
     registration.billing_settled_by = req.user?.id || null;
     await registration.save();
-    res.json({ ok: true });
+    // The promise made at cancellation: debt closed → archived, by itself.
+    await require('../services/registrationArchive.service')
+      .archiveRegistration({ registrationId: registration._id, userId: req.user?.id || null });
+    res.json({ ok: true, archived: true });
   } catch (error) {
     next(error);
   }

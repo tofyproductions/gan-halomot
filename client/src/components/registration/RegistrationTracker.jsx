@@ -296,8 +296,8 @@ export default function RegistrationTracker() {
         exit_month: exitMonth || undefined, note, no_debt: noDebt,
       });
       toast.success(noDebt
-        ? 'הילד/ה הוסר/ה מהגן ומהגבייה — ההיסטוריה נשמרה'
-        : 'הרישום בוטל — הילד/ה הוסר/ה מהרשימות, המשפחה נשארת בגבייה עד סגירת החוב');
+        ? 'הילד/ה הוסר/ה מהגן ומהגבייה והרישום הועבר לארכיון'
+        : 'הרישום בוטל — המשפחה בגבייה עד החודש שנבחר; עם סגירת החוב הרישום יעבור לארכיון אוטומטית');
       setCancelDlg({ open: false, reg: null, exitMonth: '', note: '', noDebt: false, saving: false });
       fetchData();
     } catch (err) {
@@ -309,7 +309,7 @@ export default function RegistrationTracker() {
   const handleSettle = async (reg) => {
     try {
       await api.post(`/registrations/${reg._id || reg.id}/settle-billing`);
-      toast.success('החוב נסגר — המשפחה הוסרה מהגבייה');
+      toast.success('החוב נסגר — הרישום הועבר לארכיון');
       fetchData();
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה בסגירת החוב');
@@ -784,7 +784,7 @@ export default function RegistrationTracker() {
                       </IconButton>
                     </Tooltip>
                   ) : (
-                    <Tooltip title="החוב שולם — סגירה והסרה מהגבייה">
+                    <Tooltip title="החוב שולם — סגירה, הסרה מהגבייה והעברה לארכיון">
                       <IconButton size="small" color="success" onClick={() => handleSettle(reg)}>
                         <PriceCheckIcon fontSize="small" />
                       </IconButton>
@@ -970,6 +970,7 @@ export default function RegistrationTracker() {
               הילד/ה יוסר/תוסר מהכיתות ומכל הרשימות, אבל המשפחה תישאר במסך הגבייה —
               מחויבת עד החודש שנבחר כאן — עד שהמשרד יסמן שהחוב שולם.
               את הסכום המדויק לכל חודש אפשר לערוך במסך הגבייה.
+              ברגע שהחוב ייסגר, הרישום יעבור לארכיון אוטומטית (ומשם אפשר תמיד לשחזר).
             </Alert>
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               <Button size="small" variant="outlined" onClick={() => {

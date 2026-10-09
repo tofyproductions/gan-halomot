@@ -1,6 +1,7 @@
 const { Archive, Registration, Child, Collection, Classroom } = require('../models');
 const { normalizeYear, getAcademicYears, academicYearOf } = require('../services/academic-year.service');
 const { cleanupChildrenOfRegistration } = require('../services/childCleanup');
+const { archiveRegistration } = require('../services/registrationArchive.service');
 
 async function getAll(req, res, next) {
   try {
@@ -40,25 +41,10 @@ async function create(req, res, next) {
       return res.status(404).json({ error: 'Registration not found' });
     }
 
-    const archiveType = registration.agreement_signed ? 'signed' : 'unsigned';
-    const academicYear = academicYearOf(registration) || '';
-
-    const archiveRecord = await Archive.create({
-      registration_id: registration._id,
-      archive_type: archiveType,
-      original_data: registration,
-      child_name: registration.child_name,
-      classroom_name: registration.classroom_id?.name || null,
-      academic_year: academicYear,
-      archived_by: req.user?._id || req.user?.id || null,
+    const { archiveRecord } = await archiveRegistration({
+      registrationId: registration_id,
+      userId: req.user?._id || req.user?.id || null,
     });
-
-    // Referencing docs first — see services/childCleanup.js.
-    const cleaned = await cleanupChildrenOfRegistration(registration_id);
-    await Child.deleteMany({ registration_id });
-    await Collection.deleteMany({ registration_id });
-    await Registration.findByIdAndDelete(registration_id);
-    console.log('[archive] cleaned refs for registration', String(registration_id), cleaned);
 
     res.status(201).json({
       message: 'Registration archived successfully',
