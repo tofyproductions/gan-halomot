@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Box, Paper, Typography, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField } from '@mui/material';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { useAuth } from '../../hooks/useAuth';
 import { HEB_DAYS, fmtDate } from './shiftRows';
 import { inWindow, CATEGORY_KEY } from './ShiftGrid';
 
@@ -14,6 +15,11 @@ import { inWindow, CATEGORY_KEY } from './ShiftGrid';
  * "take from here, give to there" — is ACROSS classes on one day.
  */
 export default function StaffBalanceStrip({ rows, dates, closedDates, ratios, pmCaps, branchId, bonuses, canEdit, onChanged }) {
+  // The price of a slot is the OWNER's call: only system_admin sets or
+  // cancels a bonus. Managers still SEE an active one on the strip —
+  // view-as safe, since useAuth hands the effective role.
+  const { user } = useAuth();
+  const canBonus = user?.role === 'system_admin';
   /**
    * The bounty dialog: a shortage the branch cannot fill from inside can be
    * priced — the bonus is shown ONLY to other branches' staff beside the
@@ -92,9 +98,9 @@ export default function StaffBalanceStrip({ rows, dates, closedDates, ratios, pm
             {it.diff > 0 ? `+${it.diff}` : it.diff}
           </Box>
           {bonus && (
-            <Tooltip title={`בונוס פעיל לעובדות מסניפים אחרים · ${bonus.claimed_by_name ? `נתפס על ידי ${bonus.claimed_by_name}` : 'לחיצה מבטלת'}`}>
+            <Tooltip title={`בונוס פעיל לעובדות מסניפים אחרים · ${bonus.claimed_by_name ? `נתפס על ידי ${bonus.claimed_by_name}` : canBonus ? 'לחיצה מבטלת' : 'נקבע על ידי מנהל המערכת'}`}>
               <Box component="span" dir="ltr"
-                onClick={canEdit ? async (e) => {
+                onClick={canBonus ? async (e) => {
                   e.stopPropagation();
                   if (!window.confirm(`לבטל את הבונוס של ₪${bonus.amount}?`)) return;
                   try { await api.delete(`/shifts/cover-bonuses/${bonus._id}`); toast.success('הבונוס בוטל'); onChanged?.(); }
@@ -102,7 +108,7 @@ export default function StaffBalanceStrip({ rows, dates, closedDates, ratios, pm
                 } : undefined}
                 sx={{
                   display: 'inline-flex', alignItems: 'center', gap: 0.25,
-                  px: 0.75, py: 0.2, borderRadius: 999, cursor: canEdit ? 'pointer' : 'default',
+                  px: 0.75, py: 0.2, borderRadius: 999, cursor: canBonus ? 'pointer' : 'default',
                   bgcolor: '#FEF3C7', color: '#92400E', border: '1.5px solid #F59E0B',
                   fontSize: '0.66rem', fontWeight: 800, boxShadow: '0 1px 4px rgba(245,158,11,0.35)',
                 }}>
@@ -110,7 +116,7 @@ export default function StaffBalanceStrip({ rows, dates, closedDates, ratios, pm
               </Box>
             </Tooltip>
           )}
-          {canEdit && short && !bonus && it.classroom_id && (
+          {canBonus && short && !bonus && it.classroom_id && (
             <Tooltip title="הצעת בונוס לעובדת מסניף אחר שתיקח את המשמרת">
               <Box component="span"
                 onClick={(e) => { e.stopPropagation(); setBonusDlg({ gap: { ...it, date }, amount: '' }); }}
@@ -225,7 +231,8 @@ export default function StaffBalanceStrip({ rows, dates, closedDates, ratios, pm
         <DialogTitle>🎁 בונוס למשמרת חסרה</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            הבונוס יוצג רק לעובדות פנויות <b>מסניפים אחרים</b> לצד המשבצת החסרה.
+            קביעת בונוס היא סמכות מנהל המערכת. הבונוס יוצג רק לעובדות פנויות <b>מסניפים אחרים</b> לצד
+            המשבצת החסרה — המשמרת מוצעת להן גם בלי בונוס; הבונוס רק מדגיש אותה.
             כשעובדת כזו תשובץ, הבונוס יוגש אוטומטית כתוספת שכר לאישור הנהלת חשבונות — לפי הנהלים.
           </Typography>
           {bonusDlg && (

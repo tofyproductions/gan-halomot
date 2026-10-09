@@ -326,11 +326,16 @@ async function decideOffer({ user, id, approve, reason }) {
   return offer;
 }
 
-/** The manager puts a price on a slot — or takes it off. Host branch only. */
+/**
+ * The price of a slot is the OWNER's call (10.10.2026): a bonus is company
+ * money crossing branches, so only system_admin sets or cancels one. Branch
+ * managers still see an active bonus on their strip; the slot is offered to
+ * travelers with or without a prize — the bonus only makes it louder.
+ */
 async function setBonus({ user, body }) {
   const b = body || {};
+  if (user?.role !== 'system_admin') throw new ShiftError(403, 'קביעת בונוס — מנהל המערכת בלבד');
   if (!mongoose.isValidObjectId(b.branch_id)) throw new ShiftError(400, 'סניף לא תקין');
-  assertEdit(user, b.branch_id);
   if (!['am', 'pm'].includes(b.window)) throw new ShiftError(400, 'משמרת לא תקינה');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(b.date || ''))) throw new ShiftError(400, 'תאריך לא תקין');
   if (!mongoose.isValidObjectId(b.classroom_id)) throw new ShiftError(400, 'כיתה לא תקינה');
@@ -351,10 +356,10 @@ async function setBonus({ user, body }) {
 }
 
 async function cancelBonus({ user, id }) {
+  if (user?.role !== 'system_admin') throw new ShiftError(403, 'ביטול בונוס — מנהל המערכת בלבד');
   if (!mongoose.isValidObjectId(id)) throw new ShiftError(404, 'בונוס לא נמצא');
   const bonus = await ShiftCoverBonus.findById(id);
   if (!bonus) throw new ShiftError(404, 'בונוס לא נמצא');
-  assertEdit(user, bonus.branch_id);
   bonus.status = 'cancelled';
   await bonus.save();
   return bonus;
@@ -364,4 +369,29 @@ function activeBonuses(branchId, weekStart) {
   return ShiftCoverBonus.find({ branch_id: branchId, week_start: weekStart, status: 'active' }).lean();
 }
 
-module.exports = { openGaps, listForEmployee, createOffer, pendingFor, decideOffer, setBonus, cancelBonus, activeBonuses };
+/**
+ * The owner's shortage alert: a rota was just CLOSED with open,
+ * unbalanceable gaps — the exact moment a bonus decision is worth making.
+ * One notification per admin per publish, naming every gap; the dialog to
+ * price them is the 🎁 on the balance strip the notification points at.
+ */
+async function alertAdminsOnGaps(branchId, weekStart) {
+  const gaps = await openGaps(branchId, weekStart);
+  if (!gaps.length) return 0;
+  const { User } = require('../../models');
+  const branch = await Branch.findById(branchId).select('name').lean();
+  const admins = await User.find({ role: 'system_admin', is_active: { $ne: false } }).select('_id').lean();
+  const lines = gaps.slice(0, 6).map(g => {
+    const [, m, d] = g.date.split('-');
+    return `${g.classroom_name} · ${d}/${m} ${g.window === 'am' ? 'בוקר' : 'צהריים'} (חסרות ${g.missing})`;
+  });
+  const body = `${lines.join(' | ')}${gaps.length > 6 ? ` ועוד ${gaps.length - 6}…` : ''} — אפשר לקבוע בונוס לעובדת מסניף אחר דרך רצועת החוסרים בסידור`;
+  await Promise.all(admins.map(u => notificationService.notifyOnce({
+    type: 'rota_gaps', ref_collection: 'ShiftWeek', ref_id: branchId, recipient_id: u._id,
+    title: `חוסר בסידור ${branch?.name || ''} לשבוע ${weekStart.slice(8, 10)}/${weekStart.slice(5, 7)}`,
+    body, url: '/shifts',
+  }).catch(err => console.error('[cover-offers] gap alert failed:', err.message))));
+  return gaps.length;
+}
+
+module.exports = { openGaps, listForEmployee, createOffer, pendingFor, decideOffer, setBonus, cancelBonus, activeBonuses, alertAdminsOnGaps };

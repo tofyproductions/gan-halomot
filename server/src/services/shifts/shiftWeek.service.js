@@ -480,6 +480,10 @@ async function publishWeek({ user, weekId, now = new Date() }) {
     body: first ? 'אפשר לראות את המשמרות שלך ושל כל הסניף' : 'יש שינוי במשמרות שלך — כדאי להציץ',
     url: `/my-shifts?week=${week.week_start}`,
   }).catch(err => console.error('[shifts] notify failed:', err.message))));
+  // A week closed WITH holes is the owner's cue to consider a bonus —
+  // fire-and-forget; publishing never fails over an alert.
+  require('./coverOffers.service').alertAdminsOnGaps(week.branch_id, week.week_start)
+    .catch(err => console.error('[shifts] gap alert failed:', err.message));
   return { week, notified: recipients.length, auto_accepted: autoAccepted };
 }
 

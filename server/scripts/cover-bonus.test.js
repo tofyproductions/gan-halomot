@@ -62,9 +62,11 @@ async function throws(fn, status, label) {
 
   const mkUser = (role, branch) => M.User.create({ full_name: `${role} ${idn}`, id_number: String(idn++), email: `${idn}@x.l`, password_hash: 'x', role, is_active: true, branch_id: branch._id, managed_branch_ids: role === 'branch_manager' ? [branch._id] : [] });
   const hostMgrU = await mkUser('branch_manager', host);
+  const adminU = await mkUser('system_admin', host);
   await mkUser('branch_manager', home); // home manager must exist for cross placement
   const asUser = (u) => ({ id: String(u._id), role: u.role, full_name: u.full_name, branch_id: String(u.branch_id), managed_branch_ids: (u.managed_branch_ids || []).map(String) });
   const hostMgr = asUser(hostMgrU);
+  const owner = asUser(adminU);
 
   const homeU1 = await mkUser('teacher', home);
   const homeU2 = await mkUser('teacher', home);
@@ -95,8 +97,9 @@ async function throws(fn, status, label) {
   eq(gaps.some(g => g.classroom_id === String(oldRoom._id)), false, 'כיתת שנה שעברה לא מייצרת חוסר');
 
   console.log('\n🎁 בונוס — מי רואה');
-  await throws(() => svc.setBonus({ user: hostMgr, body: { branch_id: host._id, date: gap.date, window: 'pm', classroom_id: room._id, amount: 5 } }), 400, 'סכום מתחת לרצפה נדחה');
-  const bonus = await svc.setBonus({ user: hostMgr, body: { branch_id: host._id, date: gap.date, window: 'pm', classroom_id: room._id, amount: 150 } });
+  await throws(() => svc.setBonus({ user: hostMgr, body: { branch_id: host._id, date: gap.date, window: 'pm', classroom_id: room._id, amount: 150 } }), 403, 'מנהלת סניף לא קובעת בונוס');
+  await throws(() => svc.setBonus({ user: owner, body: { branch_id: host._id, date: gap.date, window: 'pm', classroom_id: room._id, amount: 5 } }), 400, 'סכום מתחת לרצפה נדחה');
+  const bonus = await svc.setBonus({ user: owner, body: { branch_id: host._id, date: gap.date, window: 'pm', classroom_id: room._id, amount: 150 } });
   eq(bonus.amount, 150, 'בונוס נוצר');
   const fList = await svc.listForEmployee({ employee: rated.toObject() });
   const fGap = fList.gaps.find(g => g.classroom_id === String(room._id) && g.window === 'pm' && g.date === gap.date);
