@@ -54,6 +54,13 @@ const notificationEventSchema = new mongoose.Schema({
       'rate_request', 'rate_request_decision', 'cross_placement_request', 'cross_placement_decision',
       'cross_arrangement', 'shift_attendance_report', 'shift_attendance_report_office',
       'swap_request', 'swap_response', 'swap_offer', 'swap_picked',
+      // צפייה בסידור: the manager's nudge to whoever has not opened the
+      // published rota (shiftWeek.service#remindUnviewed).
+      'shift_published_reminder',
+      // הצעות כיסוי (coverOffers.service): an employee raised a hand for an
+      // open gap; the decision back to her; and the owner's alert when a
+      // rota was closed with unbalanceable holes.
+      'cover_offer', 'cover_offer_decision', 'rota_gaps',
       // The 10th-of-the-month nudge to file the attendance report at
       // daycareattendance.labor.gov.il. Unlike every other type here it refers
       // to no record — there is nothing in this database to point at — so its

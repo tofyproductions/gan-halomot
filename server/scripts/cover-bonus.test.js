@@ -108,6 +108,26 @@ async function throws(fn, status, label) {
   const lGap = lList.gaps.find(g => g.classroom_id === String(room._id) && g.window === 'pm' && g.date === gap.date);
   eq([!!lGap, lGap?.bonus ?? null], [true, null], 'מקומית רואה את החוסר — בלי בונוס');
 
+  console.log('\n🔔 סגירת סידור עם חוסר — ההתראה למנהל המערכת');
+  const shiftWeekSvc = require('../src/services/shifts/shiftWeek.service');
+  const weekDoc = await M.ShiftWeek.findOne({ branch_id: host._id, week_start: weekStart });
+  // Saturday before the week: the next-week submission window (Thu 18:00)
+  // is already shut, so publishing is allowed.
+  const satBefore = new Date(`${weekStart}T12:00:00Z`); satBefore.setUTCDate(satBefore.getUTCDate() - 1);
+  await shiftWeekSvc.publishWeek({ user: hostMgr, weekId: weekDoc._id, now: satBefore });
+  // The alert is fire-and-forget off the publish — give it a beat.
+  let alerts = [];
+  for (let i = 0; i < 20 && !alerts.length; i++) {
+    await new Promise(r => setTimeout(r, 100));
+    alerts = await M.NotificationEvent.find({ type: 'rota_gaps', recipient_id: adminU._id }).lean();
+  }
+  eq(alerts.length >= 1, true, 'מנהל המערכת קיבל התראת חוסר אחרי הסגירה');
+  eq(/בוגרים/.test(alerts[0]?.body || ''), true, 'ההתראה נוקבת בכיתה החסרה');
+  eq(new RegExp(host.name).test(alerts[0]?.title || ''), true, 'ההתראה נוקבת בסניף');
+  eq(/בונוס/.test(alerts[0]?.body || ''), true, 'ההתראה מכוונת להחלטת הבונוס');
+  const mgrGapAlerts = await M.NotificationEvent.countDocuments({ type: 'rota_gaps', recipient_id: hostMgrU._id });
+  eq(mgrGapAlerts, 0, 'ההתראה למנהל המערכת בלבד — לא למנהלת הסניף');
+
   console.log('\n🚫 בלי תעריף — חסימה נקייה');
   const off1 = await svc.createOffer({ employee: noRate.toObject(), body: { branch_id: host._id, date: gap.date, window: 'pm', classroom_id: room._id } });
   await throws(() => svc.decideOffer({ user: hostMgr, id: off1._id, approve: true }), 409, 'אישור בלי תעריף נעצר עם הנחיה');
