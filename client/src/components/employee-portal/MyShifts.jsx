@@ -87,11 +87,18 @@ function sunday(offsetWeeks) {
 /** The published rota of her branch — this week and next — with her own hours marked. */
 export default function MyShifts() {
   const explicitWeek = new URLSearchParams(window.location.search).get('week');
-  const [week, setWeek] = useState(explicitWeek || sunday(0));
-  // One silent jump forward: she opens on "השבוע", but when that one was
-  // never published and next week's rota IS out — the rota she came for is
-  // next week's. Landing her on "עוד לא פורסם" hid the published rota
-  // behind a tap many never made (and her view was never recorded).
+  /**
+   * Which week the door opens on. Sunday-Thursday she is living THIS week —
+   * that is the rota she consults. From Friday the working week is over and
+   * the question changes to "מתי אני בשבוע הבא": open on next week, provided
+   * it is published — the fetch below falls back to the current week when
+   * it is not. An explicit ?week always wins.
+   */
+  const preferNext = new Date().getDay() >= 5; // שישי ושבת
+  const [week, setWeek] = useState(explicitWeek || (preferNext ? sunday(1) : sunday(0)));
+  // One silent jump, either direction, at most once: forward when the
+  // current week was never published but next week's rota is out; back when
+  // Friday's next-week preference finds nothing published there yet.
   const [autoJumped, setAutoJumped] = useState(false);
   const [tab, setTab] = useState(new URLSearchParams(window.location.search).get('tab') === 'constraints' ? 'constraints' : 'rota');
   const [data, setData] = useState(null);
@@ -100,10 +107,10 @@ export default function MyShifts() {
     setLoading(true);
     api.get('/shifts/my', { params: { week } }).then(r => {
       setData(r.data);
-      if (!explicitWeek && !autoJumped && week === sunday(0)
-          && r.data?.published === false && !(r.data?.away || []).length) {
-        setAutoJumped(true);
-        setWeek(sunday(1));
+      const unpublished = r.data?.published === false && !(r.data?.away || []).length;
+      if (!explicitWeek && !autoJumped && unpublished) {
+        if (week === sunday(0)) { setAutoJumped(true); setWeek(sunday(1)); }
+        else if (preferNext && week === sunday(1)) { setAutoJumped(true); setWeek(sunday(0)); }
       }
     }).catch(() => setData({ error: true })).finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
