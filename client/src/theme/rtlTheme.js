@@ -126,9 +126,26 @@ const theme = createTheme({
   components: {
     MuiCssBaseline: {
       styleOverrides: {
+        /**
+         * Galaxy phones, two guards. Samsung's browsers "boost" font sizes
+         * on text they decide is too small, which inflates some rows and not
+         * others — the screen stops being proportional; text-size-adjust
+         * 100% turns the boost off. And a table wider than the viewport used
+         * to widen the PAGE, so the whole app wobbled sideways over a fixed
+         * bottom bar; the html/body clamp keeps the page itself still (the
+         * wide content scrolls inside main — AppShell).
+         */
+        html: {
+          textSizeAdjust: '100%',
+          WebkitTextSizeAdjust: '100%',
+          maxWidth: '100%',
+          overflowX: 'hidden',
+        },
         body: {
           backgroundColor: COLOR.background.default,
           WebkitFontSmoothing: 'antialiased',
+          maxWidth: '100%',
+          overflowX: 'hidden',
         },
 
         /**

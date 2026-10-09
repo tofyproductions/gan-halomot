@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Box, Drawer, Typography, Divider, Avatar, Select, MenuItem } from '@mui/material';
+import { Box, Drawer, Typography, Divider, Avatar, Select, MenuItem, TextField, InputAdornment } from '@mui/material';
+import SearchIcon from '@mui/icons-material/Search';
 import { useNavigate, useLocation } from 'react-router-dom';
 import MoreHorizIcon from '@mui/icons-material/MoreHoriz';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -66,6 +67,9 @@ export default function MobileNav() {
   const { branches, selectedBranch, changeBranch } = useBranch();
   const [moreOpen, setMoreOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  // The drawer's quick-find line. Cleared on every close, so the drawer
+  // always opens showing everything.
+  const [query, setQuery] = useState('');
   const model = useMemo(() => buildNavModel(user), [user]);
 
   const all = useMemo(() => model.flatMap((g) => g.items), [model]);
@@ -81,9 +85,19 @@ export default function MobileNav() {
     return picked.slice(0, 4);
   }, [all, user?.role]);
 
+  // Every screen with the group it lives under, for the search line: typing
+  // "שכר" should find the tab whether the word is in its label or its group.
+  const searchable = useMemo(
+    () => model.flatMap((g) => g.items.map((i) => ({ ...i, group: g.label }))),
+    [model],
+  );
+  const q = query.trim();
+  const hits = q ? searchable.filter((i) => i.label.includes(q) || i.group.includes(q)) : null;
+
   if (all.length === 0) return null;
 
-  const go = (path) => { setMoreOpen(false); navigate(path); };
+  const closeMore = () => { setMoreOpen(false); setQuery(''); };
+  const go = (path) => { closeMore(); navigate(path); };
 
   // 44px is the floor for a target somebody hits with a thumb while holding a
   // child's folder in the other hand.
@@ -155,7 +169,7 @@ export default function MobileNav() {
       <Drawer
         anchor="bottom"
         open={moreOpen}
-        onClose={() => setMoreOpen(false)}
+        onClose={closeMore}
         PaperProps={{ sx: { maxHeight: '80dvh', borderTopLeftRadius: 12, borderTopRightRadius: 12 } }}
       >
         <Box sx={{ p: 2 }}>
@@ -237,7 +251,58 @@ export default function MobileNav() {
 
           <Divider sx={{ mb: 1.5 }} />
 
-          {model.map((group) => (
+          {/**
+           * Quick find. The item buttons below are the same component the
+           * grouped list uses; Enter opens the first hit, so "שכר ⏎" is two
+           * gestures from anywhere.
+           */}
+          <TextField
+            size="small"
+            fullWidth
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && hits && hits[0]) go(hits[0].path); }}
+            placeholder="חיפוש מסך…"
+            inputProps={{ 'aria-label': 'חיפוש מסך' }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start"><SearchIcon sx={{ fontSize: 20 }} /></InputAdornment>
+              ),
+            }}
+            sx={{ mb: 1.5 }}
+          />
+
+          {hits ? (
+            hits.length === 0 ? (
+              <Typography sx={{ fontSize: '0.875rem', color: 'text.secondary', py: 2, textAlign: 'center' }}>
+                אין מסך בשם הזה
+              </Typography>
+            ) : (
+              hits.map((item) => {
+                const Icon = iconFor(item.id);
+                return (
+                  <Box
+                    component="button"
+                    type="button"
+                    key={item.id}
+                    onClick={() => go(item.path)}
+                    sx={{
+                      display: 'flex', alignItems: 'center', gap: 1.25, width: '100%',
+                      minHeight: 44, px: 1, borderRadius: 1, border: 0,
+                      bgcolor: 'transparent', cursor: 'pointer', fontFamily: 'inherit',
+                      fontSize: '0.875rem', textAlign: 'inherit', color: 'text.primary',
+                    }}
+                  >
+                    <Icon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                    {item.label}
+                    <Typography component="span" sx={{ fontSize: '0.6875rem', color: 'text.secondary', mr: 'auto' }}>
+                      {item.group}
+                    </Typography>
+                  </Box>
+                );
+              })
+            )
+          ) : model.map((group) => (
             <Box key={group.label} sx={{ mb: 2 }}>
               <Typography sx={{ fontSize: '0.6875rem', color: 'text.secondary', mb: 0.5 }}>
                 {group.label}

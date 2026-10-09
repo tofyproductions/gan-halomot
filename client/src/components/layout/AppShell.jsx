@@ -75,6 +75,10 @@ export default function AppShell() {
         sx={{
           flex: 1,
           minWidth: 0,
+          // A wide table pans HERE, between the header and the bottom bar,
+          // instead of dragging the whole page (and the fixed nav) sideways —
+          // the Galaxy disproportion. html/body are clamped in rtlTheme.
+          overflowX: 'auto',
           px: { xs: 2, md: 3 },
           py: { xs: 2, md: 2.5 },
           // Clear of the phone's bottom bar, which is fixed and would otherwise
