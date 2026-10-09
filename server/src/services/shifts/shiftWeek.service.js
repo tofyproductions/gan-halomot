@@ -794,6 +794,13 @@ async function myShifts({ employee, weekStart }) {
   const awayNames = new Map((await Branch.find({ _id: { $in: awayWeeks.map(w => w.branch_id) } }).select('name').lean()).map(b => [String(b._id), b.name]));
   const away = awayWeeks.flatMap(w => (w.published || []).filter(e => String(e.employee_id) === String(employee._id))
     .map(e => ({ ...e, branch_id: String(w.branch_id), branch_name: awayNames.get(String(w.branch_id)) || '' })));
+  // The room's NAME, not its id: her own screen says "תינוקייה בהרצליה",
+  // and the host branch's room list is nowhere else in this payload.
+  const awayRoomIds = [...new Set(away.filter(e => e.classroom_id).map(e => String(e.classroom_id)))];
+  if (awayRoomIds.length) {
+    const awayRooms = new Map((await Classroom.find({ _id: { $in: awayRoomIds } }).select('name').lean()).map(r => [String(r._id), r.name]));
+    for (const e of away) e.classroom_name = e.classroom_id ? (awayRooms.get(String(e.classroom_id)) || '') : '';
+  }
   return {
     week_start: weekStart,
     dates: weekDays(weekStart),
