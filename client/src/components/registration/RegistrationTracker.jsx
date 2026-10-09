@@ -629,9 +629,12 @@ export default function RegistrationTracker() {
                 '&:hover': { boxShadow: 3 },
               }}
             >
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
+              {/* The row WRAPS when the screen runs out of width — the action
+                  buttons used to be pushed past the card's edge, and the one
+                  that vanished first (leftmost in RTL) was the delete. */}
+              <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" useFlexGap rowGap={1}>
                 {/* Info */}
-                <Stack direction="row" spacing={4} alignItems="center" sx={{ flex: 1 }}>
+                <Stack direction="row" spacing={4} alignItems="center" flexWrap="wrap" useFlexGap rowGap={1} sx={{ flex: 1, minWidth: 0 }}>
                   <Checkbox
                     size="small"
                     checked={selected.includes(id)}
@@ -717,7 +720,7 @@ export default function RegistrationTracker() {
                 </Stack>
 
                 {/* Actions */}
-                <Stack direction="row" spacing={0.5}>
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ flexShrink: 0 }}>
                   <Tooltip title="מסמכים וחוזה">
                     <IconButton size="small" onClick={() => openDocsDialog(reg)}>
                       <FolderIcon fontSize="small" />
