@@ -659,10 +659,14 @@ export default function ClassTrackingPage() {
     if (c.session) return cellFor(c.session);
     if (c.closed) return (
       <Tooltip title={`הגן סגור · ${c.closed} · ${dayMonth(c.date)}`}>
-        <Typography variant="caption" noWrap sx={{
-          color: 'info.main', fontWeight: 600, maxWidth: 76,
-          display: 'inline-block', verticalAlign: 'middle',
-        }}>{c.closed}</Typography>
+        <Box sx={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center' }}>
+          <Typography variant="caption" noWrap sx={{
+            color: 'info.main', fontWeight: 600, maxWidth: 76, lineHeight: 1.2,
+          }}>{c.closed}</Typography>
+          <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: 11, lineHeight: 1.2 }}>
+            {dayMonth(c.date)}
+          </Typography>
+        </Box>
       </Tooltip>
     );
     return (
