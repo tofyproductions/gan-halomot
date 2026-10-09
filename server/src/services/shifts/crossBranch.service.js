@@ -27,13 +27,21 @@ async function foreignCandidates({ hostBranchId }) {
   const names = await branchNames([...new Set(emps.map(e => String(e.branch_id)))]);
   const thisMonth = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' }).slice(0, 7);
   const { primaryRates } = require('../payrollCalc');
-  return emps.map(e => ({
-    _id: String(e._id), full_name: e.full_name, branch_id: String(e.branch_id),
-    branch_name: names.get(String(e.branch_id)) || '', has_rate: hasBranchRate(e, hostBranchId),
-    // Her regular hourly rate — read where payroll reads it; the dialog
-    // shows it as the default.
-    home_hourly_rate: Number(primaryRates(e, thisMonth).hourly_rate) || null,
-  }));
+  return emps.map(e => {
+    const has_rate = hasBranchRate(e, hostBranchId);
+    return {
+      _id: String(e._id), full_name: e.full_name, branch_id: String(e.branch_id),
+      branch_name: names.get(String(e.branch_id)) || '', has_rate,
+      /**
+       * Her regular hourly rate — ONLY while she still needs a rate set up
+       * here (the dialog's prefill). With a host rate already on her card
+       * the figure serves nothing, and leaving it on every candidate handed
+       * any branch manager the whole network's wage list on every board
+       * load.
+       */
+      home_hourly_rate: has_rate ? null : (Number(primaryRates(e, thisMonth).hourly_rate) || null),
+    };
+  });
 }
 
 async function activeArrangements({ hostBranchId, employeeIds }) {

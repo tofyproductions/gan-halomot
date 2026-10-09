@@ -8,6 +8,7 @@ const { compareChildIdentity } = require('../services/child-identity.service');
 const { cleanupChildrenOfRegistration } = require('../services/childCleanup');
 const { attachSecondParent } = require('../services/household.service');
 const { getBranchFilter } = require('../utils/branch-filter');
+const { canAccessRegistration } = require('../utils/branch-scope');
 const env = require('../config/env');
 
 /**
@@ -1116,6 +1117,11 @@ async function downloadContractVersion(req, res, next) {
     const version = await ContractVersion.findById(versionId).lean();
     if (!version) {
       return res.status(404).json({ error: 'Contract version not found' });
+    }
+    // The version id alone is not a grant: the signed contract belongs to a
+    // family of a branch, and the caller must hold that branch.
+    if (!(await canAccessRegistration(req, version.registration_id))) {
+      return res.status(403).json({ error: 'הרישום שייך לסניף שאינו בהרשאותיך' });
     }
     if (version.contract_pdf_path && isServableUrl(version.contract_pdf_path)) {
       return res.json({ url: version.contract_pdf_path });

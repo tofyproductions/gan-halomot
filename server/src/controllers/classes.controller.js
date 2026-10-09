@@ -83,7 +83,18 @@ async function updateProvider(req, res, next) {
     if (update.vat_mode !== undefined) {
       update.vat_mode = update.vat_mode === 'registered' ? 'registered' : 'exempt';
     }
-    if (req.body.billing !== undefined) update.billing = billingOf(req.body.billing);
+    if (req.body.billing !== undefined) {
+      // The monthly retainer is money — a change to it is accounting's act,
+      // exactly as the routes-file comment promises.
+      const nextBilling = billingOf(req.body.billing);
+      const current = await ClassProvider.findById(req.params.id).select('billing').lean();
+      if (!current) return res.status(404).json({ error: 'ספק לא נמצא' });
+      const changed = JSON.stringify(current.billing || null) !== JSON.stringify(nextBilling || null);
+      if (changed && !['system_admin', 'accountant'].includes(req.user?.role)) {
+        return res.status(403).json({ error: 'שינוי הסכם הריטיינר — הנהלת חשבונות בלבד' });
+      }
+      update.billing = nextBilling;
+    }
     const provider = await ClassProvider.findByIdAndUpdate(req.params.id, update, { new: true }).lean();
     if (!provider) return res.status(404).json({ error: 'ספק לא נמצא' });
     res.json({ provider });
@@ -120,19 +131,39 @@ async function setProviderSchedule(req, res, next) {
     if (!provider) return res.status(404).json({ error: 'ספק לא נמצא' });
 
     const body = req.body || {};
-    const rows = Array.isArray(body.rows) ? body.rows : [];
+    /**
+     * The caller's reach: a branch manager edits HER branches' rows of the
+     * shared provider; rows of branches outside her scope are ignored (not
+     * written, and — below — not swept off either), so the dialog's full
+     * round-trip stays harmless. Admin/accountant (scope null) edit all.
+     */
+    const scope = Array.isArray(req.branchScope) ? req.branchScope.map(String) : null;
+    const inScope = (bid) => !scope || scope.includes(String(bid));
+    const allRows = Array.isArray(body.rows) ? body.rows : [];
+    const rows = allRows.filter(r => r.branch_id && inScope(r.branch_id));
 
     // The branches are taken from the rows themselves when the caller did not
     // state them — the arrangement is the truth, and a branch list that
     // disagrees with it is the kind of thing nobody notices for a term.
+    // A scoped caller's list keeps the other branches she cannot speak for.
     const fromRows = [...new Set(rows.map(r => String(r.branch_id || '')).filter(Boolean))];
-    provider.branch_ids = Array.isArray(body.branch_ids) && body.branch_ids.length
-      ? [...new Set(body.branch_ids.filter(Boolean).map(String))]
+    const requested = Array.isArray(body.branch_ids) && body.branch_ids.length
+      ? [...new Set(body.branch_ids.filter(Boolean).map(String))].filter(inScope)
       : fromRows;
+    const preserved = scope ? (provider.branch_ids || []).map(String).filter(b => !scope.includes(b)) : [];
+    provider.branch_ids = [...new Set([...preserved, ...requested])];
     if (body.vat_mode !== undefined) {
       provider.vat_mode = body.vat_mode === 'registered' ? 'registered' : 'exempt';
     }
-    if (body.billing !== undefined) provider.billing = billingOf(body.billing);
+    if (body.billing !== undefined) {
+      // Same rule as updateProvider: retainer money moves only by accounting.
+      const nextBilling = billingOf(body.billing);
+      const changed = JSON.stringify(provider.billing ? provider.toObject().billing : null) !== JSON.stringify(nextBilling || null);
+      if (changed && !['system_admin', 'accountant'].includes(req.user?.role)) {
+        return res.status(403).json({ error: 'שינוי הסכם הריטיינר — הנהלת חשבונות בלבד' });
+      }
+      provider.billing = nextBilling;
+    }
     await provider.save();
 
     const kept = [];
@@ -161,11 +192,12 @@ async function setProviderSchedule(req, res, next) {
       }
     }
 
-    // Anything of this provider's that is no longer in the arrangement.
-    await ClassProgram.updateMany(
-      { provider_id: provider._id, is_active: true, _id: { $nin: kept } },
-      { is_active: false },
-    );
+    // Anything of this provider's that is no longer in the arrangement —
+    // inside the caller's own branches only. Another branch's programs are
+    // not hers to switch off.
+    const sweep = { provider_id: provider._id, is_active: true, _id: { $nin: kept } };
+    if (scope) sweep.branch_id = { $in: scope };
+    await ClassProgram.updateMany(sweep, { is_active: false });
 
     const programs = await ClassProgram.find({ provider_id: provider._id, is_active: true })
       .sort({ branch_id: 1, default_day: 1, default_time: 1 }).lean();
@@ -239,6 +271,7 @@ async function createProgram(req, res, next) {
   try {
     const b = req.body || {};
     if (!b.branch_id || !b.name) return res.status(400).json({ error: 'סניף ושם חוג נדרשים' });
+    assertBranchInScope(req, b.branch_id);
     const program = await ClassProgram.create({
       branch_id: b.branch_id,
       provider_id: b.provider_id || null,
@@ -268,8 +301,10 @@ async function updateProgram(req, res, next) {
     // to cast '' to an ObjectId — the whole edit died on it.
     if (update.provider_id === '') update.provider_id = null;
     if (update.classroom_id === '') update.classroom_id = null;
+    const existing = await ClassProgram.findById(req.params.id).select('branch_id').lean();
+    if (!existing) return res.status(404).json({ error: 'חוג לא נמצא' });
+    assertBranchInScope(req, existing.branch_id);
     const program = await ClassProgram.findByIdAndUpdate(req.params.id, update, { new: true }).lean();
-    if (!program) return res.status(404).json({ error: 'חוג לא נמצא' });
     res.json({ program });
   } catch (err) { next(err); }
 }
@@ -282,6 +317,9 @@ async function deleteProgram(req, res, next) {
      * exists (קפלן's תנועלולה did exactly that). Past months stay: they are
      * history, possibly already invoiced and paid.
      */
+    const prog = await ClassProgram.findById(req.params.id).select('branch_id').lean();
+    if (!prog) return res.status(404).json({ error: 'חוג לא נמצא' });
+    assertBranchInScope(req, prog.branch_id);
     await ClassProgram.findByIdAndUpdate(req.params.id, { is_active: false });
     const monthStart = `${classSessions.monthOf(new Date())}-01`;
     const { deletedCount } = await ClassSession.deleteMany({
@@ -312,6 +350,7 @@ async function createSession(req, res, next) {
     const b = req.body || {};
     const program = await ClassProgram.findById(b.program_id).lean();
     if (!program) return res.status(404).json({ error: 'חוג לא נמצא' });
+    assertBranchInScope(req, program.branch_id);
     if (!b.date) return res.status(400).json({ error: 'תאריך נדרש' });
     const session = await ClassSession.create({
       program_id: program._id,
@@ -336,6 +375,7 @@ async function generateSessions(req, res, next) {
     }
     const program = await ClassProgram.findById(program_id).lean();
     if (!program) return res.status(404).json({ error: 'חוג לא נמצא' });
+    assertBranchInScope(req, program.branch_id);
     const docs = dates.filter(Boolean).map(d => ({
       program_id: program._id,
       branch_id: program.branch_id,
@@ -396,14 +436,19 @@ async function updateSession(req, res, next) {
     const fields = ['date', 'time', 'rate', 'classroom_id'];
     const update = {};
     for (const f of fields) if (req.body[f] !== undefined) update[f] = req.body[f];
+    const existing = await ClassSession.findById(req.params.id).select('branch_id').lean();
+    if (!existing) return res.status(404).json({ error: 'מפגש לא נמצא' });
+    assertBranchInScope(req, existing.branch_id);
     const session = await ClassSession.findByIdAndUpdate(req.params.id, update, { new: true }).lean();
-    if (!session) return res.status(404).json({ error: 'מפגש לא נמצא' });
     res.json({ session });
   } catch (err) { next(err); }
 }
 
 async function deleteSession(req, res, next) {
   try {
+    const session = await ClassSession.findById(req.params.id).select('branch_id').lean();
+    if (!session) return res.json({ ok: true });
+    assertBranchInScope(req, session.branch_id);
     await ClassSession.deleteOne({ _id: req.params.id });
     res.json({ ok: true });
   } catch (err) { next(err); }
@@ -475,10 +520,13 @@ async function applyAnswer(session, body, { manager, lead, userId }) {
     // Half the rate is the common case and the default, but the number is
     // whatever was actually agreed — the old sheet's corrections were never
     // halves, they were "one group of three did not happen".
+    // Clamped to [0, rate]: "partial" can never bill MORE than the whole
+    // meeting — the amount is a correction downward, not a free number.
+    const rate = Number(session.rate) || 0;
     const amt = Number(raw.partial_amount);
     session.partial_amount = Number.isFinite(amt) && amt >= 0
-      ? amt
-      : Math.round(((Number(session.rate) || 0) / 2) * 100) / 100;
+      ? Math.min(amt, rate)
+      : Math.round((rate / 2) * 100) / 100;
     session.no_show_reason = raw.reason || '';
   } else if (status === 'postponed' && raw.new_date) {
     /**
@@ -521,6 +569,14 @@ async function answerSession(req, res, next) {
     const manager = isManagerRole(req);
     const lead = await isClassLead(req, session);
     if (!manager && !lead) return res.status(403).json({ error: 'אין הרשאה לענות על מפגש זה' });
+    // A manager's role is not a key to every branch: the session must sit in
+    // one she manages (admin/accountant pass — scope null).
+    if (manager && !lead) {
+      const scope = managedBranchIds(req);
+      if (scope && !scope.includes(String(session.branch_id))) {
+        return res.status(403).json({ error: 'המפגש שייך לסניף שאינו בניהולך' });
+      }
+    }
 
     await applyAnswer(session, req.body, { manager, lead, userId: req.user?.id });
     res.json({ session });
@@ -654,7 +710,9 @@ async function dueSessions(req, res, next) {
         // "תינוקייה + צעירים" when they sit together: one meeting, one tick.
         classroom_category: categoryLabel(prog),
         time: s.time || '',
-        rate: Number(s.rate) || 0,
+        // The price of the meeting is the manager's fact. A class lead
+        // answering her own room's popup gets the question, not the money.
+        ...(manager ? { rate: Number(s.rate) || 0 } : {}),
       });
     }
 

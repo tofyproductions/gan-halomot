@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const router = express.Router();
 const documentsController = require('../controllers/documents.controller');
+const { requireBranchScope } = require('../middleware/auth');
 
 // Accept the document types a registration actually carries — PDFs, images and
 // office files — and cap the size at the multer layer so an oversized or
@@ -22,12 +23,13 @@ const upload = multer({
 });
 
 // GET /api/documents/:registrationId
-router.get('/:registrationId', documentsController.getByRegistration);
+// Parent ID photos and payment proofs — a management read (M3).
+router.get('/:registrationId', requireBranchScope, documentsController.getByRegistration);
 
 // POST /api/documents/upload
-router.post('/upload', upload.single('file'), documentsController.upload);
+router.post('/upload', requireBranchScope, upload.single('file'), documentsController.upload);
 
 // GET /api/documents/:id/download
-router.get('/:id/download', documentsController.download);
+router.get('/:id/download', requireBranchScope, documentsController.download);
 
 module.exports = router;

@@ -150,6 +150,15 @@ async function uploadContract(req, res, next) {
     if (!file_data || !file_name) {
       return res.status(400).json({ error: 'קובץ ושם קובץ נדרשים' });
     }
+    // A contract is FILED somewhere, and that somewhere must be the
+    // caller's: a body-supplied registration/branch outside her scope was a
+    // way to plant a "signed" document on another branch's family.
+    if (registration_id && !(await canAccessRegistration(req, registration_id))) {
+      return res.status(403).json({ error: 'הרישום שייך לסניף שאינו בהרשאותיך' });
+    }
+    if (branch_id && !(await canAccessBranch(req, branch_id))) {
+      return res.status(403).json({ error: 'הסניף מחוץ להרשאות שלך' });
+    }
 
     const contract = await Contract.create({
       registration_id: registration_id || null,
@@ -190,8 +199,14 @@ async function getContractFile(req, res, next) {
 
 async function deleteContract(req, res, next) {
   try {
-    const contract = await Contract.findByIdAndDelete(req.params.id);
+    // Look, then judge, then delete — getContractFile's own gate, which the
+    // delete never had: a manager could erase any branch's signed contract.
+    const contract = await Contract.findById(req.params.id).lean();
     if (!contract) return res.status(404).json({ error: 'חוזה לא נמצא' });
+    if (!(await canAccessContract(req, contract))) {
+      return res.status(403).json({ error: 'החוזה שייך לסניף שאינו בהרשאותיך' });
+    }
+    await Contract.deleteOne({ _id: contract._id });
     res.json({ message: 'חוזה נמחק' });
   } catch (error) {
     next(error);

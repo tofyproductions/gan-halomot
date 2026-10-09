@@ -12,6 +12,24 @@ const CHILD_UPDATE_BLOCKLIST = [
   'registration_id', 'is_active', 'hidden_at', 'hidden_by_name', 'hide_note',
 ];
 
+
+/**
+ * What a NON-management staff token may see of a child. The room's needs
+ * stay — name, birth date, allergies, medical alerts, the emergency numbers
+ * a carer must be able to dial — and the family's identity and money leave:
+ * ת"ז of child and parents, address, email, fees and the registration
+ * document. Management roles keep the full record.
+ */
+const MANAGEMENT_ROLES = ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'];
+function childForRole(c, role) {
+  if (MANAGEMENT_ROLES.includes(role)) return c;
+  const {
+    child_id_number, parent_id_number, parent2_id_number,
+    address, email, parent2_email, notes, ...safe
+  } = c;
+  return safe;
+}
+
 async function getAll(req, res, next) {
   try {
     const { classroom_id, year } = req.query;
@@ -73,7 +91,7 @@ async function getAll(req, res, next) {
     const children = await query.lean();
 
     const result = children.map(c => ({
-      ...c,
+      ...childForRole(c, req.user?.role),
       id: c._id,
       classroom_name: c.classroom_id?.name || null,
       classroom_capacity: c.classroom_id?.capacity || null,
@@ -107,13 +125,16 @@ async function getById(req, res, next) {
     child.classroom_name = child.classroom_id?.name || null;
     child.classroom_id = child.classroom_id?._id || child.classroom_id;
 
+    // The registration (fees, signatures, access_token) is management's; a
+    // carer's read of her room's child does not carry the family's file.
+    const management = MANAGEMENT_ROLES.includes(req.user?.role);
     let registration = null;
-    if (child.registration_id) {
+    if (management && child.registration_id) {
       registration = await Registration.findById(child.registration_id).lean();
       if (registration) registration.id = registration._id;
     }
 
-    res.json({ child, registration });
+    res.json({ child: childForRole(child, req.user?.role), registration });
   } catch (error) {
     next(error);
   }

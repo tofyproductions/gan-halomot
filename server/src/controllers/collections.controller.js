@@ -7,6 +7,14 @@ const { calculatePaymentStatus } = require('../services/prorate.service');
 const { buildRegistrationMonths } = require('../services/collection-view.service');
 const { buildHouseholds } = require('../services/household.service');
 const { getBranchFilter } = require('../utils/branch-filter');
+const { canAccessRegistration } = require('../utils/branch-scope');
+
+/** 403 unless the registration in the URL sits in the caller's branches. */
+async function assertRegInScope(req, res) {
+  if (await canAccessRegistration(req, req.params.registrationId)) return true;
+  res.status(403).json({ error: 'הרישום שייך לסניף שאינו בהרשאותיך' });
+  return false;
+}
 
 async function getAll(req, res, next) {
   try {
@@ -215,6 +223,12 @@ async function getSummerCamps(req, res, next) {
  */
 async function upsertSummerCamp(req, res, next) {
   try {
+    if (req.body?.branch_id) {
+      const scope = req.branchScope;
+      if (Array.isArray(scope) && !scope.map(String).includes(String(req.body.branch_id))) {
+        return res.status(403).json({ error: 'הסניף מחוץ להרשאות שלך' });
+      }
+    }
     const { branch_id, year, enabled, label, start_date, end_date, amount, notes } = req.body || {};
     if (!branch_id) return res.status(400).json({ error: 'branch_id נדרש' });
     const targetYear = year ? normalizeYear(year) : getAcademicYears().current.range;
@@ -249,6 +263,7 @@ async function upsertSummerCamp(req, res, next) {
 
 async function getByRegistration(req, res, next) {
   try {
+    if (!(await assertRegInScope(req, res))) return;
     const { registrationId } = req.params;
     const registration = await Registration.findById(registrationId)
       .populate('classroom_id', 'name').lean();
@@ -274,6 +289,7 @@ async function getByRegistration(req, res, next) {
  */
 async function updateCampEnrollment(req, res, next) {
   try {
+    if (!(await assertRegInScope(req, res))) return;
     const { registrationId } = req.params;
     const raw = req.body?.enrolled;
     const enrolled = raw === true || raw === 'true' ? true
@@ -330,7 +346,15 @@ async function bulkCampEnrollment(req, res, next) {
     const onlyUnmarked = req.body?.only_unmarked !== false;
 
     const regFilter = { ...getBranchFilter(req) };
-    if (req.body?.branch_id) regFilter.branch_id = req.body.branch_id;
+    if (req.body?.branch_id) {
+      // A body branch is a NARROWING of the caller's scope, never an escape
+      // from it — attachBranchScope only validates ?branch on the query.
+      const scope = req.branchScope;
+      if (Array.isArray(scope) && !scope.map(String).includes(String(req.body.branch_id))) {
+        return res.status(403).json({ error: 'הסניף מחוץ להרשאות שלך' });
+      }
+      regFilter.branch_id = req.body.branch_id;
+    }
     const regs = await Registration.find(regFilter).select('_id child_id').lean();
     if (regs.length === 0) return res.json({ ok: true, updated: 0 });
 
@@ -361,6 +385,7 @@ async function bulkCampEnrollment(req, res, next) {
 
 async function updateMonth(req, res, next) {
   try {
+    if (!(await assertRegInScope(req, res))) return;
     const { registrationId, monthIndex } = req.params;
     const { receipt_number, paid_amount, payment_status, notes, force, fee_override, fee_override_reason } = req.body;
     const monthNum = parseInt(monthIndex);
@@ -390,7 +415,11 @@ async function updateMonth(req, res, next) {
     let isDuplicateOverride = false;
     if (receipt_number) {
       // Find ALL collections - we need to check each manually for multi-receipt cells
-      const allCollections = await Collection.find({})
+      // Clamped to the caller's own branches: the duplicate answer below
+      // echoes child and parent names, and an unscoped search made receipt
+      // numbers an enumeration oracle for other branches' families.
+      const dupRegIds = await Registration.find({ ...getBranchFilter(req, 'branch_id') }).select('_id').lean();
+      const allCollections = await Collection.find({ registration_id: { $in: dupRegIds.map(r => r._id) } })
         .populate('registration_id', 'child_name parent_name parent_id_number parent_phone')
         .lean();
 
@@ -508,6 +537,7 @@ async function updateMonth(req, res, next) {
 
 async function updateExitMonth(req, res, next) {
   try {
+    if (!(await assertRegInScope(req, res))) return;
     const { registrationId } = req.params;
     const { exit_month } = req.body;
 
@@ -536,6 +566,7 @@ async function updateExitMonth(req, res, next) {
  */
 async function updateNotes(req, res, next) {
   try {
+    if (!(await assertRegInScope(req, res))) return;
     const { registrationId } = req.params;
     const notes = String(req.body?.notes ?? '').slice(0, 2000);
 
@@ -559,6 +590,7 @@ async function updateNotes(req, res, next) {
 
 async function updateRegistrationFee(req, res, next) {
   try {
+    if (!(await assertRegInScope(req, res))) return;
     const { registrationId } = req.params;
     const { receipt_number, year } = req.body;
 
@@ -603,6 +635,7 @@ async function updateRegistrationFee(req, res, next) {
 
 async function recalculate(req, res, next) {
   try {
+    if (!(await assertRegInScope(req, res))) return;
     const { registrationId } = req.params;
     const registration = await Registration.findById(registrationId);
     if (!registration) {

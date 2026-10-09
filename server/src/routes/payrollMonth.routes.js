@@ -14,7 +14,7 @@ router.use(authMiddleware);
 
 // Monthly payroll table — branch_manager has READ access only.
 // Edits go through pending change-request flow (see /change-requests below).
-router.get('/',                               c.getMonth);
+router.get('/',                               requireBranchScope, c.getMonth);
 
 // The same month, one row per unit reporting to the viewer instead of one row
 // per employee. Declared before the /:param routes below, and separate from
@@ -29,7 +29,7 @@ router.get('/accountant-contacts',            requireRole('system_admin', 'accou
 router.put('/accountant-contacts',            requireRole('system_admin', 'accountant'), c.setAccountantContacts);
 // Standing "fill in your branch's missing punches" assignments. `mine` is what
 // the branch manager's login gate polls; completing is theirs to do.
-router.get('/punch-entry-tasks/mine',         c.myPunchEntryTasks);
+router.get('/punch-entry-tasks/mine',         requireBranchScope, c.myPunchEntryTasks);
 router.post('/punch-entry-tasks/:id/done',    requireRole('system_admin', 'accountant', 'branch_manager'), c.completePunchEntryTask);
 // A branch manager labels her own branches' >2-punch days; the controller
 // stores hers as `pending` until accounting confirms (models/PunchResolution).
@@ -104,7 +104,7 @@ router.delete('/custom-columns/:id',          requireRole('system_admin', 'accou
 // her own branches, and only `approved` rows reach a salary). She may not edit
 // or delete: a filed request is a record, and withdrawing it is the
 // accountant's rejection rather than the manager's eraser.
-router.get('/adjustments',                    c.listAdjustments);
+router.get('/adjustments',                    requireBranchScope, c.listAdjustments);
 router.post('/adjustments',                   requireBranchScope, c.createAdjustment);
 router.post('/adjustments/decide-bulk',       requireRole('system_admin', 'accountant'), c.decideAdjustmentsBulk);
 router.post('/adjustments/:id/decide',        requireRole('system_admin', 'accountant'), c.decideAdjustment);

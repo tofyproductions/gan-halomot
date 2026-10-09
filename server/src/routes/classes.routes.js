@@ -25,19 +25,19 @@ router.use(attachBranchScope);
 const MANAGER = requireRole('system_admin', 'branch_manager', 'accountant');
 
 // Providers (ספקי גנים)
-router.get('/providers', c.listProviders);
+router.get('/providers', MANAGER, c.listProviders);
 router.post('/providers', MANAGER, c.createProvider);
 router.put('/providers/:id', MANAGER, c.updateProvider);
 router.delete('/providers/:id', MANAGER, c.deleteProvider);
 // One provider's whole arrangement — which branches, which groups, which days,
 // which rates — read and written in a single call. See the controller.
-router.get('/providers/:id/schedule', c.getProviderSchedule);
+router.get('/providers/:id/schedule', MANAGER, c.getProviderSchedule);
 router.put('/providers/:id/schedule', MANAGER, c.setProviderSchedule);
 // A monthly-retainer provider's year: paid vs held, and who owes whom.
 router.get('/providers/:id/settlement', MANAGER, c.providerSettlement);
 
 // Programs (חוגים)
-router.get('/programs', c.listPrograms);
+router.get('/programs', MANAGER, c.listPrograms);
 router.post('/programs', MANAGER, c.createProgram);
 router.put('/programs/:id', MANAGER, c.updateProgram);
 router.delete('/programs/:id', MANAGER, c.deleteProgram);
@@ -45,8 +45,8 @@ router.delete('/programs/:id', MANAGER, c.deleteProgram);
 // Sessions — the occurrence popup poll + answer are open to any authenticated
 // user (the controller checks manager-role OR class-lead ownership per session).
 router.get('/sessions/due', c.dueSessions);
-router.get('/closed-days', c.closedDays);
-router.get('/sessions', c.listSessions);
+router.get('/closed-days', MANAGER, c.closedDays);
+router.get('/sessions', MANAGER, c.listSessions);
 router.post('/sessions', MANAGER, c.createSession);
 router.post('/sessions/generate', MANAGER, c.generateSessions);
 // Write a whole month from each class's fixed day. Idempotent — a date that

@@ -26,14 +26,14 @@ router.put('/employees/:id',        requireRole('system_admin', 'branch_manager'
 router.delete('/employees/:id',     requireRole('system_admin', 'branch_manager', 'accountant'), c.removeEmployee);
 
 // Attendance & hours
-router.get('/attendance',                      c.attendanceByMonth);
+router.get('/attendance',                      requireBranchScope, c.attendanceByMonth);
 router.get('/employees/:id/hours-report',      requireBranchScope, c.hoursReport);
 // The same report summarised across a range of months, one row per month.
 router.get('/employees/:id/hours-range',       requireBranchScope, c.hoursRange);
 // …and the same span for a whole gan, one row per employee.
-router.get('/hours-range-bulk',                c.hoursRangeBulk);
-router.get('/hours-report-bulk',               c.hoursReportBulk);
-router.post('/hours-report/send-managers',     c.sendHoursReportsToManagers);
+router.get('/hours-range-bulk',                requireBranchScope, c.hoursRangeBulk);
+router.get('/hours-report-bulk',               requireBranchScope, c.hoursReportBulk);
+router.post('/hours-report/send-managers',     requireBranchScope, c.sendHoursReportsToManagers);
 // Rich monthly hours-report distribution (employees / managers / office / specific email)
 router.get('/hours-distribution/preview',           requireRole('system_admin', 'accountant'), audit.hoursDistributionPreview);
 router.get('/hours-distribution/preview-html',      requireRole('system_admin', 'accountant'), audit.hoursDistributionPreviewHtml);
@@ -63,7 +63,7 @@ router.get('/clock-commands/:id',              requireRole('system_admin', 'bran
 
 // Salary calculation
 router.get('/employees/:id/salary',            requireBranchScope, c.salaryForEmployee);
-router.get('/salary-summary',                  c.salarySummary);
+router.get('/salary-summary',                  requireBranchScope, c.salarySummary);
 
 // Manual punch entry / deletion (for corrections)
 router.post('/manual-punches',                 requireRole('system_admin', 'branch_manager', 'accountant'), c.createManualPunches);
@@ -80,7 +80,7 @@ router.delete('/fixed-schedules/:employeeId/exception/:date',  requireRole('syst
 
 // Employee commitments (weekly schedules)
 const commitments = require('../controllers/commitments.controller');
-router.get('/commitments',                     commitments.list);
+router.get('/commitments',                     requireBranchScope, commitments.list);
 router.put('/commitments/exempt',              requireRole('system_admin', 'branch_manager', 'accountant'), commitments.setExempt);
 router.put('/commitments',                     requireRole('system_admin', 'branch_manager', 'accountant'), commitments.upsert);
 router.delete('/commitments/:id',              requireRole('system_admin', 'branch_manager', 'accountant'), commitments.remove);
@@ -117,19 +117,19 @@ router.get('/my-form-101/:id/file',            c.myForm101File);
 // ── Payslip audit (admin only) — upload xlsx + PDF, get a comparison report ──
 router.post(
   '/payslip-audit/parse-table',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   auditUpload.single('file'),
   audit.parseTable,
 );
 router.post(
   '/payslip-audit/parse-payslips',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   auditUpload.single('file'),
   audit.parsePayslips,
 );
 router.post(
   '/payslip-audit/run',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   auditUpload.fields([
     { name: 'table_file', maxCount: 1 },
     { name: 'payslip_file', maxCount: 1 },
@@ -138,13 +138,13 @@ router.post(
 );
 router.post(
   '/payslip-audit/list-branches',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   auditUpload.single('file'),
   audit.listBranches,
 );
 router.post(
   '/payslip-audit/run-multi',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   // Allow up to 1 table_file + 10 payslip_file_<i> entries (4 expected, 10 cap is safe)
   // + optional cibus_file (Cibus/Pluxee monthly report).
   auditUpload.fields([
@@ -165,7 +165,7 @@ router.post(
 );
 router.post(
   '/payslip-audit/run-system',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   // Payslips-only: compared against the in-system salary table for the month.
   auditUpload.fields([
     { name: 'cibus_file', maxCount: 1 },
@@ -184,61 +184,61 @@ router.post(
 );
 router.post(
   '/payslip-audit/email',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   audit.emailAudit,
 );
 router.post(
   '/payslip-audit/email/preview',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   audit.previewAuditEmail,
 );
 router.get(
   '/payslip-audit/email/defaults',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   audit.getDefaultRecipients,
 );
 
 // Audit history (saved runs)
 router.get(
   '/payslip-audit/history',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   audit.listAuditHistory,
 );
 router.get(
   '/payslip-audit/history/:id',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   audit.getAuditFromHistory,
 );
 router.delete(
   '/payslip-audit/history/:id',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   audit.deleteAuditFromHistory,
 );
 router.patch(
   '/payslip-audit/history/:id/edits',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   audit.saveAuditEdits,
 );
 router.get(
   '/payslip-audit/history/:id/payslip-page',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   audit.getPayslipPage,
 );
 router.get(
   '/payslip-audit/employee-history',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   audit.getEmployeeHistory,
 );
 router.get(
   '/payslip-audit/cycle-progression',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   audit.getCycleProgression,
 );
 
 // Notes already sent to the accountant this month — surfaced while reviewing.
 router.get(
   '/payslip-audit/prior-notes',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   audit.getPriorNotes,
 );
 
@@ -247,23 +247,23 @@ router.get(
 const fixRoundFields = Array.from({ length: 10 }, (_, i) => ({ name: `payslip_file_${i}`, maxCount: 1 }));
 router.post(
   '/payslip-audit/history/:id/fix-round',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   auditUpload.fields(fixRoundFields),
   audit.createFixRound,
 );
 router.get(
   '/payslip-audit/history/:id/fix-rounds',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   audit.listFixRounds,
 );
 router.patch(
   '/payslip-audit/history/:id/fix-rounds/:roundNo/verdict',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   audit.setFixVerdict,
 );
 router.post(
   '/payslip-audit/history/:id/notes',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   audit.addAuditNote,
 );
 router.post(
@@ -273,7 +273,7 @@ router.post(
 );
 router.get(
   '/payslip-audit/history/:id/fix-rounds/:roundNo/page',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   audit.getFixRoundPage,
 );
 // The accountant's own upload link — minting it is an admin action.
@@ -290,7 +290,7 @@ router.delete(
 // Approval workflow — accepts up to 10 corrected payslip PDFs
 router.patch(
   '/payslip-audit/history/:id/approve',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   auditUpload.fields([
     { name: 'approved_payslip_0', maxCount: 1 },
     { name: 'approved_payslip_1', maxCount: 1 },
@@ -392,7 +392,7 @@ router.post(
 );
 router.patch(
   '/payslip-audit/history/:id/unapprove',
-  requireRole('system_admin', 'branch_manager', 'accountant'),
+  requireRole('system_admin', 'accountant'),
   audit.unapproveAudit,
 );
 

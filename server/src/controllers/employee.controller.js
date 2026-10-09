@@ -182,6 +182,23 @@ async function remove(req, res, next) {
     const employee = await User.findById(req.params.id);
     if (!employee) return res.status(404).json({ error: 'עובד לא נמצא' });
 
+    /**
+     * The same two guards `update` has, which this function was never given:
+     * deactivation is the hardest write of all — attachBranchScope kills the
+     * target's session on her very next request — and it was reachable by
+     * any branch manager against ANY account in the network, including the
+     * system admin's and the accountant's. Same branch only, and never up
+     * the privilege ladder.
+     */
+    if (req.user.role !== 'system_admin' &&
+        String(employee.branch_id) !== String(req.user.branch_id)) {
+      return res.status(403).json({ error: 'אין הרשאה' });
+    }
+    if (req.user.role !== 'system_admin' &&
+        ['system_admin', 'accountant'].includes(employee.role)) {
+      return res.status(403).json({ error: 'אין הרשאה' });
+    }
+
     employee.is_active = false;
     await employee.save();
     res.json({ message: 'עובד הוסר', id: req.params.id });

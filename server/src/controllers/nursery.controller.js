@@ -1,5 +1,5 @@
 const { Child, Classroom, DailyLog, DailyMenu, ClassroomDay, Setting } = require('../models');
-const { CLASSROOM_BOARD } = require('../constants/roles');
+const { CLASSROOM_BOARD, BRANCH_MANAGING_ROLES } = require('../constants/roles');
 const nursery = require('../services/nursery.service');
 
 /**
@@ -43,10 +43,18 @@ async function visibleClassrooms(user) {
 
   if (user.role === 'system_admin' || user.role === 'accountant') return rooms;
 
-  const managed = (user.managed_branch_ids || []).map(String);
+  // Same two rules photos.controller already learned, ported here (the board
+  // had the OPPOSITE answers): `managed_branch_ids` counts only for the
+  // roles that manage branches — on a carer's row it is leftover noise that
+  // opened another branch's rooms — and a scope-less account sees NOTHING,
+  // not everything. The old fallback handed an account with no branch every
+  // infant board in the network, logs and writes included.
+  const managed = BRANCH_MANAGING_ROLES.includes(user.role)
+    ? (user.managed_branch_ids || []).map(String)
+    : [];
   const own = user.branch_id ? [String(user.branch_id)] : [];
   const allowed = new Set([...managed, ...own].filter(Boolean));
-  if (allowed.size === 0) return rooms;
+  if (allowed.size === 0) return [];
 
   return rooms.filter(r => allowed.has(String(r.branch_id?._id || r.branch_id)));
 }

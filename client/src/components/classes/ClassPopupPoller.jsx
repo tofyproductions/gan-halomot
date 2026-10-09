@@ -85,7 +85,9 @@ export default function ClassPopupPoller() {
     setRows(Object.fromEntries((next.classes || []).map(c => [
       c.id, {
         status: 'occurred',
-        amount: Math.round((c.rate / 2) * 100) / 100,
+        // A class lead's popup carries no rate (the price is the manager's
+        // fact) — leave the amount blank and the server fills half-rate.
+        amount: c.rate != null ? Math.round((c.rate / 2) * 100) / 100 : '',
         reason: '',
         // A make-up for THIS group, when only this one was missed.
         postpone: false, newDate: '', newTime: c.time || '',
@@ -193,7 +195,7 @@ export default function ClassPopupPoller() {
                         {c.classroom_category || c.program_name}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {c.time ? `${c.time} · ` : ''}₪{c.rate}
+                        {c.time ? `${c.time} · ` : ''}{c.rate != null ? `₪${c.rate}` : ''}
                       </Typography>
                     </Stack>
                     <ToggleButtonGroup

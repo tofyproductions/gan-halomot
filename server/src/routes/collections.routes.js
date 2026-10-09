@@ -1,13 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const collectionsController = require('../controllers/collections.controller');
-const { requireRole } = require('../middleware/auth');
+const { requireRole, requireBranchScope } = require('../middleware/auth');
 
 // GET /api/collections?year=2026
+// The whole module is billing — a management read at minimum (C2: it was
+// open to any staff token, and /history returned every family network-wide).
+router.use(requireBranchScope);
+
 router.get('/', collectionsController.getAll);
 
 // GET /api/collections/history
-router.get('/history', collectionsController.getHistory);
+router.get('/history', requireRole('system_admin', 'accountant'), collectionsController.getHistory);
 
 // Summer camp (קייטנה) config — MUST stay above '/:registrationId', which
 // would otherwise swallow this path as a registration id.

@@ -195,6 +195,17 @@ async function create(req, res, next) {
     const room = await Classroom.findById(roomId)
       .populate('branch_id', 'name').select('name branch_id category').lean();
     if (!room) return res.status(404).json({ error: 'כיתה לא נמצאה' });
+    /**
+     * Same scope every OTHER handler here already has (list, setPassword,
+     * revoke) — create was the one door without it. Minting a board on a
+     * foreign room, with a password the minter chose and a token the
+     * response returns, was a self-contained way into another branch's
+     * children and photos.
+     */
+    const scope = await resolveBranchScope(req);
+    if (scope !== null && !scope.map(String).includes(String(room.branch_id?._id || room.branch_id))) {
+      return res.status(403).json({ error: 'הכיתה שייכת לסניף שאינו בניהולך' });
+    }
     // Refused here too, not only hidden from the list: a room id is a thing
     // somebody can send, and a board on a room with no day would look created
     // and then open on nothing.

@@ -3215,8 +3215,20 @@ async function resolveSelfEmployee(req) {
   }
   const name = (req.user?.full_name || '').trim();
   if (name) {
+    /**
+     * The name fallback, PINNED TO THE CALLER'S OWN BRANCH. Two women named
+     * שרה כהן at two branches used to be one identity here — and this
+     * function is the owner side of every self read: payslips, hours, טופס
+     * 101, constraint attachments. A name alone must never cross a branch;
+     * a caller whose token carries no branch gets no name fallback at all
+     * (link her card or set her ת"ז — both exact).
+     */
+    if (!req.user?.branch_id) return null;
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const byName = await firstOf({ full_name: { $regex: new RegExp(`^${escaped}$`, 'i') } });
+    const byName = await firstOf({
+      full_name: { $regex: new RegExp(`^${escaped}$`, 'i') },
+      branch_id: req.user.branch_id,
+    });
     if (byName) return byName;
   }
   return null;

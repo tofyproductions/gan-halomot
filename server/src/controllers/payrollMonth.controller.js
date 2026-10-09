@@ -6729,8 +6729,16 @@ async function getVacationOverdraft(req, res, next) {
   try {
     const { employeeId } = req.params;
     const emp = await Employee.findById(employeeId)
-      .select('full_name salary_type vacation_balance_opening vacation_monthly_accrual').lean();
+      .select('full_name salary_type vacation_balance_opening vacation_monthly_accrual branch_id').lean();
     if (!emp) return res.status(404).json({ error: 'עובד/ת לא נמצא/ה' });
+    // Hers to read only inside her own branches — the id in the URL is not
+    // a grant (a manager could walk any employee id in the network).
+    if (!decidesPayroll(req.user)) {
+      const scope = managedBranchIds(req.user).map(String);
+      if (!scope.includes(String(emp.branch_id))) {
+        return res.status(403).json({ error: 'העובד/ת אינם בסניף שבניהולך' });
+      }
+    }
 
     const rows = await PayrollMonth.find({
       employee_id: employeeId, 'vacation_overdraft.days': { $gt: 0 },

@@ -87,7 +87,11 @@ async function throws(fn, status, message, label) {
   console.log('\nמועמדות מסניפים אחרים');
   const cands = await cross.foreignCandidates({ hostBranchId: String(host._id) });
   eq(cands.filter(c => c.full_name === 'דנה').map(c => [c.full_name, c.has_rate, c.branch_name]), [['דנה', true, 'כפר סבא - קפלן']], 'דנה עם תעריף');
-  eq(cands.filter(c => c.full_name === 'רינה').map(c => [c.has_rate, c.home_hourly_rate]), [[true, 45]], 'רינה — תעריף הועתק ותעריף רגיל מדווח');
+  // Once her host rate exists the regular rate leaves the payload — a
+  // candidate list must not be the network's wage sheet (security review
+  // 09.10.2026). Gila still needs setup at a THIRD branch? Not modeled here;
+  // the rule under test: has_rate=true → home_hourly_rate withheld.
+  eq(cands.filter(c => c.full_name === 'רינה').map(c => [c.has_rate, c.home_hourly_rate]), [[true, null]], 'רינה — תעריף הועתק, והתעריף הרגיל כבר לא נחשף');
 
   console.log('\nשיבוץ מסניף אחר ואישור');
   const ShiftWeek = M.ShiftWeek;

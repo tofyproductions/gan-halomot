@@ -88,6 +88,9 @@ async function submitSignature(req, res, next) {
     if (!registration) {
       return res.status(404).json({ error: 'Registration not found or link expired' });
     }
+    if (registration.token_expires_at && new Date(registration.token_expires_at) < new Date()) {
+      return res.status(410).json({ error: 'תוקף הקישור פג — בקשו קישור חדש מהגן' });
+    }
 
     registration.signature_data = signature;
     registration.agreement_signed = true;
@@ -140,6 +143,9 @@ async function storeSignedContract(req, res, next) {
       .populate('classroom_id', 'name');
     if (!registration) {
       return res.status(404).json({ error: 'Registration not found or link expired' });
+    }
+    if (registration.token_expires_at && new Date(registration.token_expires_at) < new Date()) {
+      return res.status(410).json({ error: 'תוקף הקישור פג — בקשו קישור חדש מהגן' });
     }
 
     const base64 = String(pdf).replace(/^data:application\/pdf(;base64)?,/, '');
@@ -196,6 +202,9 @@ async function uploadDocument(req, res, next) {
     const registration = await Registration.findOne({ access_token: token });
     if (!registration) {
       return res.status(404).json({ error: 'Registration not found or link expired' });
+    }
+    if (registration.token_expires_at && new Date(registration.token_expires_at) < new Date()) {
+      return res.status(410).json({ error: 'תוקף הקישור פג — בקשו קישור חדש מהגן' });
     }
 
     // Persist registration-card form fields onto registration.configuration.

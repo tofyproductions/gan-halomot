@@ -1,17 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const contractsController = require('../controllers/contracts.controller');
-const { requireRole } = require('../middleware/auth');
+const { requireRole, requireBranchScope } = require('../middleware/auth');
 const manage = requireRole('system_admin', 'branch_manager', 'accountant');
 
 // GET /api/contracts/:registrationId/preview
-router.get('/:registrationId/preview', contractsController.preview);
+router.get('/:registrationId/preview', requireBranchScope, contractsController.preview);
 
 // POST /api/contracts/:registrationId/generate
-router.post('/:registrationId/generate', contractsController.generate);
+router.post('/:registrationId/generate', requireBranchScope, contractsController.generate);
 
 // GET /api/contracts/:registrationId/download
-router.get('/:registrationId/download', contractsController.download);
+router.get('/:registrationId/download', requireBranchScope, contractsController.download);
 
 // --- Contract document management ---
 // GET /api/contracts?registration_id=X or ?employee_id=X or ?employee_id=me

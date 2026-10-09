@@ -160,9 +160,10 @@ async function listRateRequests({ user }) {
       employee_name: emp?.full_name || '',
       home_branch_name: branches.get(String(r.home_branch_id)) || '',
       host_branch_name: branches.get(String(r.host_branch_id)) || '',
-      // Her regular rate — prefilled in the deciding field, so approving
-      // "the same pay here" is one click, not a lookup.
-      home_hourly_rate: emp ? (Number(primaryRates(emp, thisMonth).hourly_rate) || null) : null,
+      // Her regular rate — prefilled in the deciding field. Only for whoever
+      // may actually SET the rate (the office): the host manager, who is
+      // explicitly not allowed to decide, has no business holding the figure.
+      home_hourly_rate: isOffice && emp ? (Number(primaryRates(emp, thisMonth).hourly_rate) || null) : null,
       // An office user may decide a request at EITHER stage (one act).
       can_decide: isOffice || (r.status === 'pending_home' && canEdit(user, r.home_branch_id)),
       can_set_rate: isOffice,
