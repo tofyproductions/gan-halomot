@@ -111,16 +111,32 @@ export default function StaffBalanceStrip({ rows, dates, closedDates, ratios, pm
           return (
             <Box key={d} sx={{
               flex: '1 1 150px', minWidth: 150, borderRadius: 2.5, p: 1.25,
-              border: '1px solid',
-              borderColor: canBalance ? 'warning.main' : 'divider',
-              bgcolor: closed ? 'action.disabledBackground' : 'background.paper',
-              boxShadow: canBalance ? '0 2px 10px rgba(217,119,6,0.18)' : '0 1px 3px rgba(0,0,0,0.05)',
+              /**
+               * A day that is SHORT is the loudest thing on the strip: red
+               * frame, red wash, red glow — before any other accent. The
+               * amber ↔ cue still marks a fixable day in the header, but
+               * the card itself says "כאן חסר" from across the room. A day
+               * with only spares keeps the quiet white card.
+               */
+              border: short.length ? '2px solid' : '1px solid',
+              borderColor: short.length ? 'error.main' : canBalance ? 'warning.main' : 'divider',
+              bgcolor: closed ? 'action.disabledBackground' : short.length ? '#FEF6F5' : 'background.paper',
+              boxShadow: short.length ? '0 3px 14px rgba(220,38,38,0.28)'
+                : canBalance ? '0 2px 10px rgba(217,119,6,0.18)' : '0 1px 3px rgba(0,0,0,0.05)',
               transition: 'box-shadow .15s ease',
             }}>
               <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5, mb: 0.75,
                 pb: 0.5, borderBottom: '1px solid', borderColor: 'divider' }}>
                 <Typography sx={{ fontWeight: 800, fontSize: '0.82rem' }}>{HEB_DAYS[i]}</Typography>
                 <Typography sx={{ color: 'text.secondary', fontSize: '0.72rem' }}>{fmtDate(d)}</Typography>
+                {short.length > 0 && (
+                  <Box component="span" sx={{
+                    px: 0.75, py: 0.2, borderRadius: 999, fontSize: '0.66rem', fontWeight: 800,
+                    bgcolor: 'error.main', color: '#fff', lineHeight: 1.4,
+                  }}>
+                    חסר
+                  </Box>
+                )}
                 {canBalance && (
                   <Tooltip title="יש גם חוסר וגם עודף — אפשר לגרור עובדת מהעודף לחוסר">
                     <Box component="span" sx={{ mr: 'auto', fontSize: '0.72rem', fontWeight: 800, color: 'warning.dark' }}>↔ לאזן</Box>
