@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
-import { Box, Stack, Button, IconButton, Typography, Alert, CircularProgress, Chip, Paper, ToggleButton, ToggleButtonGroup } from '@mui/material';
+import { Box, Stack, Button, IconButton, Typography, Alert, CircularProgress, Chip, Paper, ToggleButton, ToggleButtonGroup, Tooltip } from '@mui/material';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import UndoIcon from '@mui/icons-material/Undo';
+import RedoIcon from '@mui/icons-material/Redo';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
@@ -202,7 +204,40 @@ export default function ShiftsScreen() {
   const sameEntry = (a, b) => a === b || (a._id && a._id === b._id) || (a.tmp && a.tmp === b.tmp);
   const clean = (list) => list.map(({ tmp, ...e }) => e);
 
-  const persist = async (next) => {
+  /**
+   * Undo/redo for the board. Every edit that goes through persist() first
+   * snapshots what is on screen; חזור plays the snapshot back through the
+   * same save (the server keeps no half-state), והבא replays what חזור took.
+   * Server-side acts that rewrite the week wholesale (שיבוץ לפי הכרטיסים)
+   * snapshot themselves explicitly before they run.
+   */
+  const undoStack = useRef([]);
+  const redoStack = useRef([]);
+  const [, setHistVer] = useState(0);
+  const snapshot = () => shown.map(e => ({ ...e }));
+  const pushUndo = (snap) => {
+    undoStack.current.push(snap);
+    if (undoStack.current.length > 25) undoStack.current.shift();
+    redoStack.current = [];
+    setHistVer(v => v + 1);
+  };
+  const undo = () => {
+    const prev = undoStack.current.pop();
+    if (!prev) return;
+    redoStack.current.push(snapshot());
+    setHistVer(v => v + 1);
+    persistRaw(prev);
+  };
+  const redo = () => {
+    const next = redoStack.current.pop();
+    if (!next) return;
+    undoStack.current.push(snapshot());
+    setHistVer(v => v + 1);
+    persistRaw(next);
+  };
+  const persist = (next) => { pushUndo(snapshot()); return persistRaw(next); };
+
+  const persistRaw = async (next) => {
     if (board.can_edit) {
       try {
         const { data } = await api.put(`/shifts/weeks/${board.week._id}/entries`, { entries: clean(next) });
@@ -369,6 +404,13 @@ export default function ShiftsScreen() {
   const placementItems = useMemo(() => rotaEmployees.filter(e => !e.foreign).map(e => ({ ...e, employee_id: e._id })), [rotaEmployees]);
   const unassignedCount = (board?.week?.entries || []).filter(e => e.area === 'unassigned').length;
   const autoPlace = async () => {
+    if (!window.confirm(
+      'שיבוץ לפי הכרטיסים ישנה את הסידור הנוכחי:\n'
+      + 'כל עובדת תוזז לכיתה הקבועה שמוגדרת בכרטיס שלה, כולל שיבוצים שכבר סידרת ידנית השבוע.\n'
+      + 'אפשר לבטל אחר כך עם כפתור "חזור" שליד ניווט השבועות.\n\n'
+      + 'להמשיך?',
+    )) return;
+    pushUndo(snapshot());
     try {
       const { data } = await api.post(`/shifts/weeks/${board.week._id}/auto-place`);
       toast[data.placed ? 'success' : 'info'](data.placed
@@ -418,6 +460,24 @@ export default function ShiftsScreen() {
           <Typography fontWeight={700}>{board ? `${fmtDate(board.dates[0])} – ${fmtDate(board.dates[5])}` : ''}</Typography>
           <IconButton onClick={() => setWeek(addDays(week, 7))} aria-label="שבוע הבא"><ChevronLeftIcon /></IconButton>
           <Button size="small" onClick={() => setWeek(addDays(sundayOf(), 7))}>השבוע הבא</Button>
+          {board?.can_edit && (
+            <>
+              <Tooltip title={undoStack.current.length ? 'חזור — ביטול הפעולה האחרונה בסידור' : 'אין פעולה לבטל'}>
+                <span>
+                  <IconButton size="small" onClick={undo} disabled={!undoStack.current.length} aria-label="ביטול הפעולה האחרונה">
+                    <UndoIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+              <Tooltip title={redoStack.current.length ? 'הבא — ביצוע חוזר של מה שבוטל' : 'אין פעולה להחזיר'}>
+                <span>
+                  <IconButton size="small" onClick={redo} disabled={!redoStack.current.length} aria-label="ביצוע חוזר">
+                    <RedoIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            </>
+          )}
         </Stack>
       </PageHeader>
 
