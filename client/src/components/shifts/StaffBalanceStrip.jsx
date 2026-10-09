@@ -27,9 +27,13 @@ export default function StaffBalanceStrip({ rows, dates, closedDates, ratios, pm
       const list = row.cells[d] || [];
       const uniq = (win) => new Set(list.filter(e => inWindow(e, win)).map(e => String(e.employee_id))).size;
       const am = uniq('am') - needed;
-      if (am !== 0) items.push({ label: row.label, winIcon: '☀️', winName: 'בוקר', diff: am });
-      if (!isFriday) {
-        const pm = uniq('pm') - pmNeeded;
+      const pm = isFriday ? 0 : uniq('pm') - pmNeeded;
+      // The same gap in both windows is one person's whole day, not two
+      // facts — one line, both icons. Different gaps stay two lines.
+      if (am !== 0 && am === pm) {
+        items.push({ label: row.label, winIcon: '☀️🌙', winName: 'בוקר וצהריים', diff: am });
+      } else {
+        if (am !== 0) items.push({ label: row.label, winIcon: '☀️', winName: 'בוקר', diff: am });
         if (pm !== 0) items.push({ label: row.label, winIcon: '🌙', winName: 'צהריים', diff: pm });
       }
     }
