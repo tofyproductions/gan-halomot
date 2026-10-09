@@ -117,7 +117,18 @@ async function getBoard({ user, branchId, weekStart }) {
   const preview = week ? null : await seedRespectingConstraints(branchId, dates, closed);
   const entries = week ? week.entries.map(e => e.toObject()) : preview;
 
-  const employees = await Employee.find({ branch_id: branchId, is_active: true }).select('full_name primary_classroom_id extra_classroom_ids shift_area shift_day_classrooms on_maternity_leave maternity_leave_from maternity_leave_to').sort({ full_name: 1 }).lean();
+  /**
+   * The board's people: the active staff, plus an INACTIVE employee who is
+   * on maternity leave. Her card was switched off so payroll stops counting
+   * her — but the rota is a different question: she may come back one day a
+   * week, and the manager must be able to place her. Pay is punch-driven, so
+   * a placement alone never reaches her payslip. The weekly seed (seedFor)
+   * still reads active-only — she is offered, never auto-placed.
+   */
+  const employees = await Employee.find({
+    branch_id: branchId,
+    $or: [{ is_active: true }, { on_maternity_leave: true }],
+  }).select('full_name primary_classroom_id extra_classroom_ids shift_area shift_day_classrooms on_maternity_leave maternity_leave_from maternity_leave_to is_active').sort({ full_name: 1 }).lean();
   const [commitments, inactive, editRequests] = await Promise.all([
     // By employee, like seedFor — see the comment there.
     EmployeeCommitment.find({ employee_id: { $in: employees.map(e => e._id) } }).lean(),
@@ -179,6 +190,8 @@ async function getBoard({ user, branchId, weekStart }) {
       on_maternity_leave: !!e.on_maternity_leave,
       maternity_leave_from: e.maternity_leave_from || null,
       maternity_leave_to: e.maternity_leave_to || null,
+      // An inactive card on the board (maternity only) — the sidebar says so.
+      inactive: e.is_active === false,
     }))
       .concat(foreignCandidates.filter(c => c.has_rate).map(c => ({ _id: String(c._id), full_name: `${c.full_name} (${c.branch_name})`, primary_classroom_id: null, extra_classroom_ids: [], foreign: true, commitment: {} }))),
     ratios,

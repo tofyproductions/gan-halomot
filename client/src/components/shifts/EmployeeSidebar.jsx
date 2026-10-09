@@ -64,6 +64,14 @@ export default function EmployeeSidebar({ employees = [], entries = [], dates = 
                     sx={{ height: 18, fontSize: '0.65rem', my: 0.25, display: 'inline-flex' }} />
                 </Tooltip>
               )}
+              {/* Her card is switched off (payroll stopped), yet she can be
+                  placed — pay is punch-driven, a placement costs nothing. */}
+              {emp.inactive && (
+                <Tooltip title="הכרטיס מוגדר לא פעיל — השכר לא מושפע מהשיבוץ; אפשר לגרור אותה ללוח ידנית">
+                  <Chip size="small" color="warning" variant="outlined" label="לא פעילה"
+                    sx={{ height: 18, fontSize: '0.65rem', my: 0.25, mx: 0.5, display: 'inline-flex' }} />
+                </Tooltip>
+              )}
               <Box component="span" sx={{ display: 'block', fontSize: '0.7rem', color: 'text.secondary' }}>
                 {n} ימים · {fmtMin(mins)} שע׳
                 {extra > 0 && committed > 0 && (
