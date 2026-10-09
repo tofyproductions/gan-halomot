@@ -87,9 +87,17 @@ async function createRateRequest({ user, employeeId, hostBranchId, proposedRate 
 
 async function decideRateRequest({ user, id, approve, reason, finalRate }) {
   const r = await loadOr404(id);
-  const atHome = r.status === 'pending_home';
-  const atOffice = r.status === 'pending_office';
+  let atHome = r.status === 'pending_home';
+  let atOffice = r.status === 'pending_office';
   if (!atHome && !atOffice) throw new ShiftError(409, 'הבקשה כבר טופלה');
+  /**
+   * The office outranks the queue. Requests from before the flow changed
+   * still sit at the home stage; an accountant or admin facing one should
+   * finish it in a single act — she is the final authority on the money,
+   * and the home manager's consent to the placement itself lives on the
+   * board, not here.
+   */
+  if (atHome && OFFICE.includes(user.role)) { atHome = false; atOffice = true; }
   if ((atHome && !canEdit(user, r.home_branch_id)) || (atOffice && !OFFICE.includes(user.role))) throw new ShiftError(403, 'אין הרשאה להחליט בשלב הזה');
   const emp = await Employee.findById(r.employee_id);
   if (!approve) {
@@ -141,15 +149,25 @@ async function listRateRequests({ user }) {
   const filter = isOffice ? { status: { $in: ['pending_home', 'pending_office'] } }
     : { status: { $in: ['pending_home', 'pending_office'] }, $or: [{ home_branch_id: { $in: managed } }, { host_branch_id: { $in: managed } }] };
   const list = await BranchRateRequest.find(filter).sort({ created_at: -1 }).lean();
-  const emps = new Map((await Employee.find({ _id: { $in: list.map(r => r.employee_id) } }).select('full_name').lean()).map(e => [String(e._id), e.full_name]));
+  const thisMonth = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' }).slice(0, 7);
+  const { primaryRates } = require('../payrollCalc');
+  const emps = new Map((await Employee.find({ _id: { $in: list.map(r => r.employee_id) } }).select('full_name salary_type amuta_distribution terms_history').lean()).map(e => [String(e._id), e]));
   const branches = new Map((await Branch.find({ _id: { $in: list.flatMap(r => [r.home_branch_id, r.host_branch_id]) } }).select('name').lean()).map(b => [String(b._id), b.name]));
-  return list.map(r => ({
-    ...r,
-    employee_name: emps.get(String(r.employee_id)) || '',
-    home_branch_name: branches.get(String(r.home_branch_id)) || '',
-    host_branch_name: branches.get(String(r.host_branch_id)) || '',
-    can_decide: (r.status === 'pending_home' && canEdit(user, r.home_branch_id)) || (r.status === 'pending_office' && isOffice),
-  }));
+  return list.map(r => {
+    const emp = emps.get(String(r.employee_id));
+    return {
+      ...r,
+      employee_name: emp?.full_name || '',
+      home_branch_name: branches.get(String(r.home_branch_id)) || '',
+      host_branch_name: branches.get(String(r.host_branch_id)) || '',
+      // Her regular rate — prefilled in the deciding field, so approving
+      // "the same pay here" is one click, not a lookup.
+      home_hourly_rate: emp ? (Number(primaryRates(emp, thisMonth).hourly_rate) || null) : null,
+      // An office user may decide a request at EITHER stage (one act).
+      can_decide: isOffice || (r.status === 'pending_home' && canEdit(user, r.home_branch_id)),
+      can_set_rate: isOffice,
+    };
+  });
 }
 
 module.exports = { createRateRequest, decideRateRequest, listRateRequests };

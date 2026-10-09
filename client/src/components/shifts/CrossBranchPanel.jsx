@@ -51,17 +51,28 @@ export default function CrossBranchPanel({ board, onChanged }) {
           </Stack>
         </Alert>
       ))}
-      {requests.map(r => (
-        <Alert key={r._id} severity="warning" icon={false}>
-          <Typography fontWeight={700}>תעריף ל{r.employee_name} ({r.home_branch_name}) לעבודה ב{r.host_branch_name}{r.proposed_rate ? ` — הוצע ${r.proposed_rate} ₪ לשעה` : ''}</Typography>
-          <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1, flexWrap: 'wrap' }} useFlexGap>
-            {r.status === 'pending_office' && <TextField size="small" type="number" label="תעריף לשעה" value={rate[r._id] ?? (r.proposed_rate || '')} onChange={e => setRate(s => ({ ...s, [r._id]: e.target.value }))} />}
-            <Button size="small" variant="contained" disabled={!!busy[r._id]} onClick={() => post(r._id, `/shifts/rate-requests/${r._id}/decide`, { approve: true, final_rate: rate[r._id] ? Number(rate[r._id]) : undefined }, r.status === 'pending_office' ? 'התעריף נקבע' : 'אישרת — הבקשה עברה למשרד')}>אישור</Button>
-            <TextField size="small" placeholder="סיבת דחייה" value={reason[r._id] || ''} onChange={e => setReason(s => ({ ...s, [r._id]: e.target.value }))} />
-            <Button size="small" color="error" disabled={!!busy[r._id] || !reason[r._id]?.trim()} onClick={() => post(r._id, `/shifts/rate-requests/${r._id}/decide`, { approve: false, reason: reason[r._id] }, 'הבקשה נדחתה')}>דחייה</Button>
-          </Stack>
-        </Alert>
-      ))}
+      {requests.map(r => {
+        /* Her regular rate fills the field; what the field SHOWS is what
+           approval sends — no more approving an empty box. */
+        const canRate = r.can_set_rate ?? (r.status === 'pending_office');
+        const eff = rate[r._id] ?? String(r.proposed_rate || r.home_hourly_rate || '');
+        return (
+          <Alert key={r._id} severity="warning" icon={false}>
+            <Typography fontWeight={700}>
+              תעריף ל{r.employee_name} ({r.home_branch_name}) לעבודה ב{r.host_branch_name}
+              {r.proposed_rate ? ` — הוצע ${r.proposed_rate} ₪ לשעה` : ''}
+              {r.home_hourly_rate ? ` · התעריף הקבוע שלה: ${r.home_hourly_rate} ₪ לשעה` : ''}
+            </Typography>
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1, flexWrap: 'wrap' }} useFlexGap>
+              {canRate && <TextField size="small" type="number" label="תעריף לשעה" value={eff} onChange={e => setRate(s => ({ ...s, [r._id]: e.target.value }))} />}
+              <Button size="small" variant="contained" disabled={!!busy[r._id] || (canRate && !Number(eff))}
+                onClick={() => post(r._id, `/shifts/rate-requests/${r._id}/decide`, { approve: true, final_rate: canRate && Number(eff) ? Number(eff) : undefined }, canRate ? 'התעריף נקבע' : 'אישרת — הבקשה עברה למשרד')}>אישור</Button>
+              <TextField size="small" placeholder="סיבת דחייה" value={reason[r._id] || ''} onChange={e => setReason(s => ({ ...s, [r._id]: e.target.value }))} />
+              <Button size="small" color="error" disabled={!!busy[r._id] || !reason[r._id]?.trim()} onClick={() => post(r._id, `/shifts/rate-requests/${r._id}/decide`, { approve: false, reason: reason[r._id] }, 'הבקשה נדחתה')}>דחייה</Button>
+            </Stack>
+          </Alert>
+        );
+      })}
     </Stack>
   );
 }
