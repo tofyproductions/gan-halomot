@@ -55,10 +55,18 @@ const STORE_KEY = 'gan.a11y.v1';
  * move the button back under the save button without being asked to.
  */
 const PLACE_KEY = 'gan.a11y.placement';
+/**
+ * The styles live in A11Y_CSS classes, not inline: the phone's bottom
+ * navigation bar is a fixed strip this button used to sit ON — covering the
+ * "עוד" dots, the one control it must never block. A media query raises the
+ * default placement above the bar, and `html:has(nav)` scopes that to pages
+ * where the bar actually exists (the parent portal has none, and there the
+ * corner stays a corner). Inline `bottom` would out-rank all of that.
+ */
 const PLACEMENTS = {
-  bottom: { label: 'למטה', style: { bottom: 16, left: 16 } },
-  raised: { label: 'גבוה יותר', style: { bottom: 104, left: 16 } },
-  tucked: { label: 'מוצמד לצד', style: { bottom: 104, left: -22, opacity: 0.45 } },
+  bottom: { label: 'למטה' },
+  raised: { label: 'גבוה יותר' },
+  tucked: { label: 'מוצמד לצד' },
 };
 
 function readPlacement() {
@@ -69,6 +77,15 @@ function readPlacement() {
 }
 
 const A11Y_CSS = `
+.a11y-launcher.a11y-place-bottom { bottom: 16px; left: 16px; }
+.a11y-launcher.a11y-place-raised { bottom: 104px; left: 16px; }
+.a11y-launcher.a11y-place-tucked { bottom: 104px; left: -22px; opacity: 0.45; }
+.a11y-panel.a11y-from-bottom { bottom: 76px; }
+.a11y-panel.a11y-from-raised, .a11y-panel.a11y-from-tucked { bottom: 164px; }
+@media (max-width: 899.95px) {
+  html:has(nav[aria-label="ניווט"]) .a11y-launcher.a11y-place-bottom { bottom: calc(68px + env(safe-area-inset-bottom, 0px)); }
+  html:has(nav[aria-label="ניווט"]) .a11y-panel.a11y-from-bottom { bottom: calc(128px + env(safe-area-inset-bottom, 0px)); }
+}
 html.a11y-zoom-1 { zoom: 1.1; }
 html.a11y-zoom-2 { zoom: 1.25; }
 html.a11y-zoom-3 { zoom: 1.4; }
@@ -222,9 +239,9 @@ export default function AccessibilityWidget() {
         // to get it without knowing that pressing a half-hidden circle opens
         // something.
         onClick={() => (placement === 'tucked' ? setPlacement('raised') : setOpen((v) => !v))}
+        className={`a11y-launcher a11y-place-${placement}`}
         style={{
           position: 'fixed', zIndex: 2000,
-          ...PLACEMENTS[placement].style,
           height: 48, width: 48, borderRadius: '50%', border: 'none',
           background: '#0b57a4', color: '#fff', cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -244,10 +261,9 @@ export default function AccessibilityWidget() {
           ref={panelRef}
           role="dialog"
           aria-label="הגדרות נגישות"
+          className={`a11y-panel a11y-from-${placement}`}
           style={{
             position: 'fixed', zIndex: 2000, left: 16,
-            // Above the button, wherever the button is.
-            bottom: placement === 'bottom' ? 76 : 164,
             width: 300, maxWidth: 'calc(100vw - 2rem)', borderRadius: 16,
             border: '1px solid #e2e8f0', background: '#fff', padding: 12,
             boxShadow: '0 20px 50px rgba(0,0,0,.3)', ...font,
