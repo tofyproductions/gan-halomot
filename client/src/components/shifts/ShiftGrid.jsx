@@ -59,19 +59,30 @@ function readDrag(ev) {
  */
 export const CATEGORY_KEY = { 'תינוקייה': 'infants', 'צעירים': 'young', 'בוגרים': 'older' };
 
-/** ☀️ 5/4 — placed vs the licence minimum for one window, colored by the gap. */
+/**
+ * ☀️ בוקר 5/4 — placed vs the licence minimum for one window, colored by the
+ * gap. The two pills ARE the row now: "בוקר 5/4 · צהריים 3/3" answers the
+ * staffing question whole, and the old "6 שובצו" total beside them only
+ * muddied it — six people across a day says nothing about either shift.
+ */
 function StaffPill({ icon, label, staff, needed }) {
   const diff = staff - needed;
-  const tone = diff < 0 ? 'warning' : diff > 0 ? 'info' : 'success';
+  const tone = diff < 0 ? 'error' : diff > 0 ? 'info' : 'success';
   const text = diff < 0 ? `חסרות ${-diff}` : diff > 0 ? `עודף ${diff}` : 'לפי התקן';
   return (
     <Tooltip title={`${label}: משובצות ${staff}, תקן ${needed} — ${text}`}>
       <Box component="span" sx={{
-        display: 'inline-flex', alignItems: 'center', gap: 0.25,
-        px: 0.6, py: 0.1, borderRadius: 2, fontSize: '0.68rem', fontWeight: 700,
+        display: 'inline-flex', alignItems: 'center', gap: 0.5,
+        px: 1, py: 0.4, borderRadius: 999,
+        fontSize: '0.72rem', fontWeight: 700, lineHeight: 1,
         bgcolor: `${tone}.soft`, color: `${tone}.softOn`,
+        border: '1px solid', borderColor: diff < 0 ? 'error.main' : 'transparent',
+        boxShadow: diff < 0 ? '0 1px 4px rgba(220,38,38,0.25)' : 'none',
       }}>
-        {icon} {staff}/{needed}{diff !== 0 ? ` · ${diff > 0 ? `עודף ${diff}` : `חסרות ${-diff}`}` : ''}
+        <Box component="span" aria-hidden sx={{ fontSize: '0.8rem', lineHeight: 1 }}>{icon}</Box>
+        <Box component="span" sx={{ opacity: 0.8, fontWeight: 600 }}>{label}</Box>
+        <Box component="span" dir="ltr" sx={{ fontVariantNumeric: 'tabular-nums', fontSize: '0.8rem' }}>{staff}/{needed}</Box>
+        {diff !== 0 && <Box component="span" sx={{ fontWeight: 800 }} dir="ltr">{diff > 0 ? `+${diff}` : diff}</Box>}
       </Box>
     </Tooltip>
   );
@@ -336,8 +347,7 @@ export default function ShiftGrid({ dates, rows, closedDates, warnings = [], swi
                       borderBottom: '3px solid', borderBottomColor: 'divider',
                     }}>
                       {!closed && (
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, fontSize: '0.7rem', color: 'text.secondary', flexWrap: 'wrap' }}>
-                          <span>{uniq('all')} שובצו</span>
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, py: 0.25, fontSize: '0.7rem', color: 'text.secondary', flexWrap: 'wrap' }}>
                           {needed != null ? (
                             <>
                               <StaffPill icon="☀️" label="בוקר" staff={uniq('am')} needed={needed} />
