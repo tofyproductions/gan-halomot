@@ -607,7 +607,10 @@ export default function ClassTrackingPage() {
   };
 
   const delProgram = async (p) => {
-    if (!(await confirm({ title: 'הסרת חוג', message: `להסיר את "${p.name}"?` }))) return;
+    if (!(await confirm({
+      title: 'הסרת חוג',
+      message: `להסיר את "${p.name}"? כל מפגשי החודש הנוכחי והעתידיים שלו יימחקו — כולל מפגשים שסומנו "התקיים" — והתשלום בגינם יתבטל. חודשים קודמים נשארים.`,
+    }))) return;
     api.delete(`/classes/programs/${p._id}`).then(() => refreshAll()).catch(err => toast.error(apiError(err, 'המחיקה נכשלה')));
   };
 

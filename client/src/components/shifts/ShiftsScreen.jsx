@@ -257,6 +257,27 @@ export default function ShiftsScreen() {
         persist(next);
       } else {
         if (dragged.date === date && entryRowKey(dragged) === targetKey) return;
+        /**
+         * The split, undone: dragging one of her entries onto a row where
+         * she already stands THAT DAY folds the two back into one shift —
+         * earliest start to latest end, living in the target row.
+         */
+        const counterpart = shown.find(e =>
+          e !== dragged && String(e.employee_id) === String(dragged.employee_id) &&
+          e.date === date && entryRowKey(e) === targetKey);
+        if (counterpart) {
+          const starts = [dragged, counterpart].sort((x, y) => (toMin(x.start_hhmm) ?? 0) - (toMin(y.start_hhmm) ?? 0));
+          const ends = [dragged, counterpart].sort((x, y) => (toMin(y.end_hhmm) ?? 0) - (toMin(x.end_hhmm) ?? 0));
+          if (!window.confirm(
+            `לאחד את שתי המשמרות של ${dragged.employee_name || 'העובדת'}?
+` +
+            `תיווצר משמרת אחת ${starts[0].start_hhmm}–${ends[0].end_hhmm} ב"${row.label}".`,
+          )) return;
+          persist(shown
+            .filter(e => e !== dragged)
+            .map(e => (e === counterpart ? { ...e, start_hhmm: starts[0].start_hhmm, end_hhmm: ends[0].end_hhmm } : e)));
+          return;
+        }
         persist(shown.map(e => (e === dragged ? { ...e, ...target, date } : e)));
       }
       return;

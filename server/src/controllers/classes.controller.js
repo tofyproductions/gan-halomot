@@ -275,8 +275,19 @@ async function updateProgram(req, res, next) {
 }
 async function deleteProgram(req, res, next) {
   try {
+    /**
+     * Removing a class is also a statement about its money: the month's
+     * meetings — including ones already ticked "התקיים" — must stop billing,
+     * or the payment summary keeps charging for a class that no longer
+     * exists (קפלן's תנועלולה did exactly that). Past months stay: they are
+     * history, possibly already invoiced and paid.
+     */
     await ClassProgram.findByIdAndUpdate(req.params.id, { is_active: false });
-    res.json({ ok: true });
+    const monthStart = `${classSessions.monthOf(new Date())}-01`;
+    const { deletedCount } = await ClassSession.deleteMany({
+      program_id: req.params.id, date: { $gte: monthStart },
+    });
+    res.json({ ok: true, sessions_removed: deletedCount || 0 });
   } catch (err) { next(err); }
 }
 

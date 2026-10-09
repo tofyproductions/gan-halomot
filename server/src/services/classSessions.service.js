@@ -162,4 +162,22 @@ async function fillUpcoming() {
   return { created: a.created + b.created, months: [now, nextMonth(now)] };
 }
 
-module.exports = { fillMonth, fillUpcoming, monthOf, nextMonth, academicYearOf, closedDaysOf };
+/**
+ * The one-time broom for classes removed BEFORE deleteProgram learned to
+ * take its month's sessions with it: any inactive program still holding
+ * sessions from the current month onward loses them. Idempotent and cheap —
+ * one indexed query per boot, zero rows on every boot after the first.
+ */
+async function sweepRemovedPrograms() {
+  const ClassProgram = require('../models/ClassProgram');
+  const ClassSession = require('../models/ClassSession');
+  const inactive = await ClassProgram.find({ is_active: false }).select('_id').lean();
+  if (!inactive.length) return 0;
+  const monthStart = `${monthOf(new Date())}-01`;
+  const { deletedCount } = await ClassSession.deleteMany({
+    program_id: { $in: inactive.map(p => p._id) }, date: { $gte: monthStart },
+  });
+  return deletedCount || 0;
+}
+
+module.exports = { fillMonth, fillUpcoming, monthOf, nextMonth, academicYearOf, closedDaysOf, sweepRemovedPrograms };

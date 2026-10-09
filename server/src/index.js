@@ -478,6 +478,13 @@ connectDB().then(() => {
     // טופס 101: the documents that only ever carried the number in their label
     // become typed rows, once. Idempotent — it only touches rows that have no
     // doc_type yet — so it costs a single indexed query on every later boot.
+    // חוגים: a program removed before deleteProgram learned to take its
+    // month's sessions with it kept billing for them. One indexed query per
+    // boot; zero rows after the first run.
+    if (!platformMode) require('./services/classSessions.service').sweepRemovedPrograms()
+      .then(n => { if (n) console.log(`[classes] נוקו ${n} מפגשים של חוגים שהוסרו`); })
+      .catch(e => console.error('[classes] removed-program sweep failed:', e.message));
+
     const form101 = require('./services/form101');
     if (!platformMode) form101.backfillLegacy()
       .then(r => { if (r.converted) console.log(`[form101] converted ${r.converted} legacy documents`); })
