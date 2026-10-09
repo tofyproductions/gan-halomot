@@ -455,7 +455,9 @@ export default function ShiftsScreen() {
       {board && <ConstraintsPanel constraints={board.constraints} canEdit={!!board.can_edit} onChanged={load} entries={shown} />}
       {board && (
         <StaffBalanceStrip rows={rows} dates={board.dates} closedDates={closed}
-          ratios={board.ratios} pmCaps={board.pm_caps} />
+          ratios={board.ratios} pmCaps={board.pm_caps}
+          branchId={board.branch_id} bonuses={board.cover_bonuses}
+          canEdit={!!board.can_edit} onChanged={load} />
       )}
       {board && <OvertimeStrip employees={board.employees} entries={shown} dates={board.dates} />}
       {board && <FillSuggestions board={board} entries={shown} closed={closed} onAdd={addSuggested} />}

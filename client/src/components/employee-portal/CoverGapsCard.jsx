@@ -77,11 +77,26 @@ export default function CoverGapsCard() {
                 {awayGaps.map(g => {
                   const key = `${g.date}|${g.window}|${g.classroom_id}`;
                   return (
-                    <Tooltip key={key} title={`${g.branch_name} · חסרות ${g.missing} · ההצעה נשלחת למנהלת של הסניף הזה`}>
+                    <Tooltip key={key} title={`${g.branch_name} · חסרות ${g.missing}${g.bonus ? ` · בונוס ₪${g.bonus} באישור הנהלת חשבונות` : ''} · ההצעה נשלחת למנהלת של הסניף הזה`}>
                       <Button size="small" variant="outlined" color="info" disabled={busy === key}
                         onClick={() => offer(g)}
-                        sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>
+                        sx={{
+                          borderRadius: 999, fontWeight: 700, textTransform: 'none',
+                          ...(g.bonus ? {
+                            borderColor: '#F59E0B', color: '#92400E', bgcolor: '#FFFBEB',
+                            boxShadow: '0 1px 6px rgba(245,158,11,0.35)',
+                            '&:hover': { bgcolor: '#FEF3C7', borderColor: '#F59E0B' },
+                          } : {}),
+                        }}>
                         + {g.branch_name} · {HEB_DAYS[weekdayOf(g.date)]} {fmtDate(g.date)} · {g.classroom_name} · {WIN[g.window]}
+                        {g.bonus && (
+                          <Box component="span" dir="ltr" sx={{
+                            mr: 0.75, px: 0.75, py: 0.1, borderRadius: 999,
+                            bgcolor: '#F59E0B', color: '#fff', fontSize: '0.68rem', fontWeight: 800,
+                          }}>
+                            🎁 ₪{g.bonus}
+                          </Box>
+                        )}
                       </Button>
                     </Tooltip>
                   );

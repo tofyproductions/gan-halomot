@@ -1,4 +1,7 @@
-import { Box, Paper, Typography, Tooltip } from '@mui/material';
+import { useState } from 'react';
+import { Box, Paper, Typography, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField } from '@mui/material';
+import { toast } from 'react-toastify';
+import api from '../../api/client';
 import { HEB_DAYS, fmtDate } from './shiftRows';
 import { inWindow, CATEGORY_KEY } from './ShiftGrid';
 
@@ -10,7 +13,15 @@ import { inWindow, CATEGORY_KEY } from './ShiftGrid';
  * bottom of every class and the comparison the manager actually makes —
  * "take from here, give to there" — is ACROSS classes on one day.
  */
-export default function StaffBalanceStrip({ rows, dates, closedDates, ratios, pmCaps }) {
+export default function StaffBalanceStrip({ rows, dates, closedDates, ratios, pmCaps, branchId, bonuses, canEdit, onChanged }) {
+  /**
+   * The bounty dialog: a shortage the branch cannot fill from inside can be
+   * priced — the bonus is shown ONLY to other branches' staff beside the
+   * gap on their own screen, and is paid through a pending salary
+   * adjustment the accountant approves. Here the manager sets or removes
+   * the price.
+   */
+  const [bonusDlg, setBonusDlg] = useState(null); // { gap, amount }
   if (!ratios) return null;
   const classRows = rows.filter(r => r.area === 'class' && r.enrolled > 0 && CATEGORY_KEY[r.category]);
   if (!classRows.length) return null;
@@ -30,11 +41,13 @@ export default function StaffBalanceStrip({ rows, dates, closedDates, ratios, pm
       const pm = isFriday ? 0 : uniq('pm') - pmNeeded;
       // The same gap in both windows is one person's whole day, not two
       // facts — one line, both icons. Different gaps stay two lines.
+      const base = { label: row.label, classroom_id: row.classroom_id };
       if (am !== 0 && am === pm) {
-        items.push({ label: row.label, winIcon: '☀️🌙', winName: 'בוקר וצהריים', diff: am });
+        // One line, both windows — the bonus anchor stays the morning slot.
+        items.push({ ...base, winIcon: '☀️🌙', winName: 'בוקר וצהריים', win: 'am', diff: am });
       } else {
-        if (am !== 0) items.push({ label: row.label, winIcon: '☀️', winName: 'בוקר', diff: am });
-        if (pm !== 0) items.push({ label: row.label, winIcon: '🌙', winName: 'צהריים', diff: pm });
+        if (am !== 0) items.push({ ...base, winIcon: '☀️', winName: 'בוקר', win: 'am', diff: am });
+        if (pm !== 0) items.push({ ...base, winIcon: '🌙', winName: 'צהריים', win: 'pm', diff: pm });
       }
     }
     return { d, i, closed: false, items };
@@ -49,9 +62,13 @@ export default function StaffBalanceStrip({ rows, dates, closedDates, ratios, pm
    * in its own white circle with a red or green ring. Same glyph, same
    * meaning, wherever the planner looks.
    */
-  const GapPill = ({ it }) => {
+  const bonusOf = (it, d) => (bonuses || []).find(x =>
+    x.status === 'active' && x.date === d && x.window === it.win && String(x.classroom_id) === String(it.classroom_id));
+
+  const GapPill = ({ it, date }) => {
     const short = it.diff < 0;
     const tone = short ? 'error' : 'success';
+    const bonus = short && it.classroom_id ? bonusOf(it, date) : null;
     return (
       <Tooltip title={`${it.label} · ${it.winName}: ${short ? `חסרות ${-it.diff} מול התקן` : `${it.diff} מעל התקן — אפשר להעביר`}`}>
         <Box sx={{
@@ -74,9 +91,55 @@ export default function StaffBalanceStrip({ rows, dates, closedDates, ratios, pm
           }}>
             {it.diff > 0 ? `+${it.diff}` : it.diff}
           </Box>
+          {bonus && (
+            <Tooltip title={`בונוס פעיל לעובדות מסניפים אחרים · ${bonus.claimed_by_name ? `נתפס על ידי ${bonus.claimed_by_name}` : 'לחיצה מבטלת'}`}>
+              <Box component="span" dir="ltr"
+                onClick={canEdit ? async (e) => {
+                  e.stopPropagation();
+                  if (!window.confirm(`לבטל את הבונוס של ₪${bonus.amount}?`)) return;
+                  try { await api.delete(`/shifts/cover-bonuses/${bonus._id}`); toast.success('הבונוס בוטל'); onChanged?.(); }
+                  catch (err) { toast.error(err.response?.data?.error || 'הביטול נכשל'); }
+                } : undefined}
+                sx={{
+                  display: 'inline-flex', alignItems: 'center', gap: 0.25,
+                  px: 0.75, py: 0.2, borderRadius: 999, cursor: canEdit ? 'pointer' : 'default',
+                  bgcolor: '#FEF3C7', color: '#92400E', border: '1.5px solid #F59E0B',
+                  fontSize: '0.66rem', fontWeight: 800, boxShadow: '0 1px 4px rgba(245,158,11,0.35)',
+                }}>
+                🎁 ₪{bonus.amount}
+              </Box>
+            </Tooltip>
+          )}
+          {canEdit && short && !bonus && it.classroom_id && (
+            <Tooltip title="הצעת בונוס לעובדת מסניף אחר שתיקח את המשמרת">
+              <Box component="span"
+                onClick={(e) => { e.stopPropagation(); setBonusDlg({ gap: { ...it, date }, amount: '' }); }}
+                sx={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  minWidth: 18, height: 18, borderRadius: '50%', cursor: 'pointer',
+                  border: '1.5px dashed #F59E0B', color: '#B45309', fontSize: '0.7rem', fontWeight: 800,
+                  '&:hover': { bgcolor: '#FEF3C7' },
+                }}>
+                🎁
+              </Box>
+            </Tooltip>
+          )}
         </Box>
       </Tooltip>
     );
+  };
+
+  const saveBonus = async () => {
+    const { gap, amount } = bonusDlg;
+    try {
+      await api.post('/shifts/cover-bonuses', {
+        branch_id: branchId, date: gap.date, window: gap.win,
+        classroom_id: gap.classroom_id, amount: Number(amount),
+      });
+      toast.success('הבונוס פורסם — עובדות פנויות מסניפים אחרים יראו אותו');
+      setBonusDlg(null);
+      onChanged?.();
+    } catch (err) { toast.error(err.response?.data?.error || 'הפרסום נכשל'); }
   };
 
   return (
@@ -149,14 +212,41 @@ export default function StaffBalanceStrip({ rows, dates, closedDates, ratios, pm
                 <Typography variant="caption" sx={{ color: 'success.main', fontWeight: 700 }}>מאוזן ✓</Typography>
               ) : (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.6 }}>
-                  {short.map((it, k) => <GapPill key={`s${k}`} it={it} />)}
-                  {extra.map((it, k) => <GapPill key={`e${k}`} it={it} />)}
+                  {short.map((it, k) => <GapPill key={`s${k}`} it={it} date={d} />)}
+                  {extra.map((it, k) => <GapPill key={`e${k}`} it={it} date={d} />)}
                 </Box>
               )}
             </Box>
           );
         })}
       </Box>
+
+      <Dialog open={!!bonusDlg} onClose={() => setBonusDlg(null)} maxWidth="xs" fullWidth dir="rtl">
+        <DialogTitle>🎁 בונוס למשמרת חסרה</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            הבונוס יוצג רק לעובדות פנויות <b>מסניפים אחרים</b> לצד המשבצת החסרה.
+            כשעובדת כזו תשובץ, הבונוס יוגש אוטומטית כתוספת שכר לאישור הנהלת חשבונות — לפי הנהלים.
+          </Typography>
+          {bonusDlg && (
+            <Typography sx={{ fontWeight: 700, mb: 2 }}>
+              {bonusDlg.gap.label} · {fmtDate(bonusDlg.gap.date)} · {bonusDlg.gap.winName}
+            </Typography>
+          )}
+          <TextField
+            autoFocus fullWidth type="number" label="סכום הבונוס (₪)"
+            value={bonusDlg?.amount || ''}
+            onChange={e => setBonusDlg(s => ({ ...s, amount: e.target.value }))}
+            helperText="בין 20 ל-1,000 ₪ · תשלום חד-פעמי על המשמרת"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBonusDlg(null)}>ביטול</Button>
+          <Button variant="contained" disabled={!(Number(bonusDlg?.amount) >= 20)} onClick={saveBonus}>
+            פרסום הבונוס
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Paper>
   );
 }

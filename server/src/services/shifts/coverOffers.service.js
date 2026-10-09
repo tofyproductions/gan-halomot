@@ -15,7 +15,7 @@
  */
 const mongoose = require('mongoose');
 const {
-  ShiftWeek, ShiftCoverOffer, Employee, EmployeeCommitment, Branch, Classroom,
+  ShiftWeek, ShiftCoverOffer, ShiftCoverBonus, Employee, EmployeeCommitment, Branch, Classroom,
 } = require('../../models');
 const notificationService = require('../notification.service');
 const { ShiftError, assertEdit } = require('./access');
@@ -139,10 +139,20 @@ async function listForEmployee({ employee }) {
   const ordered = [...branches].sort((a, b) =>
     (String(a._id) === home ? 0 : 1) - (String(b._id) === home ? 0 : 1));
   const all = [];
+  const bonuses = await ShiftCoverBonus.find({ status: 'active', week_start: { $in: weeks } }).lean();
+  const bonusOf = new Map(bonuses.map(x => [`${x.branch_id}|${x.date}|${x.window}|${x.classroom_id}`, x.amount]));
   for (const b of ordered) {
     for (const ws of weeks) {
       const gs = await openGaps(b._id, ws);
-      for (const g of gs) all.push({ ...g, branch_name: b.name, foreign: String(b._id) !== home });
+      for (const g of gs) {
+        const foreign = String(b._id) !== home;
+        all.push({
+          ...g, branch_name: b.name, foreign,
+          // The bounty is for TRAVELERS only: her own branch's gap carries
+          // no prize — she is expected without one.
+          bonus: foreign ? (bonusOf.get(`${g.branch_id}|${g.date}|${g.window}|${g.classroom_id}`) || null) : null,
+        });
+      }
     }
   }
   const free = [];
@@ -194,10 +204,28 @@ async function createOffer({ employee, body }) {
   return offer;
 }
 
-/** The pending offers a manager sees on her board. */
-function pendingFor(branchId, weekStart) {
-  return ShiftCoverOffer.find({ branch_id: branchId, week_start: weekStart, status: 'pending' })
+/** The pending offers a manager sees on her board — marked foreign, with
+ *  the bonus that would apply so the approve button says the whole truth. */
+async function pendingFor(branchId, weekStart) {
+  const offers = await ShiftCoverOffer.find({ branch_id: branchId, week_start: weekStart, status: 'pending' })
     .sort({ date: 1 }).lean();
+  if (!offers.length) return offers;
+  const emps = await Employee.find({ _id: { $in: offers.map(o => o.employee_id) } })
+    .select('branch_id').lean();
+  const homeOf = new Map(emps.map(e => [String(e._id), String(e.branch_id)]));
+  const bonuses = await ShiftCoverBonus.find({ branch_id: branchId, week_start: weekStart, status: 'active' }).lean();
+  const bonusOf = new Map(bonuses.map(x => [`${x.date}|${x.window}|${x.classroom_id}`, x.amount]));
+  const homeBranches = await Branch.find({ _id: { $in: [...new Set([...homeOf.values()])] } }).select('name').lean();
+  const branchName = new Map(homeBranches.map(b => [String(b._id), b.name]));
+  return offers.map(o => {
+    const home = homeOf.get(String(o.employee_id));
+    const foreign = home && home !== String(branchId);
+    return {
+      ...o, foreign,
+      home_branch_name: foreign ? (branchName.get(home) || '') : '',
+      bonus: foreign ? (bonusOf.get(`${o.date}|${o.window}|${o.classroom_id}`) || null) : null,
+    };
+  });
 }
 
 /** Her hours for the window: her commitment for that weekday, clipped. */
@@ -243,6 +271,36 @@ async function decideOffer({ user, id, approve, reason }) {
       throw err;
     }
     offer.status = 'accepted';
+    /**
+     * The bounty, paid by the rules: a FOREIGN taker of a slot that carries
+     * an active bonus gets a pending money_add adjustment — the accountant
+     * approves it like any other addition; nothing lands on a payslip on a
+     * manager's word alone. Hers-branch takers never claim it.
+     */
+    if (String(emp.branch_id) !== String(offer.branch_id)) {
+      const bonus = await ShiftCoverBonus.findOne({
+        branch_id: offer.branch_id, date: offer.date, window: offer.window,
+        classroom_id: offer.classroom_id, status: 'active',
+      });
+      if (bonus) {
+        const { SalaryAdjustment, Branch: BranchModel } = require('../../models');
+        const hostName = (await BranchModel.findById(offer.branch_id).select('name').lean())?.name || '';
+        await SalaryAdjustment.create({
+          employee_id: emp._id,
+          branch_id: emp.branch_id,
+          month: offer.date.slice(0, 7),
+          type: 'money_add',
+          amount: bonus.amount,
+          reason: `בונוס כיסוי משמרת בסניף ${hostName} — ${offer.classroom_name}, ${offer.date}, משמרת ${offer.window === 'am' ? 'בוקר' : 'צהריים'}`,
+          created_by: user.id,
+          created_by_role: user.role || '',
+          status: 'pending',
+        });
+        bonus.claimed_by_name = emp.full_name;
+        bonus.claimed_at = new Date();
+        await bonus.save();
+      }
+    }
   } else {
     if (!String(reason || '').trim()) throw new ShiftError(400, 'יש לכתוב סיבה לדחייה');
     offer.status = 'declined';
@@ -263,4 +321,42 @@ async function decideOffer({ user, id, approve, reason }) {
   return offer;
 }
 
-module.exports = { openGaps, listForEmployee, createOffer, pendingFor, decideOffer };
+/** The manager puts a price on a slot — or takes it off. Host branch only. */
+async function setBonus({ user, body }) {
+  const b = body || {};
+  if (!mongoose.isValidObjectId(b.branch_id)) throw new ShiftError(400, 'סניף לא תקין');
+  assertEdit(user, b.branch_id);
+  if (!['am', 'pm'].includes(b.window)) throw new ShiftError(400, 'משמרת לא תקינה');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(b.date || ''))) throw new ShiftError(400, 'תאריך לא תקין');
+  if (!mongoose.isValidObjectId(b.classroom_id)) throw new ShiftError(400, 'כיתה לא תקינה');
+  const amount = Math.round(Number(b.amount));
+  if (!(amount >= 20 && amount <= 1000)) throw new ShiftError(400, 'סכום הבונוס: בין 20 ל-1,000 ₪');
+  const weekStart = sundayOf(b.date);
+  // Priced only while it is a real gap — a filled slot sells nothing.
+  const gaps = await openGaps(b.branch_id, weekStart);
+  const gap = gaps.find(g => g.date === b.date && g.window === b.window && g.classroom_id === String(b.classroom_id));
+  if (!gap) throw new ShiftError(409, 'המשבצת כבר לא בחוסר');
+  await ShiftCoverBonus.updateMany(
+    { branch_id: b.branch_id, date: b.date, window: b.window, classroom_id: b.classroom_id, status: 'active' },
+    { status: 'cancelled' },
+  );
+  return ShiftCoverBonus.create({
+    ...gap, amount, created_by: user.id, created_by_name: user.full_name || '',
+  });
+}
+
+async function cancelBonus({ user, id }) {
+  if (!mongoose.isValidObjectId(id)) throw new ShiftError(404, 'בונוס לא נמצא');
+  const bonus = await ShiftCoverBonus.findById(id);
+  if (!bonus) throw new ShiftError(404, 'בונוס לא נמצא');
+  assertEdit(user, bonus.branch_id);
+  bonus.status = 'cancelled';
+  await bonus.save();
+  return bonus;
+}
+
+function activeBonuses(branchId, weekStart) {
+  return ShiftCoverBonus.find({ branch_id: branchId, week_start: weekStart, status: 'active' }).lean();
+}
+
+module.exports = { openGaps, listForEmployee, createOffer, pendingFor, decideOffer, setBonus, cancelBonus, activeBonuses };

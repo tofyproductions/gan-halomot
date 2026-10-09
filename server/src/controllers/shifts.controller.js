@@ -49,6 +49,12 @@ module.exports = {
     if (!employee) return res.status(400).json({ error: 'לא נמצא כרטיס עובדת מקושר' });
     res.json({ offer: await require('../services/shifts/coverOffers.service').createOffer({ employee, body: req.body }) });
   }),
+  setCoverBonus: handle(async (req, res) => {
+    res.json({ bonus: await require('../services/shifts/coverOffers.service').setBonus({ user: req.user, body: req.body }) });
+  }),
+  cancelCoverBonus: handle(async (req, res) => {
+    res.json({ bonus: await require('../services/shifts/coverOffers.service').cancelBonus({ user: req.user, id: req.params.id }) });
+  }),
   decideCoverOffer: handle(async (req, res) => {
     res.json({ offer: await require('../services/shifts/coverOffers.service').decideOffer({
       user: req.user, id: req.params.id, approve: req.body.approve === true, reason: req.body.reason,

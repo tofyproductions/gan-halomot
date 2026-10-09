@@ -30,8 +30,13 @@ export default function CoverOffersPanel({ offers, onChanged }) {
       {offers.map(o => (
         <Alert key={o._id} severity="info" icon="🙋">
           <Typography fontWeight={700}>
-            {o.employee_name} מציעה את עצמה: {o.classroom_name} · {HEB_DAYS[weekdayOf(o.date)]} {fmtDate(o.date)} · {WIN[o.window]}
+            {o.employee_name}{o.foreign ? ` (${o.home_branch_name || 'סניף אחר'})` : ''} מציעה את עצמה: {o.classroom_name} · {HEB_DAYS[weekdayOf(o.date)]} {fmtDate(o.date)} · {WIN[o.window]}
           </Typography>
+          {o.bonus && (
+            <Typography variant="body2" sx={{ color: '#92400E', fontWeight: 700 }}>
+              🎁 כולל בונוס ₪{o.bonus} — עם האישור יוגש אוטומטית כתוספת שכר לאישור הנהלת חשבונות
+            </Typography>
+          )}
           <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1, flexWrap: 'wrap' }} useFlexGap>
             <Button size="small" variant="contained" disabled={!!busy[o._id]} onClick={() => decide(o, true)}>
               אישור ושיבוץ

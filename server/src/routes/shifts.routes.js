@@ -44,6 +44,8 @@ router.post('/constraints/:id/volunteer', mine, c.volunteer);
 router.get('/cover-offers/mine', mine, c.myCoverGaps);
 router.post('/cover-offers', mine, c.createCoverOffer);
 router.post('/cover-offers/:id/decide', board, c.decideCoverOffer);
+router.post('/cover-bonuses', board, c.setCoverBonus);
+router.delete('/cover-bonuses/:id', board, c.cancelCoverBonus);
 router.post('/constraints/manual', board, c.createManualConstraint);
 router.post('/constraints/:id/decide', board, c.decideConstraint);
 router.post('/constraints/:id/approve-broadcast', board, c.approveBroadcast);
