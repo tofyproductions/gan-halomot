@@ -27,7 +27,7 @@ const todayYmd = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/
  */
 const AM_STARTS_BEFORE = 13 * 60;
 const PM_STAYS_PAST = 14 * 60;
-const inWindow = (e, win) => {
+export const inWindow = (e, win) => {
   if (win === 'all') return true;
   const a = toMin(e.start_hhmm); const b = toMin(e.end_hhmm);
   if (a == null || b == null) return true; // no hours — never hide
@@ -57,7 +57,7 @@ function readDrag(ev) {
  * scrolling sideways inside its own box — the page itself never widens (see
  * PageHeader for what a wide page does to sticky cells on iOS).
  */
-const CATEGORY_KEY = { 'תינוקייה': 'infants', 'צעירים': 'young', 'בוגרים': 'older' };
+export const CATEGORY_KEY = { 'תינוקייה': 'infants', 'צעירים': 'young', 'בוגרים': 'older' };
 
 /** ☀️ 5/4 — placed vs the licence minimum for one window, colored by the gap. */
 function StaffPill({ icon, label, staff, needed }) {

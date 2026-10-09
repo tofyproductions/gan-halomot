@@ -14,6 +14,7 @@ import EmployeeSidebar from './EmployeeSidebar';
 import EntryDialog from './EntryDialog';
 import PrimaryClassDialog from './PrimaryClassDialog';
 import OvertimeStrip from './OvertimeStrip';
+import StaffBalanceStrip from './StaffBalanceStrip';
 import FillSuggestions from './FillSuggestions';
 import ShiftSettingsDialog from './ShiftSettingsDialog';
 import EditRequestsPanel from './EditRequestsPanel';
@@ -423,6 +424,10 @@ export default function ShiftsScreen() {
       {board?.can_edit && <EditRequestsPanel requests={board.edit_requests} onDecided={load} />}
       {board && <CrossBranchPanel board={board} onChanged={load} />}
       {board && <ConstraintsPanel constraints={board.constraints} canEdit={!!board.can_edit} onChanged={load} entries={shown} />}
+      {board && (
+        <StaffBalanceStrip rows={rows} dates={board.dates} closedDates={closed}
+          ratios={board.ratios} pmCaps={board.pm_caps} />
+      )}
       {board && <OvertimeStrip employees={board.employees} entries={shown} dates={board.dates} />}
       {board && <FillSuggestions board={board} entries={shown} closed={closed} onAdd={addSuggested} />}
       {board?.can_edit && (() => {
