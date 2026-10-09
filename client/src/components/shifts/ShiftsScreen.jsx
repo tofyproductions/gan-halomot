@@ -220,6 +220,21 @@ export default function ShiftsScreen() {
     persist(next);
   };
 
+  /**
+   * The dialog's split: one block becomes two at the chosen hour — the first
+   * keeps its room and ends at the cut, the second starts there, ends where
+   * the whole shift used to, and lives in the chosen row. Any hour, any row
+   * — the 14:00 drag-split is the shortcut, this is the general tool.
+   */
+  const splitEntry = (entry, { at, area, classroom_id }) => {
+    closeDlg();
+    const next = shown.map(e => (sameEntry(e, entry) ? { ...e, end_hhmm: at } : e));
+    persist([...next, {
+      employee_id: entry.employee_id, employee_name: entry.employee_name,
+      date: entry.date, area, classroom_id, start_hhmm: at, end_hhmm: entry.end_hhmm, tmp: newTmp(),
+    }]);
+  };
+
   // 🤒 → she filed a sick day here, and still chose to work: the manager
   // confirms it on the entry itself. A second click takes it back.
   const toggleSickOk = (entry) => {
@@ -479,6 +494,7 @@ export default function ShiftsScreen() {
       <EntryDialog open={dlg.open} onClose={closeDlg}
         entry={dlg.entry} defaults={dlg.defaults || NO_DEFAULTS} employees={rotaEmployees} rows={rows}
         onSave={saveEntry} onDelete={deleteEntry}
+        onSplit={splitEntry}
         onRequestRate={board?.can_edit ? () => { closeDlg(); setRateEmployeeId(null); setRateOpen(true); } : undefined} />
       <RateRequestDialog open={rateOpen} onClose={() => setRateOpen(false)} candidates={board?.foreign_candidates}
         hostBranchId={board?.branch_id} initialEmployeeId={rateEmployeeId}
