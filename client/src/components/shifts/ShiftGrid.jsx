@@ -67,8 +67,24 @@ export const CATEGORY_KEY = { 'תינוקייה': 'infants', 'צעירים': 'yo
  */
 function StaffPill({ icon, label, staff, needed }) {
   const diff = staff - needed;
-  const tone = diff < 0 ? 'error' : diff > 0 ? 'info' : 'success';
+  const tone = diff < 0 ? 'error' : 'success';
   const text = diff < 0 ? `חסרות ${-diff}` : diff > 0 ? `עודף ${diff}` : 'לפי התקן';
+  // The gap, in its own little circle OFF the fraction: 5/4 and the +1 used
+  // to sit as one run of digits and read as a third number. A surplus wears
+  // the same escalation a shortage does — green frame and glow — because a
+  // spare pair of hands is a fact the planner acts on, not background.
+  const gapBadge = diff !== 0 && (
+    <Box component="span" dir="ltr" sx={{
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      minWidth: 18, height: 18, px: 0.4, borderRadius: '50%',
+      bgcolor: 'background.paper',
+      border: '1.5px solid', borderColor: diff < 0 ? 'error.main' : 'success.main',
+      color: diff < 0 ? 'error.main' : 'success.dark',
+      fontSize: '0.66rem', fontWeight: 800, lineHeight: 1,
+    }}>
+      {diff > 0 ? `+${diff}` : diff}
+    </Box>
+  );
   return (
     <Tooltip title={`${label}: משובצות ${staff}, תקן ${needed} — ${text}`}>
       <Box component="span" sx={{
@@ -76,13 +92,15 @@ function StaffPill({ icon, label, staff, needed }) {
         px: 1, py: 0.4, borderRadius: 999,
         fontSize: '0.72rem', fontWeight: 700, lineHeight: 1,
         bgcolor: `${tone}.soft`, color: `${tone}.softOn`,
-        border: '1px solid', borderColor: diff < 0 ? 'error.main' : 'transparent',
-        boxShadow: diff < 0 ? '0 1px 4px rgba(220,38,38,0.25)' : 'none',
+        border: '1px solid',
+        borderColor: diff < 0 ? 'error.main' : diff > 0 ? 'success.main' : 'transparent',
+        boxShadow: diff < 0 ? '0 1px 4px rgba(220,38,38,0.25)'
+          : diff > 0 ? '0 1px 4px rgba(22,163,74,0.3)' : 'none',
       }}>
         <Box component="span" aria-hidden sx={{ fontSize: '0.8rem', lineHeight: 1 }}>{icon}</Box>
         <Box component="span" sx={{ opacity: 0.8, fontWeight: 600 }}>{label}</Box>
         <Box component="span" dir="ltr" sx={{ fontVariantNumeric: 'tabular-nums', fontSize: '0.8rem' }}>{staff}/{needed}</Box>
-        {diff !== 0 && <Box component="span" sx={{ fontWeight: 800 }} dir="ltr">{diff > 0 ? `+${diff}` : diff}</Box>}
+        {gapBadge}
       </Box>
     </Tooltip>
   );
