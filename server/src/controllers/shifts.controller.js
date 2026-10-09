@@ -38,6 +38,22 @@ module.exports = {
   remindUnviewed: handle(async (req, res) => {
     res.json(await svc.remindUnviewed({ user: req.user, weekId: req.params.id }));
   }),
+  // ── self-nomination for open gaps ──────────────────────────────────
+  myCoverGaps: handle(async (req, res) => {
+    const employee = await resolveSelfEmployee(req);
+    if (!employee) return res.json({ gaps: [], offers: [] });
+    res.json(await require('../services/shifts/coverOffers.service').listForEmployee({ employee }));
+  }),
+  createCoverOffer: handle(async (req, res) => {
+    const employee = await resolveSelfEmployee(req);
+    if (!employee) return res.status(400).json({ error: 'לא נמצא כרטיס עובדת מקושר' });
+    res.json({ offer: await require('../services/shifts/coverOffers.service').createOffer({ employee, body: req.body }) });
+  }),
+  decideCoverOffer: handle(async (req, res) => {
+    res.json({ offer: await require('../services/shifts/coverOffers.service').decideOffer({
+      user: req.user, id: req.params.id, approve: req.body.approve === true, reason: req.body.reason,
+    }) });
+  }),
   createEditRequest: handle(async (req, res) => {
     res.json({ request: await svc.createEditRequest({ user: req.user, weekId: req.params.id, entries: req.body.entries }) });
   }),

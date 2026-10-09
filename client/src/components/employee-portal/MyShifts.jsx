@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Box, Stack, Typography, Alert, ToggleButtonGroup, ToggleButton, LinearProgress, Tabs, Tab, Paper, Chip, Accordion, AccordionSummary, AccordionDetails } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import MyConstraints from './MyConstraints';
+import CoverGapsCard from './CoverGapsCard';
 import api from '../../api/client';
 import ShiftGrid from '../shifts/ShiftGrid';
 import { buildRows, buildAwayRow, switchedSet, fmtDate, toMin, fmtMin, HEB_DAYS } from '../shifts/shiftRows';
@@ -147,6 +148,7 @@ export default function MyShifts() {
           {data && data.published === false && <Alert severity="info">הסידור לשבוע {fmtDate(week)} עוד לא פורסם.</Alert>}
           {data && (data.published || (data.away && data.away.length)) && (
             <Stack spacing={1.5}>
+              <CoverGapsCard />
               <MyWeekCards data={data} mine={mine} />
               <Accordion disableGutters>
                 <AccordionSummary expandIcon={<ExpandMoreIcon />}>

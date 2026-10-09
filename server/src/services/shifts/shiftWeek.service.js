@@ -191,6 +191,7 @@ async function getBoard({ user, branchId, weekStart }) {
     dates,
     closed_dates: [...closed],
     classrooms,
+    cover_offers: week ? await require('./coverOffers.service').pendingFor(branchId, weekStart) : [],
     stale_enrolled: staleEnrolled,
     inactive_classrooms: inactive.map(r => ({ _id: String(r._id), name: r.name, academic_year: r.academic_year })),
     employees: employees.map(e => ({

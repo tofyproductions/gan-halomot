@@ -17,6 +17,7 @@ import OvertimeStrip from './OvertimeStrip';
 import StaffBalanceStrip from './StaffBalanceStrip';
 import ManualConstraintDialog from './ManualConstraintDialog';
 import RotaViewsPanel from './RotaViewsPanel';
+import CoverOffersPanel from './CoverOffersPanel';
 import FillSuggestions from './FillSuggestions';
 import ShiftSettingsDialog from './ShiftSettingsDialog';
 import EditRequestsPanel from './EditRequestsPanel';
@@ -447,6 +448,7 @@ export default function ShiftsScreen() {
           יש להעביר אותם לכיתות השנה במסך רישום ← שיבוץ לכיתות.
         </Alert>
       )}
+      {board?.can_edit && <CoverOffersPanel offers={board.cover_offers} onChanged={load} />}
       {board?.can_edit && <RotaViewsPanel week={board.week} />}
       {board?.can_edit && <EditRequestsPanel requests={board.edit_requests} onDecided={load} />}
       {board && <CrossBranchPanel board={board} onChanged={load} />}

@@ -1,0 +1,84 @@
+import { useEffect, useState } from 'react';
+import { Paper, Stack, Typography, Chip, Button, Box, Tooltip } from '@mui/material';
+import { toast } from 'react-toastify';
+import api from '../../api/client';
+import { HEB_DAYS, fmtDate } from '../shifts/shiftRows';
+
+const weekdayOf = (ymd) => new Date(`${ymd}T12:00`).getDay();
+const WIN = { am: '☀️ בוקר', pm: '🌙 צהריים' };
+const STATUS = {
+  pending: { label: 'ממתין למנהלת', color: 'warning' },
+  accepted: { label: 'אושר — את בסידור', color: 'success' },
+  declined: { label: 'לא אושר', color: 'default' },
+};
+
+/**
+ * "חסר — ואת פנויה": the gaps she may volunteer for, computed on the server
+ * from the same arithmetic as the manager's balance strip, shown only when
+ * the gap has no internal surplus to drag from. One tap sends the offer to
+ * the manager; the decision comes back as a notification and shows here.
+ */
+export default function CoverGapsCard() {
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState('');
+  const load = () => api.get('/shifts/cover-offers/mine').then(r => setData(r.data)).catch(() => setData(null));
+  useEffect(() => { load(); }, []);
+
+  if (!data || (!data.gaps.length && !data.offers.length)) return null;
+
+  const offer = async (g) => {
+    const key = `${g.date}|${g.window}|${g.classroom_id}`;
+    setBusy(key);
+    try {
+      await api.post('/shifts/cover-offers', { date: g.date, window: g.window, classroom_id: g.classroom_id });
+      toast.success('ההצעה נשלחה למנהלת — תקבלי הודעה כשתוחלט');
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'השליחה נכשלה');
+      load();
+    } finally { setBusy(''); }
+  };
+
+  return (
+    <Paper sx={{ p: 1.5, mb: 1.5, borderRadius: 3 }}>
+      <Typography sx={{ fontWeight: 800, mb: 0.5 }}>🙋 חסר בסידור — ואת פנויה</Typography>
+      {data.gaps.length > 0 && (
+        <>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            במשבצות האלה חסרה עובדת ואת פנויה לפי הסידור. לחיצה שולחת הצעה למנהלת — השיבוץ נכנס רק אחרי אישור שלה.
+          </Typography>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: data.offers.length ? 1.5 : 0 }}>
+            {data.gaps.map(g => {
+              const key = `${g.date}|${g.window}|${g.classroom_id}`;
+              return (
+                <Tooltip key={key} title={`חסרות ${g.missing} · לחיצה שולחת הצעה למנהלת`}>
+                  <Button size="small" variant="outlined" color="primary" disabled={busy === key}
+                    onClick={() => offer(g)}
+                    sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>
+                    + {HEB_DAYS[weekdayOf(g.date)]} {fmtDate(g.date)} · {g.classroom_name} · {WIN[g.window]}
+                  </Button>
+                </Tooltip>
+              );
+            })}
+          </Stack>
+        </>
+      )}
+      {data.offers.length > 0 && (
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
+          <Typography variant="caption" color="text.secondary">ההצעות שלך:</Typography>
+          {data.offers.map(o => (
+            <Tooltip key={o._id} title={o.status === 'declined' && o.reject_reason ? `סיבה: ${o.reject_reason}` : ''}>
+              <Chip size="small" variant="outlined" color={STATUS[o.status]?.color || 'default'}
+                label={`${fmtDate(o.date)} ${o.classroom_name} ${WIN[o.window]} — ${STATUS[o.status]?.label || o.status}`} />
+            </Tooltip>
+          ))}
+        </Stack>
+      )}
+      {data.gaps.length === 0 && data.offers.length > 0 && (
+        <Box sx={{ mt: 0.5 }}>
+          <Typography variant="caption" color="text.secondary">אין כרגע משבצות פתוחות נוספות.</Typography>
+        </Box>
+      )}
+    </Paper>
+  );
+}
