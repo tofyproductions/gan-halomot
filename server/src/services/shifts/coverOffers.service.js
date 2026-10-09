@@ -120,13 +120,31 @@ async function isFree(employee, gap) {
   return true;
 }
 
-/** The gaps SHE may offer herself for — this week and next. */
+/**
+ * The gaps SHE may offer herself for — this week and next, HER branch first
+ * and then every other active branch's opened weeks (09.10.2026: a gap in
+ * הרצליה may be exactly the extra morning a קפלן worker wants).
+ *
+ * What crosses the branch line is ONLY the gap itself: branch name, class
+ * name, date, window, how many missing. No entries, no names, no numbers of
+ * another branch's staffing beyond "here is a hole" — the same four facts a
+ * help-wanted note on a door would carry.
+ */
 async function listForEmployee({ employee }) {
   if (!employee.branch_id || employee.shift_area === 'none') return { gaps: [], offers: [] };
   const thisSunday = sundayOf(todayIL());
   const weeks = [thisSunday, addDays(thisSunday, 7)];
+  const branches = await Branch.find({ is_active: { $ne: false } }).select('name').lean();
+  const home = String(employee.branch_id);
+  const ordered = [...branches].sort((a, b) =>
+    (String(a._id) === home ? 0 : 1) - (String(b._id) === home ? 0 : 1));
   const all = [];
-  for (const ws of weeks) all.push(...await openGaps(employee.branch_id, ws));
+  for (const b of ordered) {
+    for (const ws of weeks) {
+      const gs = await openGaps(b._id, ws);
+      for (const g of gs) all.push({ ...g, branch_name: b.name, foreign: String(b._id) !== home });
+    }
+  }
   const free = [];
   for (const g of all) {
     if (await isFree(employee, g)) free.push(g);
@@ -147,26 +165,30 @@ async function createOffer({ employee, body }) {
   if (!['am', 'pm'].includes(b.window)) throw new ShiftError(400, 'משמרת לא תקינה');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(b.date || ''))) throw new ShiftError(400, 'תאריך לא תקין');
   if (!mongoose.isValidObjectId(b.classroom_id)) throw new ShiftError(400, 'כיתה לא תקינה');
+  // The gap's branch — hers by default, any active branch by request. The
+  // probe reveals nothing: a wrong guess answers exactly like a filled slot.
+  const targetBranch = b.branch_id && mongoose.isValidObjectId(b.branch_id) ? b.branch_id : employee.branch_id;
   const weekStart = sundayOf(b.date);
   // Revalidated server-side in full — the button is not the authority.
-  const gaps = await openGaps(employee.branch_id, weekStart);
+  const gaps = await openGaps(targetBranch, weekStart);
   const gap = gaps.find(g => g.date === b.date && g.window === b.window && g.classroom_id === String(b.classroom_id));
   if (!gap) throw new ShiftError(409, 'המשבצת כבר לא פתוחה — ייתכן שהסידור השתנה');
   if (!(await isFree(employee, gap))) throw new ShiftError(409, 'כבר יש לך שיבוץ או אילוץ בשעות האלה');
   if (await ShiftCoverOffer.exists({ employee_id: employee._id, date: gap.date, window: gap.window, classroom_id: gap.classroom_id, status: 'pending' })) {
     throw new ShiftError(409, 'כבר הצעת את עצמך למשבצת הזו');
   }
+  const foreign = String(targetBranch) !== String(employee.branch_id);
   const offer = await ShiftCoverOffer.create({
     ...gap, employee_id: employee._id, employee_name: employee.full_name,
   });
   const { User } = require('../../models');
   const { branchManagerFilter } = require('../branch-recipients.service');
-  const managers = await User.find({ ...branchManagerFilter(employee.branch_id), role: 'branch_manager' }).select('_id').lean();
+  const managers = await User.find({ ...branchManagerFilter(gap.branch_id), role: 'branch_manager' }).select('_id').lean();
   const [, m, d] = gap.date.split('-');
   await Promise.all(managers.map(u => notificationService.notifyOnce({
     type: 'cover_offer', ref_collection: 'ShiftCoverOffer', ref_id: offer._id, recipient_id: u._id,
-    title: `${employee.full_name} מציעה את עצמה ל${gap.classroom_name}`,
-    body: `${d}/${m} · משמרת ${gap.window === 'am' ? 'בוקר' : 'צהריים'} — אפשר לאשר מהסידור`,
+    title: `${employee.full_name}${foreign ? ' (מסניף אחר)' : ''} מציעה את עצמה ל${gap.classroom_name}`,
+    body: `${d}/${m} · משמרת ${gap.window === 'am' ? 'בוקר' : 'צהריים'} — אפשר לאשר מהסידור${foreign ? '; שיבוץ מסניף אחר יעבור גם אישור סניף הבית' : ''}`,
     url: '/shifts',
   }).catch(err => console.error('[cover-offers] notify failed:', err.message))));
   return offer;
@@ -210,7 +232,16 @@ async function decideOffer({ user, id, approve, reason }) {
     // The same validated door every placement takes: constraints, overlaps,
     // cross-branch rules all run. A conflict surfaces as the error it is.
     const shiftWeek = require('./shiftWeek.service');
-    await shiftWeek.saveEntries({ user, weekId: week._id, entries: [...week.entries.map(e => e.toObject()), entry] });
+    try {
+      await shiftWeek.saveEntries({ user, weekId: week._id, entries: [...week.entries.map(e => e.toObject()), entry] });
+    } catch (err) {
+      // A foreign volunteer without a host rate: keep the offer pending and
+      // tell the manager the one step that unblocks it.
+      if (err && err.extra && err.extra.needs_rate) {
+        throw new ShiftError(409, `ל${emp.full_name} אין עדיין תעריף בסניף — פתחי "בקשת תעריף" (התעריף הרגיל שלה מאושר מיד) ואז אשרי שוב`, err.extra);
+      }
+      throw err;
+    }
     offer.status = 'accepted';
   } else {
     if (!String(reason || '').trim()) throw new ShiftError(400, 'יש לכתוב סיבה לדחייה');

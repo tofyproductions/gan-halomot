@@ -27,17 +27,24 @@ export default function CoverGapsCard() {
   if (!data || (!data.gaps.length && !data.offers.length)) return null;
 
   const offer = async (g) => {
+    // Another branch is a real commute — said out loud before it is sent.
+    if (g.foreign && !window.confirm(`להציע את עצמך למשמרת בסניף ${g.branch_name}? ההצעה תישלח למנהלת של הסניף הזה.`)) return;
     const key = `${g.date}|${g.window}|${g.classroom_id}`;
     setBusy(key);
     try {
-      await api.post('/shifts/cover-offers', { date: g.date, window: g.window, classroom_id: g.classroom_id });
-      toast.success('ההצעה נשלחה למנהלת — תקבלי הודעה כשתוחלט');
+      await api.post('/shifts/cover-offers', { date: g.date, window: g.window, classroom_id: g.classroom_id, branch_id: g.branch_id });
+      toast.success(g.foreign
+        ? `ההצעה נשלחה למנהלת של ${g.branch_name} — תקבלי הודעה כשתוחלט`
+        : 'ההצעה נשלחה למנהלת — תקבלי הודעה כשתוחלט');
       load();
     } catch (err) {
       toast.error(err.response?.data?.error || 'השליחה נכשלה');
       load();
     } finally { setBusy(''); }
   };
+
+  const homeGaps = data.gaps.filter(g => !g.foreign);
+  const awayGaps = data.gaps.filter(g => g.foreign);
 
   return (
     <Paper sx={{ p: 1.5, mb: 1.5, borderRadius: 3 }}>
@@ -47,8 +54,8 @@ export default function CoverGapsCard() {
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
             במשבצות האלה חסרה עובדת ואת פנויה לפי הסידור. לחיצה שולחת הצעה למנהלת — השיבוץ נכנס רק אחרי אישור שלה.
           </Typography>
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: data.offers.length ? 1.5 : 0 }}>
-            {data.gaps.map(g => {
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: awayGaps.length || data.offers.length ? 1.25 : 0 }}>
+            {homeGaps.map(g => {
               const key = `${g.date}|${g.window}|${g.classroom_id}`;
               return (
                 <Tooltip key={key} title={`חסרות ${g.missing} · לחיצה שולחת הצעה למנהלת`}>
@@ -61,6 +68,27 @@ export default function CoverGapsCard() {
               );
             })}
           </Stack>
+          {awayGaps.length > 0 && (
+            <>
+              <Typography variant="caption" sx={{ display: 'block', mb: 0.75, color: 'info.dark', fontWeight: 700 }}>
+                בסניפים אחרים — משמרת נוספת אם מתאים לך להגיע:
+              </Typography>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: data.offers.length ? 1.5 : 0 }}>
+                {awayGaps.map(g => {
+                  const key = `${g.date}|${g.window}|${g.classroom_id}`;
+                  return (
+                    <Tooltip key={key} title={`${g.branch_name} · חסרות ${g.missing} · ההצעה נשלחת למנהלת של הסניף הזה`}>
+                      <Button size="small" variant="outlined" color="info" disabled={busy === key}
+                        onClick={() => offer(g)}
+                        sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>
+                        + {g.branch_name} · {HEB_DAYS[weekdayOf(g.date)]} {fmtDate(g.date)} · {g.classroom_name} · {WIN[g.window]}
+                      </Button>
+                    </Tooltip>
+                  );
+                })}
+              </Stack>
+            </>
+          )}
         </>
       )}
       {data.offers.length > 0 && (
