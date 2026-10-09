@@ -22,6 +22,7 @@ const ParentVisibility = require('./ParentVisibility');
 const ChildSupplies = require('./ChildSupplies');
 const Collection = require('./Collection');
 const Archive = require('./Archive');
+const AuditTrail = require('./AuditTrail');
 const Document = require('./Document');
 const CollectionHistory = require('./CollectionHistory');
 const PriceAdjustment = require('./PriceAdjustment');
@@ -166,6 +167,7 @@ const real = {
   ParentVisibility,
   Collection,
   Archive,
+  AuditTrail,
   Document,
   CollectionHistory,
   PriceAdjustment,

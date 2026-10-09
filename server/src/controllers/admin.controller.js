@@ -35,6 +35,24 @@ async function setRoleTabs(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/**
+ * GET /admin/audit-trail?days=&area=&user=&q=&status=
+ * The sensitive-area access log, newest first. system_admin only (router).
+ */
+async function auditTrail(req, res, next) {
+  try {
+    const { AuditTrail } = require('../models');
+    const days = Math.min(Number(req.query.days) || 7, 180);
+    const filter = { created_at: { $gte: new Date(Date.now() - days * 86400000) } };
+    if (req.query.area) filter.area = String(req.query.area);
+    if (req.query.user) filter.user_id = String(req.query.user);
+    if (req.query.status === '403') filter.status = 403;
+    if (req.query.q) filter.path = { $regex: String(req.query.q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' };
+    const rows = await AuditTrail.find(filter).sort({ created_at: -1 }).limit(500).lean();
+    res.json({ rows, days });
+  } catch (err) { next(err); }
+}
+
 async function listUsers(req, res, next) {
   try {
     const found = await User.find({ is_active: true })
@@ -515,6 +533,7 @@ async function emailTest(req, res, next) {
 }
 
 module.exports = {
+  auditTrail,
   listAllClassrooms,
   listUsers, updateUserTabs, updateUserRole, resetPassword,
   getRoleTabs, setRoleTabs, emailDiagnostic, emailTest,

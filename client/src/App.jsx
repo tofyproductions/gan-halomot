@@ -114,6 +114,7 @@ const ProposedChanges = lazy(() => import('./components/admin/ProposedChanges'))
 const RecruitmentPage = lazy(() => import('./components/recruitment/RecruitmentPage'));
 const OnboardingQueue = lazy(() => import('./components/employees/OnboardingQueue'));
 const ShareLinks = lazy(() => import('./components/links/ShareLinks'));
+const AuditTrailPage = lazy(() => import('./components/admin/AuditTrailPage'));
 const RegistrationTracker = lazy(() => import('./components/registration/RegistrationTracker'));
 const RegistrationWizard = lazy(() => import('./components/registration/RegistrationWizard'));
 const RequestsManager = lazy(() => import('./components/employees/RequestsManager'));
@@ -365,6 +366,11 @@ function AppRoutes() {
         <Route path="share-links" element={
           <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager', 'accountant']}>
             <ShareLinks />
+          </ProtectedRoute>
+        } />
+        <Route path="audit-trail" element={
+          <ProtectedRoute roles={['system_admin', 'admin_viewer']}>
+            <AuditTrailPage />
           </ProtectedRoute>
         } />
         <Route path="parent-letters" element={

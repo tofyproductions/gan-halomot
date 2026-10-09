@@ -7,6 +7,7 @@ const dataDeletion = wrapControllers(require('../controllers/dataDeletion.contro
 router.use(authMiddleware, requireRole('system_admin'));
 
 router.get('/users', ctrl.listUsers);
+router.get('/audit-trail', ctrl.auditTrail);
 // כל הכיתות הפעילות, לבורר השיוך במסך ההרשאות.
 router.get('/classrooms', ctrl.listAllClassrooms);
 router.patch('/users/:id/tabs', ctrl.updateUserTabs);

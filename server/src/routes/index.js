@@ -54,12 +54,16 @@ router.use('/sync', require('./sync.routes'));
 router.use('/import-bot', require('./importBot.routes'));
 
 // Protected routes that require auth for employees/salary
-router.use('/employees', require('./employee.routes'));
+// Access log for the areas that carry money and personal data — see
+// middleware/auditTrail.js and the audit-trail screen (admin).
+const { auditTrail } = require('../middleware/auditTrail');
+
+router.use('/employees', auditTrail('employees'), require('./employee.routes'));
 router.use('/salary-requests', require('./salary.routes'));
 // Payroll (TIMEDOX replacement) — CRUD for Employee model + attendance
-router.use('/payroll', require('./payroll.routes'));
+router.use('/payroll', auditTrail('payroll'), require('./payroll.routes'));
 // Monthly payroll table — per-amuta breakdown + manual fields (sick, vacation, etc.)
-router.use('/payroll-month', require('./payrollMonth.routes'));
+router.use('/payroll-month', auditTrail('payroll'), require('./payrollMonth.routes'));
 // Punch follow-up — the employee fixes her own missing/duplicate/empty days first.
 router.use('/punch-followup', require('./punchFollowup.routes'));
 // What accounting decided on the requests THIS person sent — one answer across
@@ -83,7 +87,7 @@ router.use('/employee-file', require('./employeeFile.routes'));
 // טופס 101 — the roster view, the mail scan and its review queue
 router.use('/form-101', require('./form101.routes'));
 // Class tracking (מעקב חוגים) — providers, programs, sessions + occurrence popup
-router.use('/classes', require('./classes.routes'));
+router.use('/classes', auditTrail('classes'), require('./classes.routes'));
 // Maintenance (אחזקה) — assets per branch with service cycles + fault reports
 router.use('/maintenance', require('./maintenance.routes'));
 // Gan events (אירועים) — manager builds a bring-list, parents claim items via a
@@ -125,16 +129,16 @@ router.use('/push', require('./push.routes'));
 router.use('/notifications', require('./notifications.routes'));
 router.use('/data-deletion', require('./dataDeletion.routes'));
 router.use('/dashboard', require('./dashboard.routes'));
-router.use('/children', require('./children.routes'));
-router.use('/registrations', require('./registration.routes'));
+router.use('/children', auditTrail('children'), require('./children.routes'));
+router.use('/registrations', auditTrail('registration'), require('./registration.routes'));
 // קליקטאק — enrollments from the מעונות אמונה system, reviewed before they
 // become registrations here.
 router.use('/external-enrollments', require('./externalEnrollment.routes'));
 // משרד התמ"ת — the ministry's approval list, and the reconciliation against
 // ClickTac that decides who is actually enrolled next year.
 router.use('/tmt', require('./tmtApproval.routes'));
-router.use('/contracts', require('./contracts.routes'));
-router.use('/collections', require('./collections.routes'));
+router.use('/contracts', auditTrail('contracts'), require('./contracts.routes'));
+router.use('/collections', auditTrail('collections'), require('./collections.routes'));
 router.use('/archives', require('./archive.routes'));
 router.use('/contacts', require('./contacts.routes'));
 // הכתובות המותאמות של מסך קישורים להפצה.
@@ -181,7 +185,7 @@ router.use('/branch-certifications', require('./branchCertifications.routes'));
 router.use('/employee-courses', require('./employeeCourses.routes'));
 // פערי רישום — the roster each branch actually keeps, against the cards here.
 router.use('/roster-gap', require('./rosterGap.routes'));
-router.use('/documents', require('./documents.routes'));
+router.use('/documents', auditTrail('documents'), require('./documents.routes'));
 router.use('/supplies', require('./supplies.routes'));
 router.use('/holidays', require('./holiday.routes'));
 router.use('/parent-supply-list', require('./supplyList.routes'));

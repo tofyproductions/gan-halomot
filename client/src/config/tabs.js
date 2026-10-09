@@ -22,6 +22,8 @@ export const TAB_GROUPS = [
       // looking for "the link for parents" was asking somebody in the office
       // every time.
       { id: 'share_links',    label: 'קישורים להפצה', path: '/share-links',  defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
+      // Who opened what on the sensitive screens — reads included. Admin only.
+      { id: 'audit_trail',    label: 'יומן ביקורת', path: '/audit-trail',    defaultRoles: ['system_admin', 'admin_viewer'] },
       { id: 'leads',          label: 'פניות הורים', path: '/leads',           defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
       { id: 'registrations',  label: 'רישום',     path: '/registrations',     defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager'] },
       // The supervised branches enroll in קליקטאק and are approved by משרד
