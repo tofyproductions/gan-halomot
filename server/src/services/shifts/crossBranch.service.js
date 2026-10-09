@@ -23,9 +23,17 @@ async function branchNames(ids) {
 }
 
 async function foreignCandidates({ hostBranchId }) {
-  const emps = await Employee.find({ is_active: true, branch_id: { $ne: hostBranchId } }).select('full_name branch_id branch_rates').sort({ full_name: 1 }).lean();
+  const emps = await Employee.find({ is_active: true, branch_id: { $ne: hostBranchId } }).select('full_name branch_id branch_rates amuta_distribution terms_history salary_type').sort({ full_name: 1 }).lean();
   const names = await branchNames([...new Set(emps.map(e => String(e.branch_id)))]);
-  return emps.map(e => ({ _id: String(e._id), full_name: e.full_name, branch_id: String(e.branch_id), branch_name: names.get(String(e.branch_id)) || '', has_rate: hasBranchRate(e, hostBranchId) }));
+  const thisMonth = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' }).slice(0, 7);
+  const { primaryRates } = require('../payrollCalc');
+  return emps.map(e => ({
+    _id: String(e._id), full_name: e.full_name, branch_id: String(e.branch_id),
+    branch_name: names.get(String(e.branch_id)) || '', has_rate: hasBranchRate(e, hostBranchId),
+    // Her regular hourly rate — read where payroll reads it; the dialog
+    // shows it as the default.
+    home_hourly_rate: Number(primaryRates(e, thisMonth).hourly_rate) || null,
+  }));
 }
 
 async function activeArrangements({ hostBranchId, employeeIds }) {

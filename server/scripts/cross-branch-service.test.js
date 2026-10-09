@@ -44,16 +44,15 @@ async function throws(fn, status, message, label) {
   const homeMgr = as(homeMgrU); const hostMgr = as(hostMgrU); const acc = as(accU);
   const dana = await M.Employee.create({ full_name: 'דנה', israeli_id: String(idn++), branch_id: home._id, is_active: true });
 
-  console.log('\nבקשת תעריף');
+  console.log('\nבקשת תעריף — עובדת בלי תעריף שעתי רגיל: המשרד קובע');
   await throws(() => rates.createRateRequest({ user: homeMgr, employeeId: String(dana._id), hostBranchId: String(host._id), proposedRate: 50 }), 403, 'רק מנהלת הסניף המארח מבקשת תעריף', 'רק המארחת מבקשת');
   const rr = await rates.createRateRequest({ user: hostMgr, employeeId: String(dana._id), hostBranchId: String(host._id), proposedRate: 50 });
-  eq(rr.status, 'pending_home', 'ממתין למנהלת סניף הבית');
-  eq(await M.NotificationEvent.countDocuments({ type: 'rate_request', recipient_id: homeMgrU._id }), 1, 'מנהלת הבית קיבלה התראה');
+  eq(rr.status, 'pending_office', 'בלי תעריף רגיל — ישר להנהלת חשבונות');
+  eq(await M.NotificationEvent.countDocuments({ type: 'rate_request', recipient_id: homeMgrU._id }), 0, 'מנהלת הבית לא נשאלת על הכסף');
+  eq(await M.NotificationEvent.countDocuments({ type: 'rate_request', recipient_id: accU._id }), 1, 'המשרד קיבל את הבקשה');
   await throws(() => rates.createRateRequest({ user: hostMgr, employeeId: String(dana._id), hostBranchId: String(host._id), proposedRate: 50 }), 409, 'כבר יש בקשת תעריף פתוחה לעובדת הזו', 'בקשה כפולה');
-  await throws(() => rates.decideRateRequest({ user: hostMgr, id: String(rr._id), approve: true }), 403, 'אין הרשאה להחליט בשלב הזה', 'המארחת לא מאשרת שלב בית');
-  await throws(() => rates.decideRateRequest({ user: homeMgr, id: String(rr._id), approve: false, reason: '' }), 400, 'יש לכתוב סיבה לדחייה', 'דחייה בלי סיבה');
-  const step2 = await rates.decideRateRequest({ user: homeMgr, id: String(rr._id), approve: true });
-  eq(step2.status, 'pending_office', 'עבר למשרד');
+  await throws(() => rates.decideRateRequest({ user: hostMgr, id: String(rr._id), approve: true }), 403, 'אין הרשאה להחליט בשלב הזה', 'המארחת לא מאשרת שלב משרד');
+  await throws(() => rates.decideRateRequest({ user: acc, id: String(rr._id), approve: false, reason: '' }), 400, 'יש לכתוב סיבה לדחייה', 'דחייה בלי סיבה');
   const list = await rates.listRateRequests({ user: acc });
   eq(list.map(r => [r.employee_name, r.can_decide]), [['דנה', true]], 'המשרד רואה את הבקשה ויכול להחליט');
   await throws(() => rates.decideRateRequest({ user: acc, id: String(rr._id), approve: true, finalRate: 0 }), 400, 'יש להזין תעריף לשעה', 'תעריף אפס');
@@ -65,9 +64,30 @@ async function throws(fn, status, message, label) {
   eq(await M.NotificationEvent.countDocuments({ type: 'rate_request_decision', recipient_id: hostMgrU._id }), 1, 'המבקשת עודכנה');
   eq((await rates.listRateRequests({ user: acc })).length, 0, 'אחרי אישור — יורדת מהרשימה');
 
+  console.log('\nתעריף רגיל — מועתק מיד, בלי לשאול אף אחד');
+  const rina = await M.Employee.create({ full_name: 'רינה', israeli_id: String(idn++), branch_id: home._id, is_active: true, salary_type: 'hourly', amuta_distribution: [{ amuta_id: new mongoose.Types.ObjectId(), hourly_rate: 45 }] });
+  const auto = await rates.createRateRequest({ user: hostMgr, employeeId: String(rina._id), hostBranchId: String(host._id), proposedRate: null });
+  eq(auto.status, 'approved', 'בלי שינוי — מאושר מיד');
+  eq(auto.final_rate, 45, 'התעריף הרגיל שלה');
+  const r2 = await M.Employee.findById(rina._id).lean();
+  eq(r2.branch_rates.map(r => [String(r.branch_id), r.hourly_rate]), [[String(host._id), 45]], 'הועתק לכרטיס');
+  eq(syncCalls.length, 2, 'סנכרון שעון גם במסלול המיידי');
+  eq(await M.NotificationEvent.countDocuments({ type: 'rate_request', recipient_id: accU._id }), 1, 'המשרד לא קיבל בקשה נוספת');
+
+  console.log('\nתעריף שונה מהרגיל — אישור הנהלת חשבונות');
+  const gila = await M.Employee.create({ full_name: 'גילה', israeli_id: String(idn++), branch_id: home._id, is_active: true, salary_type: 'hourly', amuta_distribution: [{ amuta_id: new mongoose.Types.ObjectId(), hourly_rate: 45 }] });
+  const diff = await rates.createRateRequest({ user: hostMgr, employeeId: String(gila._id), hostBranchId: String(host._id), proposedRate: 52 });
+  eq(diff.status, 'pending_office', 'שינוי תעריף — ממתין למשרד');
+  const g1 = await M.Employee.findById(gila._id).lean();
+  eq((g1.branch_rates || []).length, 0, 'התעריף החדש לא בתוקף לפני אישור');
+  await rates.decideRateRequest({ user: acc, id: String(diff._id), approve: true, finalRate: 52 });
+  const g2 = await M.Employee.findById(gila._id).lean();
+  eq(g2.branch_rates.map(r => [String(r.branch_id), r.hourly_rate]), [[String(host._id), 52]], 'אחרי אישור — נכנס לתוקף');
+
   console.log('\nמועמדות מסניפים אחרים');
   const cands = await cross.foreignCandidates({ hostBranchId: String(host._id) });
-  eq(cands.map(c => [c.full_name, c.has_rate, c.branch_name]), [['דנה', true, 'כפר סבא - קפלן']], 'דנה עם תעריף');
+  eq(cands.filter(c => c.full_name === 'דנה').map(c => [c.full_name, c.has_rate, c.branch_name]), [['דנה', true, 'כפר סבא - קפלן']], 'דנה עם תעריף');
+  eq(cands.filter(c => c.full_name === 'רינה').map(c => [c.has_rate, c.home_hourly_rate]), [[true, 45]], 'רינה — תעריף הועתק ותעריף רגיל מדווח');
 
   console.log('\nשיבוץ מסניף אחר ואישור');
   const ShiftWeek = M.ShiftWeek;

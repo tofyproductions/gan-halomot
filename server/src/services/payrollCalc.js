@@ -795,4 +795,4 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   };
 }
 
-module.exports = { calculateMonthlySalary, collapseToSpan, billableDayPunches, loanDeductionForMonth };
+module.exports = { calculateMonthlySalary, collapseToSpan, billableDayPunches, loanDeductionForMonth, primaryRates };

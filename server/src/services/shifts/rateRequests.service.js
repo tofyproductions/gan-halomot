@@ -28,21 +28,59 @@ async function loadOr404(id) {
 async function createRateRequest({ user, employeeId, hostBranchId, proposedRate }) {
   if (!canEdit(user, hostBranchId)) throw new ShiftError(403, 'רק מנהלת הסניף המארח מבקשת תעריף');
   if (!mongoose.isValidObjectId(employeeId)) throw new ShiftError(404, 'עובדת לא נמצאה');
-  const emp = await Employee.findOne({ _id: employeeId, is_active: true }).lean();
+  const emp = await Employee.findOne({ _id: employeeId, is_active: true });
   if (!emp) throw new ShiftError(404, 'עובדת לא נמצאה');
   if (String(emp.branch_id) === String(hostBranchId)) throw new ShiftError(400, 'העובדת כבר שייכת לסניף הזה');
   if (await BranchRateRequest.exists({ employee_id: emp._id, host_branch_id: hostBranchId, status: { $in: ['pending_home', 'pending_office'] } })) {
     throw new ShiftError(409, 'כבר יש בקשת תעריף פתוחה לעובדת הזו');
   }
   const rate = Number(proposedRate);
+  // Her "regular rate" is what PAYROLL would pay her this month — read from
+  // the same place payroll reads it (amuta_distribution / terms_history),
+  // not a card field nobody maintains.
+  const thisMonth = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' }).slice(0, 7);
+  const homeRate = Number(require('../payrollCalc').primaryRates(emp, thisMonth).hourly_rate) || 0;
+
+  /**
+   * The default IS her rate. Most placements pay her at the host exactly
+   * what home pays her — so that path asks nobody: the rate is copied to
+   * the host row, the fingerprint syncs, she can be placed now, and an
+   * approved request row remains as the audit trail. Only a DIFFERENT
+   * figure is a decision, and that decision is accounting's: it goes
+   * straight to the office (no home-manager stop — her manager's consent
+   * to the placement itself is the cross-approval on the board), and the
+   * new rate takes effect at the host only when the office approves.
+   */
+  if (homeRate > 0 && (!(rate > 0) || rate === homeRate)) {
+    const rows = emp.branch_rates || [];
+    const row = rows.find(x => String(x.branch_id) === String(hostBranchId));
+    if (row) row.hourly_rate = homeRate; else rows.push({ branch_id: hostBranchId, hourly_rate: homeRate });
+    emp.branch_rates = rows;
+    await emp.save();
+    try {
+      require('../fingerprintSync').syncEmployee(emp._id, { createdBy: user.id })
+        .catch(err => console.error('[rate-requests] fingerprint sync failed:', err.message));
+    } catch (err) { console.error('[rate-requests] fingerprint sync failed:', err.message); }
+    return BranchRateRequest.create({
+      employee_id: emp._id, home_branch_id: emp.branch_id, host_branch_id: hostBranchId,
+      proposed_rate: homeRate, final_rate: homeRate, status: 'approved',
+      requested_by: user.id, requested_by_name: user.full_name || '',
+    });
+  }
+
   const r = await BranchRateRequest.create({
     employee_id: emp._id, home_branch_id: emp.branch_id, host_branch_id: hostBranchId,
-    proposed_rate: rate > 0 ? rate : null, requested_by: user.id, requested_by_name: user.full_name || '',
+    proposed_rate: rate > 0 ? rate : null, status: 'pending_office',
+    requested_by: user.id, requested_by_name: user.full_name || '',
   });
   const hostName = (await Branch.findById(hostBranchId).select('name').lean())?.name || '';
-  await notify(await managersOf(emp.branch_id), {
+  await notify(await officeIds(), {
     type: 'rate_request', ref_collection: 'BranchRateRequest', ref_id: r._id,
-    title: `בקשה לשבץ את ${emp.full_name} ב${hostName}`, body: 'נדרש אישור שלך לפני שהמשרד קובע תעריף', url: '/shifts',
+    title: `תעריף שונה מהרגיל — ${emp.full_name} ב${hostName}`,
+    body: rate > 0
+      ? `הוצע ${rate} ₪ לשעה${homeRate ? ` (התעריף הרגיל שלה: ${homeRate} ₪)` : ''}`
+      : 'לעובדת אין תעריף שעתי רגיל — יש לקבוע תעריף',
+    url: '/shifts',
   });
   return r;
 }

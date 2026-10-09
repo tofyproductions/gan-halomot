@@ -376,8 +376,24 @@ async function prepareEntries(week, raw) {
 }
 
 /** The shared write behind a manager's save and an approved office request. */
-async function applyEntries(week, raw) {
+async function applyEntries(week, raw, user) {
   const { entries, additions } = await prepareEntries(week, raw);
+  /**
+   * One person, two hats: when the manager SAVING the week also manages the
+   * employee's home branch (משה דיין and קפלן share a manager), the home
+   * approval is already in the save — asking her to approve her own request
+   * was a notification with one possible answer. Everyone else still waits
+   * for the real home manager.
+   */
+  const pendingCross = entries.filter(e => e.cross_status === 'pending');
+  if (user && pendingCross.length) {
+    const homes = await Employee.find({ _id: { $in: pendingCross.map(e => e.employee_id) } }).select('branch_id').lean();
+    const homeOf = new Map(homes.map(h => [String(h._id), String(h.branch_id)]));
+    for (const e of pendingCross) {
+      const home = homeOf.get(String(e.employee_id));
+      if (home && canEdit(user, home)) e.cross_status = 'approved';
+    }
+  }
   const prevPendingKeys = new Set(week.entries.filter(e => e.cross_status === 'pending').map(e => placementKey(e)));
   for (const [empId, rooms] of additions) {
     await Employee.updateOne({ _id: empId }, { $addToSet: { extra_classroom_ids: { $each: [...rooms] } } });
@@ -401,7 +417,7 @@ async function applyEntries(week, raw) {
 async function saveEntries({ user, weekId, entries }) {
   const week = await loadWeekOr404(weekId);
   assertEdit(user, week.branch_id);
-  return applyEntries(week, entries);
+  return applyEntries(week, entries, user);
 }
 
 async function setClosedDay({ user, weekId, date, closed }) {
@@ -746,7 +762,7 @@ async function decideEditRequest({ user, requestId, approve, reason }) {
     const current = week.updated_at ? new Date(week.updated_at).getTime() : null;
     const filed = doc.week_version ? new Date(doc.week_version).getTime() : null;
     if (current !== filed) throw new ShiftError(409, 'הסידור השתנה מאז שהבקשה נשלחה — יש לדחות ולבקש מחדש');
-    await applyEntries(week, doc.entries);
+    await applyEntries(week, doc.entries, user);
   }
   doc.status = approve ? 'approved' : 'rejected';
   doc.decided_by = user.id;
