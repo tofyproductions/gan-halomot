@@ -121,7 +121,8 @@ export function exportPdf(args) {
   win.document.close();
 }
 
-export async function exportPng(args) {
+/** Render the pages off-screen and hand back their canvases. */
+async function renderPages(args) {
   const { default: html2canvas } = await import('html2canvas');
   // Off-screen on an OUTER wrapper with a forced white background — the
   // blank-page trap documented in utils/contractPdf.js.
@@ -132,17 +133,61 @@ export async function exportPng(args) {
   document.body.appendChild(wrap);
   try {
     const pages = [...wrap.querySelectorAll('.page')];
-    for (let i = 0; i < pages.length; i += 1) {
-      const canvas = await html2canvas(pages[i], { scale: 2, backgroundColor: '#ffffff' });
+    const out = [];
+    for (const page of pages) out.push(await html2canvas(page, { scale: 2, backgroundColor: '#ffffff' }));
+    return out;
+  } finally {
+    wrap.remove();
+  }
+}
+
+const pngName = (args, i, count) => `סידור-${args.branchName}-${args.dates[0]}${count > 1 ? `-${i + 1}` : ''}.png`;
+
+export async function exportPng(args) {
+  try {
+    const canvases = await renderPages(args);
+    canvases.forEach((canvas, i) => {
       const a = document.createElement('a');
       a.href = canvas.toDataURL('image/png');
-      a.download = `סידור-${args.branchName}-${args.dates[0]}${pages.length > 1 ? `-${i + 1}` : ''}.png`;
+      a.download = pngName(args, i, canvases.length);
       a.click();
-    }
+    });
   } catch (err) {
     console.error(err);
     toast.error('ייצוא התמונה נכשל');
-  } finally {
-    wrap.remove();
+  }
+}
+
+/**
+ * The WhatsApp button: render the same PNGs and open the system share sheet
+ * with WhatsApp on it — picking the group and pressing send stays with the
+ * manager. Where the browser cannot share files (desktop Chrome on some
+ * setups), fall back honestly: download the image and open WhatsApp with
+ * the caption ready, one attach away.
+ */
+export async function shareWhatsApp(args) {
+  const caption = `סידור עבודה — ${args.branchName} · שבוע ${hebRange(args.dates)}`;
+  try {
+    const canvases = await renderPages(args);
+    const blobs = await Promise.all(canvases.map(c => new Promise(res => c.toBlob(res, 'image/png'))));
+    const files = blobs.map((b, i) => new File([b], pngName(args, i, blobs.length), { type: 'image/png' }));
+    if (navigator.canShare && navigator.canShare({ files })) {
+      await navigator.share({ files, text: caption });
+      return;
+    }
+    // No file sharing here — leave the PNG in the downloads and WhatsApp
+    // open with the words already typed.
+    canvases.forEach((canvas, i) => {
+      const a = document.createElement('a');
+      a.href = canvas.toDataURL('image/png');
+      a.download = pngName(args, i, canvases.length);
+      a.click();
+    });
+    window.open(`https://wa.me/?text=${encodeURIComponent(caption)}`, '_blank');
+    toast.info('התמונה ירדה להורדות — צרפו אותה להודעה שנפתחה בוואטסאפ');
+  } catch (err) {
+    if (err?.name === 'AbortError') return; // the manager closed the share sheet
+    console.error(err);
+    toast.error('השיתוף נכשל — נסו "ייצוא תמונה" ושליחה ידנית');
   }
 }

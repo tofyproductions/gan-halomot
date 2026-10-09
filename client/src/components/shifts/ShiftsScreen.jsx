@@ -22,7 +22,7 @@ import FutureConstraintsDialog from './FutureConstraintsDialog';
 import CrossBranchPanel from './CrossBranchPanel';
 import RateRequestDialog from './RateRequestDialog';
 import AttendanceReportDialog from './AttendanceReportDialog';
-import { exportPdf, exportPng } from './shiftExport';
+import { exportPdf, exportPng, shareWhatsApp } from './shiftExport';
 import { buildRows, buildAwayRow, switchedSet, fmtDate, rowKeyOf, toMin } from './shiftRows';
 
 const NO_DEFAULTS = {};
@@ -389,6 +389,7 @@ export default function ShiftsScreen() {
         menu={board ? [
           { label: board.has_unpublished_changes ? 'ייצוא PDF (כולל שינויים שלא פורסמו)' : 'ייצוא PDF להדפסה', onClick: () => exportPdf(exportArgs) },
           { label: 'ייצוא תמונה (PNG)', onClick: () => exportPng(exportArgs) },
+          { label: 'שליחה בוואטסאפ', onClick: () => shareWhatsApp(exportArgs) },
         ] : []}
       >
         <Stack direction="row" alignItems="center" spacing={1}>
