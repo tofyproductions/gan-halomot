@@ -23,12 +23,14 @@ import CrossBranchPanel from './CrossBranchPanel';
 import RateRequestDialog from './RateRequestDialog';
 import AttendanceReportDialog from './AttendanceReportDialog';
 import { exportPdf, exportPng } from './shiftExport';
-import { buildRows, buildAwayRow, switchedSet, fmtDate, rowKeyOf } from './shiftRows';
+import { buildRows, buildAwayRow, switchedSet, fmtDate, rowKeyOf, toMin } from './shiftRows';
 
 const NO_DEFAULTS = {};
 const newTmp = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 const entryRowKey = (e) => rowKeyOf({ ...e, classroom_id: e.classroom_id ? String(e.classroom_id) : null });
 const weekdayOf = (ymd) => new Date(`${ymd}T12:00`).getDay();
+// The board's one noon: 14:00, the same line the בוקר/צהריים switch cuts on.
+const PM_MIN = 14 * 60;
 
 /** The Sunday of the week containing `date` (local), as YYYY-MM-DD. */
 function sundayOf(date = new Date()) {
@@ -273,6 +275,33 @@ export default function ShiftsScreen() {
         if (!added.length) { toast.info('אין ימי התחייבות פנויים לשבץ אותה השבוע'); return; }
         persist([...shown, ...added]);
       } else {
+        /**
+         * A full-day worker dropped onto ANOTHER group on a day she is
+         * already placed is the mid-day split: morning stays where it is,
+         * the afternoon (from 14:00) moves to the new group. Two entries,
+         * no overlap — the board and the export already draw her ⇄.
+         * Dropped somewhere she is NOT placed that day: a plain placement,
+         * exactly as before. Hours stay editable per entry afterwards.
+         */
+        const existing = shown.find(e =>
+          String(e.employee_id) === String(emp._id) && e.date === date && entryRowKey(e) !== targetKey);
+        const a = existing ? toMin(existing.start_hhmm) : null;
+        const b = existing ? toMin(existing.end_hhmm) : null;
+        if (existing && a != null && b != null && a < PM_MIN && b > PM_MIN) {
+          if (!window.confirm(
+            `לפצל את המשמרת של ${emp.full_name}?
+` +
+            `בוקר (${existing.start_hhmm}–14:00) יישאר במקום הנוכחי,
+` +
+            `וצהריים (14:00–${existing.end_hhmm}) יעבור ל"${row.label}".`,
+          )) return;
+          const next = shown.map(e => (e === existing ? { ...e, end_hhmm: '14:00' } : e));
+          persist([...next, {
+            employee_id: emp._id, employee_name: emp.full_name, date, ...target,
+            start_hhmm: '14:00', end_hhmm: existing.end_hhmm, tmp: newTmp(),
+          }]);
+          return;
+        }
         persist([...shown, make(date)]);
       }
     }
