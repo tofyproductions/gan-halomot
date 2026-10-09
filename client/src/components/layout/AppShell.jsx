@@ -39,7 +39,7 @@ export default function AppShell() {
   const hasMobileNav = useHasMobileNav();
   const { pathname } = useLocation();
   const { selectedBranch } = useBranch();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, viewAs, setViewAs } = useAuth();
 
   /**
    * Native push for STAFF, which had never been switched on.
@@ -65,7 +65,29 @@ export default function AppShell() {
   }, [isAuthenticated]);
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100dvh', bgcolor: 'background.default' }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100dvh' }}>
+    {viewAs && (
+      /* The admin is wearing another role's skin — this strip is the truth
+         and the way back, above everything, on every screen. */
+      <Box sx={{
+        position: 'sticky', top: 0, zIndex: (t) => t.zIndex.appBar + 1,
+        bgcolor: '#6d28d9', color: '#fff', px: 2, py: 0.5,
+        display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', fontSize: '0.85rem',
+      }}>
+        <span>👁 מצב תצוגה: {viewAs === 'teacher' ? 'עובדת' : 'מנהלת סניף'} — הנתונים עדיין שלך, רק המסכים נראים אחרת</span>
+        <Box
+          component="button" type="button"
+          onClick={() => setViewAs('')}
+          sx={{
+            border: '1px solid rgba(255,255,255,0.7)', borderRadius: 1, bgcolor: 'transparent',
+            color: '#fff', cursor: 'pointer', fontWeight: 700, px: 1.25, py: 0.25, fontFamily: 'inherit', fontSize: '0.8rem',
+          }}
+        >
+          חזרה למנהל מערכת
+        </Box>
+      </Box>
+    )}
+    <Box sx={{ display: 'flex', flex: 1, bgcolor: 'background.default' }}>
       <Box sx={{ display: { xs: 'none', md: 'block' } }}>
         <Sidebar />
       </Box>
@@ -152,6 +174,7 @@ export default function AppShell() {
       <SetPasswordGate />
       <EnrollBiometricGate />
       <FreshEntryGate />
+    </Box>
     </Box>
   );
 }

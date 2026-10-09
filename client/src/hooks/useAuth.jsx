@@ -7,9 +7,24 @@ import {
 
 const AuthContext = createContext(null);
 
+const VIEW_AS_KEY = 'gan.viewAs';
+const VIEW_AS_ROLES = ['branch_manager', 'teacher'];
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  /**
+   * מצב תצוגה: the system admin walking the building in somebody else's
+   * shoes. CLIENT-SIDE ONLY — the token, and therefore every server answer,
+   * stays the admin's; what changes is the role the SCREENS believe, so
+   * menus, tabs and buttons arrange themselves as a branch manager or an
+   * employee sees them. Honored only while the real role is system_admin,
+   * so a stale localStorage value on another account is inert.
+   */
+  const [viewAs, setViewAsState] = useState(() => {
+    const v = localStorage.getItem(VIEW_AS_KEY) || '';
+    return VIEW_AS_ROLES.includes(v) ? v : '';
+  });
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -132,24 +147,41 @@ export function AuthProvider({ children }) {
   };
 
   const isAuthenticated = !!user;
+  const simulating = !!(user && user.role === 'system_admin' && viewAs);
+  // What the app sees. `realUser` stays reachable for the one banner that
+  // must say the truth.
+  const effectiveUser = simulating ? { ...user, role: viewAs, simulated_role: true } : user;
+  const setViewAs = (v) => {
+    if (v && VIEW_AS_ROLES.includes(v)) localStorage.setItem(VIEW_AS_KEY, v);
+    else localStorage.removeItem(VIEW_AS_KEY);
+    // A full reload from the root: the current route may not exist for the
+    // new role, and every screen should mount fresh in the new skin.
+    window.location.href = '/';
+  };
   // Who this person is, and what that lets them reach.
   //
   // The rules live in ./roleFlags, free of React, so they can be asserted with
   // real user shapes under plain node instead of being read back out of this
   // file by a regular expression. See server/scripts/viewer-client-manager.test.js.
-  const isAdmin = isAdminRole(user);
-  const isAccountant = user?.role === 'accountant';
+  const isAdmin = isAdminRole(effectiveUser);
+  const isAccountant = effectiveUser?.role === 'accountant';
   // "מנהל מערכת - לצפייה בלבד": reads what the admin reads across every
   // branch; acts as a branch manager inside managed_branch_ids; every other
   // write is queued for approval by the server (202 {proposed:true}).
-  const isViewer = isViewerRole(user);
-  const isManager = isManagerRole(user);
-  const canSeeAllBranches = canSeeAllBranchesRole(user);
+  const isViewer = isViewerRole(effectiveUser);
+  const isManager = isManagerRole(effectiveUser);
+  const canSeeAllBranches = canSeeAllBranchesRole(effectiveUser);
   /** May this person edit rows of this branch directly? */
-  const managesBranch = (branchId) => managesBranchOf(user, branchId);
+  const managesBranch = (branchId) => managesBranchOf(effectiveUser, branchId);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, loginWithPassword, requestResetCode, resetWithCode, setPassword, refreshProfile, logout, isAuthenticated, isAdmin, isAccountant, isViewer, isManager, canSeeAllBranches, managesBranch }}>
+    <AuthContext.Provider value={{
+      user: effectiveUser, realUser: user, loading, login, loginWithPassword, requestResetCode, resetWithCode,
+      setPassword, refreshProfile, logout, isAuthenticated, isAdmin, isAccountant, isViewer, isManager,
+      canSeeAllBranches, managesBranch,
+      viewAs: simulating ? viewAs : '', setViewAs,
+      canViewAs: user?.role === 'system_admin',
+    }}>
       {children}
     </AuthContext.Provider>
   );

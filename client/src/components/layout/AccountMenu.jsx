@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Dialog, DialogTitle, DialogContent, Button, Stack, Divider, Typography } from '@mui/material';
+import { Dialog, DialogTitle, DialogContent, Button, Stack, Divider, Typography, ToggleButtonGroup, ToggleButton } from '@mui/material';
 import FingerprintIcon from '@mui/icons-material/Fingerprint';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
@@ -171,10 +171,40 @@ export default function AccountMenu({ open, onClose }) {
             </Button>
           )}
 
+          <ViewAsSwitch onClose={onClose} />
+
           <Divider sx={{ pt: 1 }} />
           <DeleteAccountRequest />
         </Stack>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * מצב תצוגה — the admin walking the building in somebody else's shoes.
+ * Client-side skin only: the data stays the admin's; the screens arrange
+ * themselves as the chosen role sees them. The purple banner (AppShell) is
+ * the way back, always visible.
+ */
+function ViewAsSwitch({ onClose }) {
+  const { canViewAs, viewAs, setViewAs } = useAuth();
+  if (!canViewAs && !viewAs) return null;
+  return (
+    <>
+      <Divider sx={{ pt: 1 }} />
+      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+        מצב תצוגה — איך המערכת נראית לתפקידים אחרים (הנתונים נשארים שלך)
+      </Typography>
+      <ToggleButtonGroup
+        exclusive fullWidth size="small"
+        value={viewAs || 'admin'}
+        onChange={(_, v) => { if (v) { onClose(); setViewAs(v === 'admin' ? '' : v); } }}
+      >
+        <ToggleButton value="admin">מנהל מערכת</ToggleButton>
+        <ToggleButton value="branch_manager">מנהלת סניף</ToggleButton>
+        <ToggleButton value="teacher">עובדת</ToggleButton>
+      </ToggleButtonGroup>
+    </>
   );
 }
