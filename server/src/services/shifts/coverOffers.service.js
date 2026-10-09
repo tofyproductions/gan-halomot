@@ -56,7 +56,12 @@ async function openGaps(branchId, weekStart) {
   if (!branch) return [];
   const ratios = effectiveRatios(branch);
   const pmCaps = pmNeededCaps(branch.name);
-  const rooms = await Classroom.find({ branch_id: branchId, is_active: true }).select('name category academic_year').lean();
+  // THIS school year's rooms only — Kaplan still carries last year's active
+  // rooms with stale children attached, and counting them minted phantom
+  // gaps on classrooms the placement validator rightly refuses (caught by
+  // the e2e: 'הכיתה לא שייכת לסניף').
+  const { schoolYearOf } = require('./rules');
+  const rooms = await Classroom.find({ branch_id: branchId, is_active: true, academic_year: schoolYearOf(weekStart) }).select('name category academic_year').lean();
   const counts = await require('../../models').Child.aggregate([
     { $match: { classroom_id: { $in: rooms.map(r => r._id) }, is_active: true } },
     { $group: { _id: '$classroom_id', n: { $sum: 1 } } },

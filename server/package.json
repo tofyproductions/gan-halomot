@@ -175,6 +175,7 @@
     "test:class-payments": "node scripts/class-payments.test.js",
     "test:course-refresher-reminders": "node scripts/course-refresher-reminders.test.js",
     "test:maternity-rota": "node scripts/maternity-rota.test.js",
+    "test:cover-bonus": "node scripts/cover-bonus.test.js",
     "test:order-approval": "node scripts/order-approval-flow.test.js",
     "test:order-no-prices": "node scripts/order-email-no-prices.test.js",
     "test:parent-signups": "node scripts/parent-signups.test.js",
