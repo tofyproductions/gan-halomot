@@ -39,6 +39,15 @@ const shiftWeekSchema = new mongoose.Schema({
   published_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   // Days the manager closed for this week only, beyond the gan's own calendar.
   closed_days: { type: [String], default: [] },
+  // Read receipts: who OPENED the published rota (her my-shifts fetch),
+  // first time only. The manager's answer to "מי עוד לא ראתה".
+  views: {
+    type: [new mongoose.Schema({
+      employee_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: true },
+      at: { type: Date, default: Date.now },
+    }, { _id: false })],
+    default: [],
+  },
   created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 

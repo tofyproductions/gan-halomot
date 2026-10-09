@@ -35,6 +35,9 @@ module.exports = {
   publish: handle(async (req, res) => {
     res.json(await svc.publishWeek({ user: req.user, weekId: req.params.id }));
   }),
+  remindUnviewed: handle(async (req, res) => {
+    res.json(await svc.remindUnviewed({ user: req.user, weekId: req.params.id }));
+  }),
   createEditRequest: handle(async (req, res) => {
     res.json({ request: await svc.createEditRequest({ user: req.user, weekId: req.params.id, entries: req.body.entries }) });
   }),

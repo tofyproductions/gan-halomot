@@ -791,6 +791,18 @@ async function myShifts({ employee, weekStart }) {
   const published = !!(week && week.published_at);
   // Her own shifts in other branches' published rotas — shown to her, read-only.
   const awayWeeks = await ShiftWeek.find({ week_start: weekStart, branch_id: { $ne: branchId }, published_at: { $ne: null }, 'published.employee_id': employee._id }).lean();
+  /**
+   * The read receipt: opening this screen IS seeing the rota, so the weeks
+   * shown here record her first look — the home week and every host week
+   * alike. Guarded by the $ne so only the first view writes; a failure here
+   * must never break her own screen.
+   */
+  const markViewed = (w) => ShiftWeek.updateOne(
+    { _id: w._id, 'views.employee_id': { $ne: employee._id } },
+    { $push: { views: { employee_id: employee._id, at: new Date() } } },
+  ).catch(err => console.error('[shifts] view mark failed:', err.message));
+  if (published) markViewed(week);
+  for (const w of awayWeeks) markViewed(w);
   const awayNames = new Map((await Branch.find({ _id: { $in: awayWeeks.map(w => w.branch_id) } }).select('name').lean()).map(b => [String(b._id), b.name]));
   const away = awayWeeks.flatMap(w => (w.published || []).filter(e => String(e.employee_id) === String(employee._id))
     .map(e => ({ ...e, branch_id: String(w.branch_id), branch_name: awayNames.get(String(w.branch_id)) || '' })));
@@ -813,8 +825,35 @@ async function myShifts({ employee, weekStart }) {
   };
 }
 
+/**
+ * The nudge for whoever has not opened it: everyone standing in the
+ * PUBLISHED rota with no read receipt gets a push saying it is out. Sent on
+ * demand by the manager, repeatable — a reminder ignored on Thursday may
+ * still be needed on Saturday night.
+ */
+async function remindUnviewed({ user, weekId }) {
+  const week = await loadWeekOr404(weekId);
+  assertEdit(user, week.branch_id);
+  if (!week.published_at) throw new ShiftError(409, 'הסידור עוד לא פורסם');
+  const inRota = [...new Set((week.published || []).map(e => String(e.employee_id)))];
+  const viewed = new Set((week.views || []).map(v => String(v.employee_id)));
+  const target = inRota.filter(id => !viewed.has(id));
+  const recipients = await userIdsOf(target);
+  const [, m, d] = week.week_start.split('-');
+  const label = `${d}/${m}`;
+  await Promise.all(recipients.map(recipient_id => notificationService.notifyOnce({
+    type: 'shift_published_reminder', ref_collection: 'ShiftWeek', ref_id: week._id, recipient_id,
+    title: `תזכורת: סידור העבודה לשבוע ${label} פורסם`,
+    body: 'עוד לא צפית במשמרות שלך — כדאי להציץ',
+    url: `/my-shifts?week=${week.week_start}`,
+  }).catch(err => console.error('[shifts] remind failed:', err.message))));
+  // An employee with no linked user cannot be pushed — the manager should
+  // hear that rather than assume the phone buzzed.
+  return { reminded: recipients.length, no_user: target.length - recipients.length };
+}
+
 module.exports = {
-  ShiftError, canView, canEdit, getBoard, createWeek, saveEntries, setClosedDay, publishWeek,
+  ShiftError, canView, canEdit, getBoard, createWeek, saveEntries, setClosedDay, publishWeek, remindUnviewed,
   setShiftPlacement, setPrimaryClassroom: (args) => setShiftPlacement({ ...args, area: 'class' }),
   placeByCards, autoPlaceWeek, removeFromOpenWeeks, removeMaternityPlacements, seedMissing, closeClassroom, reopenClassroom, setRatios,
   createEditRequest, decideEditRequest, myShifts,
