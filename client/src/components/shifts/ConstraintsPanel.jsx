@@ -48,7 +48,7 @@ export default function ConstraintsPanel({ constraints, canEdit, onChanged, entr
     <Stack spacing={1} sx={{ mb: 2 }}>
       {actionable.map(c => (
         <Alert key={c._id} severity="warning" icon={false}>
-          <Typography component="div" fontWeight={700}>{c.employee_name} — {describe(c)} <Chip size="small" label={STATUS_LABEL[c.status]} sx={{ mr: 1 }} /></Typography>
+          <Typography component="div" fontWeight={700}>{c.employee_name} — {describe(c)} <Chip size="small" label={STATUS_LABEL[c.status]} sx={{ mr: 1 }} />{c.manual && <Chip size="small" variant="outlined" color="info" label="נרשם ידנית" sx={{ mr: 0.5 }} />}</Typography>
           {c.details && <Typography variant="body2">{c.details}</Typography>}
           {c.colleague_name && <Typography variant="body2">עם: {c.colleague_name}</Typography>}
           {(c.files || []).map((f, i) => <Link key={i} component="button" variant="caption" sx={{ ml: 1 }} onClick={() => openConstraintFile(c._id, i, f.name)}>{f.name}</Link>)}

@@ -93,6 +93,9 @@ module.exports = {
   futureConstraints: handle(async (req, res) => {
     res.json({ constraints: await cs.listFuture({ user: req.user, branchId: String(req.query.branch || '') }) });
   }),
+  createManualConstraint: handle(async (req, res) => {
+    res.json({ constraint: await cs.createManualConstraint({ user: req.user, body: req.body }) });
+  }),
   decideConstraint: handle(async (req, res) => {
     res.json({ constraint: await cs.decide({ user: req.user, id: req.params.id, accept: req.body.accept === true, reason: req.body.reason, confirmFar: req.body.confirm_far === true }) });
   }),

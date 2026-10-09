@@ -41,6 +41,7 @@ router.get('/constraints/future', board, c.futureConstraints);
 router.post('/constraints/:id/cancel', mine, c.cancelConstraint);
 router.post('/constraints/:id/colleague-response', mine, c.colleagueResponse);
 router.post('/constraints/:id/volunteer', mine, c.volunteer);
+router.post('/constraints/manual', board, c.createManualConstraint);
 router.post('/constraints/:id/decide', board, c.decideConstraint);
 router.post('/constraints/:id/approve-broadcast', board, c.approveBroadcast);
 router.post('/constraints/:id/pick', board, c.pickVolunteer);

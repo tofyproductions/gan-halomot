@@ -15,6 +15,7 @@ import EntryDialog from './EntryDialog';
 import PrimaryClassDialog from './PrimaryClassDialog';
 import OvertimeStrip from './OvertimeStrip';
 import StaffBalanceStrip from './StaffBalanceStrip';
+import ManualConstraintDialog from './ManualConstraintDialog';
 import FillSuggestions from './FillSuggestions';
 import ShiftSettingsDialog from './ShiftSettingsDialog';
 import EditRequestsPanel from './EditRequestsPanel';
@@ -137,6 +138,7 @@ export default function ShiftsScreen() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [futureOpen, setFutureOpen] = useState(false);
   const [rateOpen, setRateOpen] = useState(false);
+  const [manualConstraintOpen, setManualConstraintOpen] = useState(false);
   const [rateEmployeeId, setRateEmployeeId] = useState(null);
   const [reportDate, setReportDate] = useState(() => {
     const r = new URLSearchParams(window.location.search).get('report');
@@ -400,6 +402,7 @@ export default function ShiftsScreen() {
           ...(board?.can_edit && board.week ? [{ label: unassignedCount ? `שיבוץ לפי הכרטיסים (${unassignedCount} ללא כיתה)` : 'שיבוץ לפי הכרטיסים', onClick: autoPlace }] : []),
           ...(board?.can_edit ? [{ label: 'הגדרות', onClick: () => setSettingsOpen(true) }] : []),
           { label: 'אילוצים עתידיים', onClick: () => setFutureOpen(true) },
+          ...(board?.can_edit ? [{ label: 'אילוץ ידני (העובדת לא שלחה)', onClick: () => setManualConstraintOpen(true) }] : []),
           { label: 'דוח נוכחות אתמול', onClick: () => setReportDate(yesterdayYmd()) },
         ]}
         menu={board ? [
@@ -496,6 +499,13 @@ export default function ShiftsScreen() {
         onSave={saveEntry} onDelete={deleteEntry}
         onSplit={splitEntry}
         onRequestRate={board?.can_edit ? () => { closeDlg(); setRateEmployeeId(null); setRateOpen(true); } : undefined} />
+      <ManualConstraintDialog
+        open={manualConstraintOpen}
+        onClose={() => setManualConstraintOpen(false)}
+        onSaved={() => { setManualConstraintOpen(false); load(); }}
+        employees={rotaEmployees.filter(e => !e.foreign)}
+        defaultDate={board?.dates?.[0] || ''}
+      />
       <RateRequestDialog open={rateOpen} onClose={() => setRateOpen(false)} candidates={board?.foreign_candidates}
         hostBranchId={board?.branch_id} initialEmployeeId={rateEmployeeId}
         onSent={() => { setRateOpen(false); load(); }} />

@@ -21,6 +21,8 @@ const shiftConstraintSchema = new mongoose.Schema({
   employee_name: { type: String, default: '' },
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true },
   type: { type: String, enum: ['day_off', 'partial', 'sick_expected', 'other', 'move_day', 'swap'], required: true },
+  // Typed in by the manager (the employee's app defeated her) — shown as such.
+  manual: { type: Boolean, default: false },
   date: { type: String, required: true },
   target_date: { type: String, default: null },
   week_start: { type: String, required: true, index: true },

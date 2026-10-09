@@ -124,6 +124,38 @@ async function createConstraint({ employee, body, files, now = new Date() }) {
   return publicView(c, employee._id);
 }
 
+/**
+ * A constraint typed in BY THE MANAGER — for the employee whose אילוץ came
+ * by phone, by WhatsApp or across the yard because the app defeated her.
+ * Same document, same approval flow (born 'open', approved in the panel so
+ * the usual apply-effects run). What it skips: the submission window — by
+ * the time it reaches the manager it is already past — and the swap/
+ * broadcast machinery, which needs the employee herself to drive it.
+ */
+async function createManualConstraint({ user, body }) {
+  const b = body || {};
+  if (!mongoose.isValidObjectId(b.employee_id)) throw new ShiftError(400, 'יש לבחור עובדת');
+  const employee = await Employee.findById(b.employee_id).lean();
+  if (!employee) throw new ShiftError(404, 'העובדת לא נמצאה');
+  assertEdit(user, employee.branch_id);
+  if (!['day_off', 'partial', 'sick_expected', 'other'].includes(b.type)) throw new ShiftError(400, 'סוג אילוץ לא תקין');
+  const details = String(b.details || '').trim().slice(0, 1000);
+  if (!details) throw new ShiftError(400, 'יש לכתוב סיבה או פירוט');
+  const doc = {
+    employee_id: employee._id, employee_name: employee.full_name, branch_id: employee.branch_id,
+    type: b.type, date: String(b.date || ''), details, status: 'open', manual: true,
+  };
+  if (!YMD.test(doc.date)) throw new ShiftError(400, 'תאריך לא תקין');
+  if (b.type === 'partial') {
+    if (!HHMM.test(b.from_hhmm || '') || !HHMM.test(b.to_hhmm || '') || b.from_hhmm >= b.to_hhmm) throw new ShiftError(400, 'שעת הסיום חייבת להיות אחרי שעת ההתחלה');
+    doc.from_hhmm = b.from_hhmm; doc.to_hhmm = b.to_hhmm;
+  }
+  doc.week_start = weekStart(doc.date);
+  const duplicate = await ShiftConstraint.exists({ employee_id: employee._id, type: doc.type, date: doc.date, status: { $nin: [...FINAL] } });
+  if (duplicate) throw new ShiftError(409, 'כבר קיים אילוץ כזה לתאריך הזה');
+  return (await ShiftConstraint.create(doc)).toObject();
+}
+
 /** What the employee may see: her own, requests addressed to her, open offers in her branch. */
 function publicView(c, viewerId) {
   const o = c.toObject ? c.toObject() : { ...c };
@@ -463,7 +495,7 @@ async function readFile({ user, employee, id, index }) {
 }
 
 module.exports = {
-  createConstraint, listMine, colleaguesOf, respondColleague, volunteer, cancelConstraint,
+  createConstraint, createManualConstraint, listMine, colleaguesOf, respondColleague, volunteer, cancelConstraint,
   decide, approveBroadcast, pickVolunteer, forBoard, listFuture, acceptedFor, resolveForPublish, readFile,
   FINAL,
 };
