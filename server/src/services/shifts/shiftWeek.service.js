@@ -65,6 +65,21 @@ async function classroomsWithCounts(branchId, schoolYear) {
   return rooms.map(r => ({ _id: String(r._id), name: r.name, category: r.category || null, enrolled: byId.get(String(r._id)) || 0 }));
 }
 
+/**
+ * Active children still sitting in the branch's rooms of ANOTHER year (or
+ * in a closed room): registered, active — and invisible to the tekken, so
+ * "25 רשומים" showed as 10 on the board and the gap had no face. Counted so
+ * the board can say it out loud instead of silently under-counting.
+ */
+async function staleEnrolledCount(branchId, schoolYear) {
+  const other = await Classroom.find({
+    branch_id: branchId,
+    $or: [{ is_active: false }, { academic_year: { $ne: schoolYear } }],
+  }).select('_id').lean();
+  if (!other.length) return 0;
+  return Child.countDocuments({ classroom_id: { $in: other.map(r => r._id) }, is_active: true });
+}
+
 async function seedFor(branchId, dates, closedDates) {
   const employees = await Employee.find({ branch_id: branchId, is_active: true }).select('full_name primary_classroom_id shift_area shift_day_classrooms on_maternity_leave maternity_leave_from maternity_leave_to').lean();
   // Commitments by employee, not by the commitment's own branch_id copy — a
@@ -113,6 +128,7 @@ async function getBoard({ user, branchId, weekStart }) {
   const week = await ShiftWeek.findOne({ branch_id: branchId, week_start: weekStart });
   const closed = await closedDatesFor(branchId, dates, week);
   const classrooms = await classroomsWithCounts(branchId, schoolYearOf(weekStart));
+  const staleEnrolled = await staleEnrolledCount(branchId, schoolYearOf(weekStart));
   const ratios = effectiveRatios(branch);
   const preview = week ? null : await seedRespectingConstraints(branchId, dates, closed);
   const entries = week ? week.entries.map(e => e.toObject()) : preview;
@@ -175,6 +191,7 @@ async function getBoard({ user, branchId, weekStart }) {
     dates,
     closed_dates: [...closed],
     classrooms,
+    stale_enrolled: staleEnrolled,
     inactive_classrooms: inactive.map(r => ({ _id: String(r._id), name: r.name, academic_year: r.academic_year })),
     employees: employees.map(e => ({
       _id: String(e._id), full_name: e.full_name,
@@ -183,6 +200,9 @@ async function getBoard({ user, branchId, weekStart }) {
       shift_area: e.shift_area || null,
       shift_day_classrooms: (e.shift_day_classrooms || []).map(m => ({ day: m.day, classroom_id: String(m.classroom_id) })),
       has_commitment: commitmentOf.has(String(e._id)),
+      // The weekdays her commitment marks is_off — the suggestions may still
+      // offer her for a gap, but must SAY it is her day off.
+      off_days: ((commitmentOf.get(String(e._id)) || {}).days || []).filter(d => d.is_off).map(d => d.day),
       commitment_text: (commitmentOf.get(String(e._id)) || {}).classroom || '',
       commitment: commitmentHours(commitmentOf.get(String(e._id))),
       // On leave she is not seeded, but she stays HERE: a gradual return is

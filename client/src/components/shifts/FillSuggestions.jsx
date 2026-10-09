@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Paper, Stack, Typography, Chip, Box } from '@mui/material';
+import { Paper, Stack, Typography, Chip, Box, Tooltip } from '@mui/material';
 import { HEB_DAYS, fmtDate } from './shiftRows';
 
 const weekdayOf = (ymd) => new Date(`${ymd}T12:00`).getDay();
@@ -29,13 +29,18 @@ export default function FillSuggestions({ board, entries, closed, onAdd }) {
       const wd = weekdayOf(w.date);
       const roomId = String(w.classroom_id);
       const candidates = board.employees
-        .filter(emp => !emp.foreign && emp.shift_area !== 'none' && emp.commitment && emp.commitment[wd])
+        // Committed to this weekday — OR it is her DAY OFF: she can still be
+        // asked, but the chip must say what is being asked of her.
+        .filter(emp => !emp.foreign && emp.shift_area !== 'none' && emp.commitment
+          && (emp.commitment[wd] || (emp.off_days || []).includes(wd)))
         .filter(emp => !placed.get(w.date)?.has(String(emp._id)))
         .filter(emp => !constrained.has(`${emp._id}|${w.date}`))
         .map(emp => {
+          const offDay = !emp.commitment[wd];
           const mapHit = (emp.shift_day_classrooms || []).some(m => m.day === wd && String(m.classroom_id) === roomId);
           const cardHit = String(emp.primary_classroom_id) === roomId || (emp.extra_classroom_ids || []).includes(roomId);
-          return { emp, score: mapHit ? 3 : cardHit ? 2 : emp.shift_area === 'floater' ? 1 : 0 };
+          // A day-off candidate ranks below everyone who is simply free.
+          return { emp, offDay, score: offDay ? -1 : mapHit ? 3 : cardHit ? 2 : emp.shift_area === 'floater' ? 1 : 0 };
         })
         .sort((a, b) => b.score - a.score)
         .slice(0, 3);
@@ -54,12 +59,23 @@ export default function FillSuggestions({ board, entries, closed, onAdd }) {
             <Typography variant="body2" sx={{ minWidth: 210 }}>
               {s.room_name} · {HEB_DAYS[s.weekday]} {fmtDate(s.date)} — חסרות {s.needed - s.staff}:
             </Typography>
-            {s.candidates.map(({ emp }) => (
-              <Chip
-                key={emp._id} size="small" variant="outlined" clickable color="primary"
-                label={`+ ${emp.full_name} ${emp.commitment[s.weekday].start_hhmm}–${emp.commitment[s.weekday].end_hhmm}`}
-                onClick={() => onAdd(emp, s.date, roomIdOf(s))}
-              />
+            {s.candidates.map(({ emp, offDay }) => (
+              offDay ? (
+                <Tooltip key={emp._id} title={`${HEB_DAYS[s.weekday]} הוא היום החופשי הקבוע של ${emp.full_name} — אפשר לשבץ, אבל זה על חשבון החופש שלה`}>
+                  <Chip
+                    size="small" clickable color="warning"
+                    sx={{ fontWeight: 700 }}
+                    label={`+ ${emp.full_name} — ⚠️ היום החופשי שלה`}
+                    onClick={() => onAdd(emp, s.date, roomIdOf(s))}
+                  />
+                </Tooltip>
+              ) : (
+                <Chip
+                  key={emp._id} size="small" variant="outlined" clickable color="primary"
+                  label={`+ ${emp.full_name} ${emp.commitment[s.weekday].start_hhmm}–${emp.commitment[s.weekday].end_hhmm}`}
+                  onClick={() => onAdd(emp, s.date, roomIdOf(s))}
+                />
+              )
             ))}
           </Box>
         ))}

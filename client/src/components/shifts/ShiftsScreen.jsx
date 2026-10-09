@@ -439,6 +439,13 @@ export default function ShiftsScreen() {
           })}
         </Stack>
       )}
+      {board?.stale_enrolled > 0 && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          <strong>{board.stale_enrolled} ילדים פעילים לא נספרים בתקן:</strong> הם עדיין משויכים
+          לכיתות של שנה קודמת (או לכיתה סגורה). זו הסיבה שמספר הילדים על הלוח נמוך מהרישום —
+          יש להעביר אותם לכיתות השנה במסך רישום ← שיבוץ לכיתות.
+        </Alert>
+      )}
       {board?.can_edit && <EditRequestsPanel requests={board.edit_requests} onDecided={load} />}
       {board && <CrossBranchPanel board={board} onChanged={load} />}
       {board && <ConstraintsPanel constraints={board.constraints} canEdit={!!board.can_edit} onChanged={load} entries={shown} />}

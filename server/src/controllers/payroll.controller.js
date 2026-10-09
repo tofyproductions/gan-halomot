@@ -2566,7 +2566,12 @@ async function createManualPunches(req, res, next, opts = {}) {
       const scope = await resolveBranchScope(req);
       if (scope !== null) {
         const empBranches = fingerprintSync.employeeBranchIds(emp).map(String);
-        if (!scope.includes(String(punchBranchId)) || !empBranches.some(b => scope.includes(b))) {
+        // Host manager (punch's branch + the employee works for her), OR the
+        // employee's HOME manager completing a punch her worker missed at the
+        // host — same standing punchOutOfScope grants on existing punches.
+        const hostOk = scope.includes(String(punchBranchId)) && empBranches.some(b => scope.includes(b));
+        const homeOk = scope.includes(String(emp.branch_id));
+        if (!hostOk && !homeOk) {
           return res.status(403).json({ error: 'ניתן להחתים רק לעובדי הסניפים שבניהולך' });
         }
       }
@@ -2850,15 +2855,27 @@ async function listPunchesForDay(req, res, next) {
 async function punchOutOfScope(req, punch) {
   const scope = await resolveBranchScope(req);
   if (scope === null) return null;                       // admin / accountant
-  if (!scope.includes(String(punch.branch_id))) return 'ההחתמה שייכת לסניף שאינו בניהולך';
+  const branchInScope = scope.includes(String(punch.branch_id));
   // The employee is a second read; a punch whose employee row is gone is
   // judged on its branch alone rather than refused outright.
   const emp = punch.employee_id
     ? await Employee.findById(punch.employee_id).select('branch_id branch_rates hourly_bonuses').lean()
     : null;
-  if (!emp) return null;
+  if (!emp) return branchInScope ? null : 'ההחתמה שייכת לסניף שאינו בניהולך';
+  /**
+   * TWO managers may touch a multi-branch worker's punch:
+   *   - the HOST's (the branch where the punch physically happened) — the
+   *     original rule, both sides in scope;
+   *   - the HOME's (the branch on the employee's card) — שילו works קפלן
+   *     and הרצליה; her card lives at קפלן, and a missing or doubled punch
+   *     from a הרצליה morning is still her home manager's problem to fix.
+   * The approval chain is unchanged — a manager's fix still waits for the
+   * accountant, whichever manager typed it.
+   */
   const empBranches = fingerprintSync.employeeBranchIds(emp).map(String);
-  return empBranches.some(b => scope.includes(b)) ? null : 'ההחתמה שייכת לעובד/ת בסניף שאינו בניהולך';
+  if (branchInScope && empBranches.some(b => scope.includes(b))) return null;
+  if (scope.includes(String(emp.branch_id))) return null;
+  return branchInScope ? 'ההחתמה שייכת לעובד/ת בסניף שאינו בניהולך' : 'ההחתמה שייכת לסניף שאינו בניהולך';
 }
 
 /**
