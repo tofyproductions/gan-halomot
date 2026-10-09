@@ -413,27 +413,16 @@ connectDB().then(() => {
     setTimeout(each('daycare-report', daycareReport), 60000);
     setInterval(each('daycare-report', daycareReport), 60 * 60 * 1000);
 
-    // Auto-sync from Google Sheets every hour
-    const { syncFromSheets } = require('./controllers/sync.controller');
-    const runSync = () => withJobLock('sheets-auto-sync', 30 * 60 * 1000, () => new Promise((resolve) => {
-      console.log('🔄 Auto-sync started...');
-      const fakeReq = { query: {}, user: null };
-      const fakeRes = {
-        json: (data) => { console.log('🔄 Auto-sync:', data.summary || 'done'); resolve(); },
-        status: () => fakeRes,
-      };
-      syncFromSheets(fakeReq, fakeRes, (err) => {
-        if (err) console.error('🔄 Auto-sync error:', err.message);
-        resolve();
-      });
-    })).catch(e => console.error('🔄 Auto-sync lock error:', e.message));
-
-    // First sync after 30 seconds, then every hour. Single-gan only — the
-    // spreadsheet it reads is this office's, not a customer's.
-    if (!platformMode) {
-      setTimeout(runSync, 30000);
-      setInterval(runSync, 60 * 60 * 1000);
-    }
+    /**
+     * The Google-Sheets auto-sync is RETIRED (09.10.2026). The sheet was
+     * קפלן's old intake; every row it holds is already imported (verified:
+     * 73 rows — all live in the app or resting in the archive) and new
+     * registrations are born in the app. What the hourly run still did was
+     * overwrite the living record with a frozen sheet — it reset
+     * cancellations and resurrected deletions 30s after every deploy. The
+     * endpoint (POST /sync, admin-only) remains as a hand-run emergency
+     * tool; nothing calls it.
+     */
 
     // Dead-agent watchdog: alert when a branch's attendance agent (Pi) goes
     // fully silent — the heartbeat-driven clock-down alert can't catch this.
