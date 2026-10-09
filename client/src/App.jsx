@@ -466,7 +466,10 @@ function HomeRoute() {
   if (user && !hasTabAccess(user, 'dashboard')) {
     // Keep the query: a push to `/?punch_fix=1` must still open the fix popup
     // for staff who land on their own area instead of the dashboard.
-    return <Navigate to={`/my-salary${location.search}`} replace />;
+    // The first question a worker opens the app with is "מתי אני עובדת" —
+    // so the rota, not the payslip, is the front door (when she has it).
+    const home = hasTabAccess(user, 'my_shifts') ? '/my-shifts' : '/my-salary';
+    return <Navigate to={`${home}${location.search}`} replace />;
   }
   return <Dashboard />;
 }

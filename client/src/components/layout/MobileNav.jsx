@@ -285,6 +285,7 @@ export default function MobileNav() {
                     component="button"
                     type="button"
                     key={item.id}
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={() => go(item.path)}
                     sx={{
                       display: 'flex', alignItems: 'center', gap: 1.25, width: '100%',
@@ -314,6 +315,11 @@ export default function MobileNav() {
                     component="button"
                     type="button"
                     key={item.id}
+                    /* With the search keyboard open, tap #1 used to be spent
+                       on blurring the input — the list reflowed under the
+                       finger and the tab needed a second press. Keeping the
+                       focus through mousedown lets the click land. */
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={() => go(item.path)}
                     aria-current={pathname === item.path ? 'page' : undefined}
                     sx={{

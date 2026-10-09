@@ -147,6 +147,16 @@ const theme = createTheme({
           maxWidth: '100%',
           overflowX: 'hidden',
         },
+        /**
+         * One tap is a tap. Samsung's browsers hold a click back ~300ms to
+         * see if a double-tap-zoom follows — and with the a11y zoom classes
+         * on the page they sometimes swallow the first tap entirely, so a
+         * menu item needed pressing twice. `manipulation` says: pan and
+         * pinch, but a tap is mine — fire it now.
+         */
+        'button, a, [role="button"], [role="tab"], label, .MuiButtonBase-root': {
+          touchAction: 'manipulation',
+        },
 
         /**
          * An Israeli ID, a phone number or a shekel figure inside an RTL
