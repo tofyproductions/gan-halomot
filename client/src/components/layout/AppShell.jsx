@@ -39,7 +39,7 @@ export default function AppShell() {
   const hasMobileNav = useHasMobileNav();
   const { pathname } = useLocation();
   const { selectedBranch } = useBranch();
-  const { isAuthenticated, viewAs, setViewAs } = useAuth();
+  const { isAuthenticated, viewAs, setViewAs, user, isImpersonating, stopImpersonation } = useAuth();
 
   /**
    * Native push for STAFF, which had never been switched on.
@@ -66,7 +66,28 @@ export default function AppShell() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100dvh' }}>
-    {viewAs && (
+    {isImpersonating && (
+      /* Borrowed eyes: a real person's real data, read-only by the server.
+         Orange, above everything — this strip is also the way back. */
+      <Box sx={{
+        position: 'sticky', top: 0, zIndex: (t) => t.zIndex.appBar + 1,
+        bgcolor: '#b45309', color: '#fff', px: 2, py: 0.5,
+        display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', fontSize: '0.85rem',
+      }}>
+        <span>🔍 צפייה בשם {user?.full_name} — נתונים אמיתיים, קריאה בלבד; שום פעולה לא תירשם בשמה</span>
+        <Box
+          component="button" type="button"
+          onClick={stopImpersonation}
+          sx={{
+            border: '1px solid rgba(255,255,255,0.7)', borderRadius: 1, bgcolor: 'transparent',
+            color: '#fff', cursor: 'pointer', fontWeight: 700, px: 1.25, py: 0.25, fontFamily: 'inherit', fontSize: '0.8rem',
+          }}
+        >
+          חזרה לחשבון שלך
+        </Box>
+      </Box>
+    )}
+    {viewAs && !isImpersonating && (
       /* The admin is wearing another role's skin — this strip is the truth
          and the way back, above everything, on every screen. */
       <Box sx={{

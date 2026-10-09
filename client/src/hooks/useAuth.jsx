@@ -9,6 +9,8 @@ const AuthContext = createContext(null);
 
 const VIEW_AS_KEY = 'gan.viewAs';
 const VIEW_AS_ROLES = ['branch_manager', 'teacher'];
+// Where the admin's own token waits while an impersonation token is in use.
+const REAL_TOKEN_KEY = 'gan.realToken';
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -38,7 +40,18 @@ export function AuthProvider({ children }) {
           if (res.data.token) localStorage.setItem('token', res.data.token);
           setUser(res.data.user); registerNativePush(api);
         })
-        .catch(() => { localStorage.removeItem('token'); setUser(null); })
+        .catch(() => {
+          // An impersonation token that died (30m expiry) falls back to the
+          // admin's own token instead of a login screen.
+          const real = localStorage.getItem(REAL_TOKEN_KEY);
+          if (real) {
+            localStorage.setItem('token', real);
+            localStorage.removeItem(REAL_TOKEN_KEY);
+            window.location.reload();
+            return;
+          }
+          localStorage.removeItem('token'); setUser(null);
+        })
         .finally(() => setLoading(false));
     } else {
       setLoading(false);
@@ -158,6 +171,27 @@ export function AuthProvider({ children }) {
     // new role, and every screen should mount fresh in the new skin.
     window.location.href = '/';
   };
+
+  /**
+   * התחזות מלאה — real data, a specific person, read-only. The server mints
+   * a 30-minute token in her name carrying the support claims (every write
+   * refused, so nothing is recorded as her); the admin's own token waits in
+   * localStorage for the way back. Mutually exclusive with the view-as skin.
+   */
+  const impersonate = async (userId) => {
+    const { data } = await api.post('/auth/impersonate-user', { user_id: userId });
+    localStorage.setItem(REAL_TOKEN_KEY, localStorage.getItem('token') || '');
+    localStorage.setItem('token', data.token);
+    localStorage.removeItem(VIEW_AS_KEY);
+    window.location.href = '/';
+  };
+  const stopImpersonation = () => {
+    const real = localStorage.getItem(REAL_TOKEN_KEY);
+    localStorage.removeItem(REAL_TOKEN_KEY);
+    if (real) localStorage.setItem('token', real);
+    else localStorage.removeItem('token');
+    window.location.href = '/';
+  };
   // Who this person is, and what that lets them reach.
   //
   // The rules live in ./roleFlags, free of React, so they can be asserted with
@@ -181,6 +215,8 @@ export function AuthProvider({ children }) {
       canSeeAllBranches, managesBranch,
       viewAs: simulating ? viewAs : '', setViewAs,
       canViewAs: user?.role === 'system_admin',
+      impersonate, stopImpersonation,
+      isImpersonating: !!user?.support,
     }}>
       {children}
     </AuthContext.Provider>

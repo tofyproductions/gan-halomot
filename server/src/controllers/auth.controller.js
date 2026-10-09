@@ -153,7 +153,20 @@ function makeToken(user, rememberMe, roleTabs = { add: [], remove: [] }, req = n
   // A tablet on a wall must not be signed out overnight. A board that has to
   // be re-authenticated before the day can be recorded is a board that stops
   // being filled in, which is the only failure that actually matters here.
-  const expiresIn = user.role === CLASSROOM_BOARD ? '180d' : (rememberMe ? '30d' : '24h');
+  let expiresIn = user.role === CLASSROOM_BOARD ? '180d' : (rememberMe ? '30d' : '24h');
+  /**
+   * כניסה בשם עובדת (opts.supportBy): the admin borrowing a specific
+   * person's eyes. The payload is HER ordinary payload — same role, same
+   * branches, same tabs — plus the platform's own support claims, which
+   * middleware/auth.js already enforces: every screen readable, every write
+   * refused, so nothing is ever recorded in her name. Short-lived: a
+   * look-around is a visit, not an account.
+   */
+  if (opts.supportBy) {
+    payload.support = true;
+    payload.support_by = opts.supportBy;
+    expiresIn = '30m';
+  }
   const token = jwt.sign(payload, env.JWT_SECRET, { expiresIn });
   return { token, user: payload };
 }
@@ -527,6 +540,27 @@ function tokenClaimsDiffer(decoded, fresh) {
   return false;
 }
 
+/**
+ * POST /auth/impersonate-user — system_admin only.
+ * Full-data view as a specific user, read-only by construction (the support
+ * claims, enforced in middleware/auth.js on every non-GET). Logged before
+ * the token exists; the client keeps the admin's own token aside and swaps
+ * back on exit. Never at another system_admin, never at yourself.
+ */
+async function impersonateUser(req, res, next) {
+  try {
+    const target = await User.findById(String(req.body?.user_id || ''))
+      .populate('branch_id', 'name');
+    if (!target || target.is_active === false) return res.status(404).json({ error: 'המשתמש לא נמצא' });
+    if (String(target._id) === String(req.user.id)) return res.status(400).json({ error: 'זה החשבון שלך' });
+    if (target.role === 'system_admin') return res.status(403).json({ error: 'אין כניסה בשם מנהל מערכת אחר' });
+    console.log(`[auth] impersonation: ${req.user.full_name || req.user.id} → ${target.full_name} (${target.role}), 30m, read-only`);
+    const roleTabs = await effectiveRoleTabs(target);
+    const minted = makeToken(target, false, roleTabs, req, { supportBy: req.user.full_name || req.user.email || 'מנהל מערכת' });
+    res.json({ token: minted.token, as: target.full_name, role: target.role });
+  } catch (error) { next(error); }
+}
+
 async function me(req, res, next) {
   try {
     const user = await User.findById(req.user.id)
@@ -575,6 +609,8 @@ async function me(req, res, next) {
         role_tab_remove: roleTabs.remove,
         custom_role_id: roleTabs.custom_role_id,
         custom_role_name: roleTabs.custom_role_name,
+        // The borrowed-eyes banner reads these; absent on a normal session.
+        ...(req.user.support ? { support: true, support_by: req.user.support_by || null } : {}),
       },
       ...(freshToken ? { token: freshToken } : {}),
     });
@@ -815,7 +851,7 @@ async function setUiVersion(req, res, next) {
 
 module.exports = {
   effectiveRoleTabs,
-  login, loginWithPassword, setPassword, logout, me, setUiVersion,
+  login, loginWithPassword, setPassword, logout, me, impersonateUser, setUiVersion,
   forgotPassword, resetWithCode,
   webauthnRegisterOptions, webauthnRegisterVerify,
   webauthnAuthOptions, webauthnAuthVerify,

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Dialog, DialogTitle, DialogContent, Button, Stack, Divider, Typography, ToggleButtonGroup, ToggleButton } from '@mui/material';
+import { Dialog, DialogTitle, DialogContent, Button, Stack, Divider, Typography, ToggleButtonGroup, ToggleButton, Autocomplete, TextField } from '@mui/material';
 import FingerprintIcon from '@mui/icons-material/Fingerprint';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
@@ -188,8 +188,27 @@ export default function AccountMenu({ open, onClose }) {
  * the way back, always visible.
  */
 function ViewAsSwitch({ onClose }) {
-  const { canViewAs, viewAs, setViewAs } = useAuth();
+  const { canViewAs, viewAs, setViewAs, impersonate } = useAuth();
+  const [pickOpen, setPickOpen] = useState(false);
+  const [users, setUsers] = useState(null);
+  const [target, setTarget] = useState(null);
+  const [starting, setStarting] = useState(false);
   if (!canViewAs && !viewAs) return null;
+
+  const openPick = async () => {
+    setPickOpen(true);
+    if (users) return;
+    try {
+      const { data } = await api.get('/admin/users');
+      setUsers((data.users || data || []).filter(u => u.role !== 'system_admin'));
+    } catch { toast.error('טעינת המשתמשים נכשלה'); setPickOpen(false); }
+  };
+  const start = async () => {
+    setStarting(true);
+    try { await impersonate(target._id || target.id); }
+    catch (err) { toast.error(err.response?.data?.error || 'הכניסה נכשלה'); setStarting(false); }
+  };
+
   return (
     <>
       <Divider sx={{ pt: 1 }} />
@@ -205,6 +224,35 @@ function ViewAsSwitch({ onClose }) {
         <ToggleButton value="branch_manager">מנהלת סניף</ToggleButton>
         <ToggleButton value="teacher">עובדת</ToggleButton>
       </ToggleButtonGroup>
+
+      {/* Borrowed eyes: a specific person's REAL data. Server-minted token,
+          read-only by construction, 30 minutes, logged. */}
+      {!pickOpen ? (
+        <Button fullWidth variant="outlined" sx={{ justifyContent: 'flex-start' }} onClick={openPick}>
+          🔍 כניסה בשם משתמש ספציפי (נתונים אמיתיים)
+        </Button>
+      ) : (
+        <Stack spacing={1}>
+          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+            צפייה בנתונים האמיתיים של המשתמש — קריאה בלבד, ל-30 דקות. שום פעולה לא תירשם בשמו/ה.
+          </Typography>
+          <Autocomplete
+            size="small"
+            options={users || []}
+            loading={!users}
+            value={target}
+            getOptionLabel={(u) => `${u.full_name}${u.branch_id?.name ? ` — ${u.branch_id.name}` : ''}`}
+            onChange={(_, v) => setTarget(v)}
+            renderInput={(p) => <TextField {...p} label="משתמש" />}
+          />
+          <Stack direction="row" spacing={1}>
+            <Button size="small" onClick={() => setPickOpen(false)}>ביטול</Button>
+            <Button size="small" variant="contained" disabled={!target || starting} onClick={start}>
+              {starting ? 'נכנס…' : 'כניסה בשמו/ה'}
+            </Button>
+          </Stack>
+        </Stack>
+      )}
     </>
   );
 }

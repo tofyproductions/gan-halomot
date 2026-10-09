@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authMiddleware } = require('../middleware/auth');
+const { authMiddleware, requireRole } = require('../middleware/auth');
 const { authLimiter, otpLimiter } = require('../middleware/rateLimit');
 const authController = require('../controllers/auth.controller');
 
@@ -23,6 +23,10 @@ router.post('/logout', authController.logout);
 
 // GET /api/auth/me (requires auth)
 router.get('/me', authMiddleware, authController.me);
+
+// POST /api/auth/impersonate-user (system_admin) — a read-only session in a
+// specific user's shoes, on the support-claim rails. 30 minutes, logged.
+router.post('/impersonate-user', authMiddleware, requireRole('system_admin'), authController.impersonateUser);
 
 // PATCH /api/auth/ui-version (requires auth) — the caller's own display choice
 router.patch('/ui-version', authMiddleware, authController.setUiVersion);
